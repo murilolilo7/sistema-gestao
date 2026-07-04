@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import { Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function AppShell({ children }) {
@@ -112,9 +113,10 @@ export default function AppShell({ children }) {
               <button
                 onClick={iniciarEdicaoNome}
                 title="Clique para editar seu nome"
-                className="text-slate-300 text-xs hidden sm:inline hover:text-white transition"
+                className="hidden sm:flex items-center gap-1 text-slate-300 text-xs hover:text-white transition"
               >
                 {nomeExibido}
+                <Pencil size={12} />
               </button>
             )}
 
