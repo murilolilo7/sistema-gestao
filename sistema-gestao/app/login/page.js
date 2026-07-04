@@ -18,6 +18,7 @@ function traduzErro(msg) {
 
 export default function LoginPage() {
     const [modo, setModo] = useState("entrar");
+    const [nomeCompleto, setNomeCompleto] = useState("");
     const [email, setEmail] = useState("");
     const [senha, setSenha] = useState("");
     const [erro, setErro] = useState("");
@@ -42,15 +43,22 @@ export default function LoginPage() {
                         router.replace("/");
               }
       } else {
+              if (!nomeCompleto.trim()) {
+                        setErro("Informe seu nome completo.");
+                        setCarregando(false);
+                        return;
+              }
               const resultado = await supabase.auth.signUp({
                         email: email,
                         password: senha,
+                        options: { data: { nome_completo: nomeCompleto.trim() } },
               });
               if (resultado.error) {
                         setErro(traduzErro(resultado.error.message));
               } else {
                         setMensagem("Conta criada! Confirme seu e-mail se for pedido, depois entre.");
                         setModo("entrar");
+                        setNomeCompleto("");
               }
       }
         setCarregando(false);
@@ -105,6 +113,12 @@ export default function LoginPage() {
             ) : null}
 
           <form onSubmit={handleSubmit} className="space-y-3">
+                        {modo === "cadastrar" && (
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">Nome completo</label>
+                            <input type="text" value={nomeCompleto} onChange={(e) => setNomeCompleto(e.target.value)} className={classeCampo} placeholder="Seu nome e sobrenome" />
+                          </div>
+                        )}
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">E-mail</label>
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={classeCampo} placeholder="voce@empresa.com" />
