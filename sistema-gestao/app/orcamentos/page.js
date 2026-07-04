@@ -41,6 +41,7 @@ function BadgeStatus({ status }) {
 }
 
 export default function OrcamentosPage() {
+  const [modo, setModo] = useState("lista"); // 'lista' | 'novo'
   const [clientes, setClientes] = useState([]);
   const [produtos, setProdutos] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
@@ -50,6 +51,7 @@ export default function OrcamentosPage() {
   const [salvando, setSalvando] = useState(false);
   const [convertendoId, setConvertendoId] = useState(null);
   const [expandidoId, setExpandidoId] = useState(null);
+  const [termoBusca, setTermoBusca] = useState("");
 
   const [clienteId, setClienteId] = useState("");
   const [validade, setValidade] = useState("");
@@ -63,7 +65,7 @@ export default function OrcamentosPage() {
   function buscarProdutos() {
     return supabase
       .from("produtos")
-      .select("id, nome, preco, quantidade_estoque")
+      .select("id, nome, unidade, preco, quantidade_estoque")
       .order("nome");
   }
   function buscarOrcamentos() {
@@ -137,6 +139,7 @@ export default function OrcamentosPage() {
         {
           produto_id: produto.id,
           nome: produto.nome,
+          unidade: produto.unidade,
           quantidade,
           preco_unitario: produto.preco ?? 0,
         },
@@ -177,6 +180,19 @@ export default function OrcamentosPage() {
     setQuantidadeParaAdicionar("1");
   }
 
+  function abrirNovo() {
+    limparFormulario();
+    setErro("");
+    setMensagem("");
+    setModo("novo");
+  }
+
+  function voltar() {
+    setModo("lista");
+    limparFormulario();
+    setErro("");
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!clienteId) {
@@ -204,12 +220,15 @@ export default function OrcamentosPage() {
 
     if (error) {
       setErro("Erro ao salvar orçamento: " + error.message);
-    } else {
-      setMensagem("Orçamento criado com sucesso.");
-      limparFormulario();
-      await carregarTudo();
+      setSalvando(false);
+      return;
     }
+
+    setMensagem("Orçamento criado com sucesso.");
+    setModo("lista");
+    limparFormulario();
     setSalvando(false);
+    await carregarTudo();
   }
 
   async function handleConverter(orcamentoId) {
@@ -237,6 +256,242 @@ export default function OrcamentosPage() {
     setConvertendoId(null);
   }
 
+  const orcamentosFiltrados = orcamentos.filter((o) => {
+    const termo = termoBusca.trim().toLowerCase();
+    if (!termo) return true;
+    return (
+      o.clientes?.nome?.toLowerCase().includes(termo) ||
+      String(o.id).includes(termo) ||
+      o.status?.toLowerCase().includes(termo)
+    );
+  });
+
+  const campoClasse =
+    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
+  const labelClasse = "block text-xs font-medium text-slate-600 mb-1";
+
+  // ---------- TELA DE INCLUSÃO ----------
+  if (modo === "novo") {
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={voltar}
+          className="mb-4 text-sm text-slate-600 hover:text-slate-900 font-medium"
+        >
+          ← Voltar
+        </button>
+        <h1 className="text-2xl font-bold mb-1">Novo orçamento</h1>
+        <p className="text-slate-500 mb-6">
+          Monte a proposta com cliente, produtos e quantidades.
+        </p>
+
+        {erro && (
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">
+            {erro}
+          </div>
+        )}
+        {!loading && clientes.length === 0 && (
+          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 text-sm">
+            Nenhum cliente cadastrado ainda.{" "}
+            <Link href="/clientes" className="underline font-medium">
+              Cadastre um cliente
+            </Link>{" "}
+            antes de criar um orçamento.
+          </div>
+        )}
+        {!loading && produtos.length === 0 && (
+          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 text-sm">
+            Nenhum produto cadastrado ainda.{" "}
+            <Link href="/produtos" className="underline font-medium">
+              Cadastre um produto
+            </Link>{" "}
+            antes de criar um orçamento.
+          </div>
+        )}
+
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div className="sm:col-span-2">
+              <label className={labelClasse}>Cliente</label>
+              <select
+                value={clienteId}
+                onChange={(e) => setClienteId(e.target.value)}
+                className={campoClasse}
+              >
+                <option value="">Selecione um cliente</option>
+                {clientes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClasse}>Válido até</label>
+              <input
+                type="date"
+                value={validade}
+                onChange={(e) => setValidade(e.target.value)}
+                className={campoClasse}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
+            <p className="text-xs font-medium text-slate-600 mb-2">
+              Adicionar produtos
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+              <div className="sm:col-span-2">
+                <select
+                  value={produtoParaAdicionar}
+                  onChange={(e) => setProdutoParaAdicionar(e.target.value)}
+                  className={campoClasse}
+                >
+                  <option value="">Selecione um produto</option>
+                  {produtos.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nome} {p.unidade ? `(${p.unidade})` : ""} — estoque:{" "}
+                      {p.quantidade_estoque ?? 0}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <input
+                type="number"
+                min="1"
+                value={quantidadeParaAdicionar}
+                onChange={(e) => setQuantidadeParaAdicionar(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    adicionarItem();
+                  }
+                }}
+                placeholder="Qtd."
+                className={campoClasse}
+              />
+              <button
+                type="button"
+                onClick={adicionarItem}
+                disabled={!produtoParaAdicionar}
+                className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
+              >
+                Adicionar item
+              </button>
+            </div>
+
+            {itens.length === 0 ? (
+              <p className="text-xs text-slate-400">
+                Nenhum produto adicionado ainda.
+              </p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-slate-500 text-left">
+                  <tr>
+                    <th className="py-1 font-medium">Produto</th>
+                    <th className="py-1 font-medium w-24">Qtd.</th>
+                    <th className="py-1 font-medium w-28">Preço unit.</th>
+                    <th className="py-1 font-medium text-right">Subtotal</th>
+                    <th className="py-1 font-medium w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {itens.map((i) => (
+                    <tr key={i.produto_id} className="border-t border-slate-200">
+                      <td className="py-1.5 pr-2">
+                        {i.nome}
+                        {i.quantidade > estoqueDoProduto(i.produto_id) && (
+                          <span className="block text-amber-600 text-xs">
+                            acima do estoque atual (
+                            {estoqueDoProduto(i.produto_id)})
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        <input
+                          type="number"
+                          min="0"
+                          value={i.quantidade}
+                          onChange={(e) =>
+                            atualizarItem(
+                              i.produto_id,
+                              "quantidade",
+                              e.target.value
+                            )
+                          }
+                          className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={i.preco_unitario}
+                          onChange={(e) =>
+                            atualizarItem(
+                              i.produto_id,
+                              "preco_unitario",
+                              e.target.value
+                            )
+                          }
+                          className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </td>
+                      <td className="py-1.5 text-right whitespace-nowrap">
+                        {formatarMoeda(i.quantidade * i.preco_unitario)}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => removerItem(i.produto_id)}
+                          className="text-red-600 hover:text-red-800 text-xs font-medium"
+                        >
+                          Remover
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between mt-4">
+            <div className="text-sm">
+              <span className="text-slate-500">Total do orçamento: </span>
+              <span className="font-semibold text-lg">
+                {formatarMoeda(totalOrcamento)}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={voltar}
+                className="rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm font-medium px-4 py-2 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={salvando}
+                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 transition"
+              >
+                {salvando ? "Salvando..." : "Salvar orçamento"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  // ---------- TELA DE LISTAGEM ----------
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Orçamentos</h1>
@@ -254,211 +509,41 @@ export default function OrcamentosPage() {
           {mensagem}
         </div>
       )}
-      {!loading && clientes.length === 0 && (
-        <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 text-sm">
-          Nenhum cliente cadastrado ainda.{" "}
-          <Link href="/clientes" className="underline font-medium">
-            Cadastre um cliente
-          </Link>{" "}
-          antes de criar um orçamento.
-        </div>
-      )}
-      {!loading && produtos.length === 0 && (
-        <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 text-sm">
-          Nenhum produto cadastrado ainda.{" "}
-          <Link href="/produtos" className="underline font-medium">
-            Cadastre um produto
-          </Link>{" "}
-          antes de criar um orçamento.
-        </div>
-      )}
 
-      {/* Formulário de novo orçamento */}
-      <form
-        onSubmit={handleSubmit}
-        className="mb-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Cliente
-            </label>
-            <select
-              value={clienteId}
-              onChange={(e) => setClienteId(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              <option value="">Selecione um cliente</option>
-              {clientes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nome}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Válido até
-            </label>
-            <input
-              type="date"
-              value={validade}
-              onChange={(e) => setValidade(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-        </div>
+      <div className="flex items-center gap-3 mb-4">
+        <input
+          type="text"
+          value={termoBusca}
+          onChange={(e) => setTermoBusca(e.target.value)}
+          placeholder="Pesquisar por cliente, código ou status..."
+          className={campoClasse}
+        />
+        <button
+          type="button"
+          onClick={abrirNovo}
+          className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-4 py-2 whitespace-nowrap transition"
+        >
+          + Incluir orçamento
+        </button>
+      </div>
 
-        <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
-          <p className="text-xs font-medium text-slate-600 mb-2">
-            Adicionar produtos
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
-            <div className="sm:col-span-2">
-              <select
-                value={produtoParaAdicionar}
-                onChange={(e) => setProdutoParaAdicionar(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                <option value="">Selecione um produto</option>
-                {produtos.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nome} (estoque: {p.quantidade_estoque ?? 0})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <input
-              type="number"
-              min="1"
-              value={quantidadeParaAdicionar}
-              onChange={(e) => setQuantidadeParaAdicionar(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  adicionarItem();
-                }
-              }}
-              placeholder="Qtd."
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-            <button
-              type="button"
-              onClick={adicionarItem}
-              disabled={!produtoParaAdicionar}
-              className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
-            >
-              Adicionar item
-            </button>
-          </div>
-
-          {itens.length === 0 ? (
-            <p className="text-xs text-slate-400">
-              Nenhum produto adicionado ainda.
-            </p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="text-slate-500 text-left">
-                <tr>
-                  <th className="py-1 font-medium">Produto</th>
-                  <th className="py-1 font-medium w-24">Qtd.</th>
-                  <th className="py-1 font-medium w-28">Preço unit.</th>
-                  <th className="py-1 font-medium text-right">Subtotal</th>
-                  <th className="py-1 font-medium w-8"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {itens.map((i) => (
-                  <tr key={i.produto_id} className="border-t border-slate-200">
-                    <td className="py-1.5 pr-2">
-                      {i.nome}
-                      {i.quantidade > estoqueDoProduto(i.produto_id) && (
-                        <span className="block text-amber-600 text-xs">
-                          acima do estoque atual (
-                          {estoqueDoProduto(i.produto_id)})
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-1.5 pr-2">
-                      <input
-                        type="number"
-                        min="0"
-                        value={i.quantidade}
-                        onChange={(e) =>
-                          atualizarItem(
-                            i.produto_id,
-                            "quantidade",
-                            e.target.value
-                          )
-                        }
-                        className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </td>
-                    <td className="py-1.5 pr-2">
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={i.preco_unitario}
-                        onChange={(e) =>
-                          atualizarItem(
-                            i.produto_id,
-                            "preco_unitario",
-                            e.target.value
-                          )
-                        }
-                        className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </td>
-                    <td className="py-1.5 text-right whitespace-nowrap">
-                      {formatarMoeda(i.quantidade * i.preco_unitario)}
-                    </td>
-                    <td className="py-1.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => removerItem(i.produto_id)}
-                        className="text-red-600 hover:text-red-800 text-xs font-medium"
-                      >
-                        Remover
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between mt-4">
-          <div className="text-sm">
-            <span className="text-slate-500">Total do orçamento: </span>
-            <span className="font-semibold text-lg">
-              {formatarMoeda(totalOrcamento)}
-            </span>
-          </div>
-          <button
-            type="submit"
-            disabled={salvando}
-            className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 transition"
-          >
-            {salvando ? "Salvando..." : "Salvar orçamento"}
-          </button>
-        </div>
-      </form>
-
-      {/* Lista de orçamentos */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
         {loading ? (
           <p className="p-6 text-sm text-slate-500">Carregando orçamentos...</p>
         ) : orcamentos.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">
-            Nenhum orçamento criado ainda. Use o formulário acima para montar
-            o primeiro.
+            Nenhum orçamento criado ainda. Clique em &quot;Incluir
+            orçamento&quot; para montar o primeiro.
+          </p>
+        ) : orcamentosFiltrados.length === 0 ? (
+          <p className="p-6 text-sm text-slate-500">
+            Nenhum orçamento encontrado para essa busca.
           </p>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-slate-100 text-slate-600 text-left">
               <tr>
+                <th className="px-4 py-2 font-medium">Código</th>
                 <th className="px-4 py-2 font-medium">Cliente</th>
                 <th className="px-4 py-2 font-medium">Criado em</th>
                 <th className="px-4 py-2 font-medium">Válido até</th>
@@ -467,9 +552,12 @@ export default function OrcamentosPage() {
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
             </thead>
-            {orcamentos.map((o) => (
+            {orcamentosFiltrados.map((o) => (
               <tbody key={o.id} className="border-t border-slate-100">
                 <tr>
+                  <td className="px-4 py-2 whitespace-nowrap text-slate-400">
+                    {o.id}
+                  </td>
                   <td className="px-4 py-2 font-medium whitespace-nowrap">
                     {o.clientes?.nome ?? "-"}
                   </td>
@@ -509,7 +597,7 @@ export default function OrcamentosPage() {
                 </tr>
                 {expandidoId === o.id && (
                   <tr>
-                    <td colSpan={6} className="bg-slate-50 px-4 py-3">
+                    <td colSpan={7} className="bg-slate-50 px-4 py-3">
                       <p className="text-xs font-medium text-slate-500 mb-2">
                         Itens do orçamento
                       </p>
