@@ -76,6 +76,7 @@ export default function OrcamentosPage() {
   const [expandidoId, setExpandidoId] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
   const [editingId, setEditingId] = useState(null);
+  const [editingCodigo, setEditingCodigo] = useState(null);
 
   const [clienteId, setClienteId] = useState("");
   const [diasValidade, setDiasValidade] = useState("");
@@ -98,7 +99,7 @@ export default function OrcamentosPage() {
       .select(
         "*, clientes(nome), itens_orcamento(id, produto_id, quantidade, preco_unitario, produtos(nome))"
       )
-      .order("id", { ascending: false });
+      .order("codigo", { ascending: false });
   }
 
   function aplicarResultados(resClientes, resProdutos, resOrcamentos) {
@@ -207,6 +208,7 @@ export default function OrcamentosPage() {
   function abrirNovo() {
     limparFormulario();
     setEditingId(null);
+    setEditingCodigo(null);
     setErro("");
     setMensagem("");
     setModo("novo");
@@ -214,6 +216,7 @@ export default function OrcamentosPage() {
 
   function abrirEdicao(orcamento) {
     setEditingId(orcamento.id);
+    setEditingCodigo(orcamento.codigo);
     setClienteId(String(orcamento.cliente_id));
     setDiasValidade(diasAPartirDeHoje(orcamento.validade));
     setItens(
@@ -234,6 +237,7 @@ export default function OrcamentosPage() {
   function voltar() {
     setModo("lista");
     setEditingId(null);
+    setEditingCodigo(null);
     limparFormulario();
     setErro("");
   }
@@ -288,6 +292,7 @@ export default function OrcamentosPage() {
     );
     setModo("lista");
     setEditingId(null);
+    setEditingCodigo(null);
     limparFormulario();
     setSalvando(false);
     await carregarTudo();
@@ -323,7 +328,7 @@ export default function OrcamentosPage() {
     if (!termo) return true;
     return (
       o.clientes?.nome?.toLowerCase().includes(termo) ||
-      String(o.id).includes(termo) ||
+      String(o.codigo).includes(termo) ||
       o.status?.toLowerCase().includes(termo)
     );
   });
@@ -348,7 +353,7 @@ export default function OrcamentosPage() {
         </h1>
         <p className="text-slate-500 mb-6">
           {modo === "editar"
-            ? `Código #${editingId}`
+            ? `Código #${editingCodigo}`
             : "Monte a proposta com cliente, produtos e quantidades."}
         </p>
 
@@ -571,6 +576,12 @@ export default function OrcamentosPage() {
   // ---------- TELA DE LISTAGEM ----------
   return (
     <div>
+      <Link
+        href="/"
+        className="mb-4 inline-block text-sm text-slate-600 hover:text-slate-900 font-medium"
+      >
+        ← Voltar
+      </Link>
       <h1 className="text-2xl font-bold mb-1">Orçamentos</h1>
       <p className="text-slate-500 mb-6">
         Monte propostas para clientes e converta em venda quando aprovadas.
@@ -633,7 +644,7 @@ export default function OrcamentosPage() {
               <tbody key={o.id} className="border-t border-slate-100">
                 <tr>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-400">
-                    {o.id}
+                    {o.codigo}
                   </td>
                   <td className="px-4 py-2 font-medium whitespace-nowrap">
                     {o.clientes?.nome ?? "-"}
