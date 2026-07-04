@@ -24,6 +24,29 @@ function formatarDataSimples(valor) {
   return new Date(valor + "T00:00:00").toLocaleDateString("pt-BR");
 }
 
+// Calcula a data (YYYY-MM-DD) daqui a N dias, a partir de hoje.
+function calcularDataFutura(dias) {
+  const n = Number(dias);
+  if (!n || n <= 0) return "";
+  const data = new Date();
+  data.setDate(data.getDate() + n);
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const dia = String(data.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+// Caminho inverso: quantos dias faltam, a partir de hoje, para uma data
+// já salva (usado ao abrir um orçamento existente para edição).
+function diasAPartirDeHoje(dataISO) {
+  if (!dataISO) return "";
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const alvo = new Date(dataISO + "T00:00:00");
+  const diffDias = Math.round((alvo - hoje) / (1000 * 60 * 60 * 24));
+  return diffDias > 0 ? String(diffDias) : "";
+}
+
 function BadgeStatus({ status }) {
   const estilos = {
     pendente: "bg-amber-50 text-amber-700 border-amber-200",
@@ -41,7 +64,7 @@ function BadgeStatus({ status }) {
 }
 
 export default function OrcamentosPage() {
-  const [modo, setModo] = useState("lista"); // 'lista' | 'novo'
+  const [modo, setModo] = useState("lista"); // 'lista' | 'novo' | 'editar'
   const [clientes, setClientes] = useState([]);
   const [produtos, setProdutos] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
@@ -52,9 +75,10 @@ export default function OrcamentosPage() {
   const [convertendoId, setConvertendoId] = useState(null);
   const [expandidoId, setExpandidoId] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
+  const [editingId, setEditingId] = useState(null);
 
   const [clienteId, setClienteId] = useState("");
-  const [validade, setValidade] = useState("");
+  const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
   const [produtoParaAdicionar, setProdutoParaAdicionar] = useState("");
   const [quantidadeParaAdicionar, setQuantidadeParaAdicionar] = useState("1");
@@ -72,7 +96,7 @@ export default function OrcamentosPage() {
     return supabase
       .from("orcamentos")
       .select(
-        "*, clientes(nome), itens_orcamento(id, quantidade, preco_unitario, produtos(nome))"
+        "*, clientes(nome), itens_orcamento(id, produto_id, quantidade, preco_unitario, produtos(nome))"
       )
       .order("id", { ascending: false });
   }
@@ -174,7 +198,7 @@ export default function OrcamentosPage() {
 
   function limparFormulario() {
     setClienteId("");
-    setValidade("");
+    setDiasValidade("");
     setItens([]);
     setProdutoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
@@ -182,13 +206,34 @@ export default function OrcamentosPage() {
 
   function abrirNovo() {
     limparFormulario();
+    setEditingId(null);
     setErro("");
     setMensagem("");
     setModo("novo");
   }
 
+  function abrirEdicao(orcamento) {
+    setEditingId(orcamento.id);
+    setClienteId(String(orcamento.cliente_id));
+    setDiasValidade(diasAPartirDeHoje(orcamento.validade));
+    setItens(
+      (orcamento.itens_orcamento || []).map((item) => ({
+        produto_id: item.produto_id,
+        nome: item.produtos?.nome || "Produto removido",
+        quantidade: item.quantidade,
+        preco_unitario: Number(item.preco_unitario),
+      }))
+    );
+    setProdutoParaAdicionar("");
+    setQuantidadeParaAdicionar("1");
+    setErro("");
+    setMensagem("");
+    setModo("editar");
+  }
+
   function voltar() {
     setModo("lista");
+    setEditingId(null);
     limparFormulario();
     setErro("");
   }
@@ -208,24 +253,41 @@ export default function OrcamentosPage() {
     setErro("");
     setMensagem("");
 
-    const { error } = await supabase.rpc("criar_orcamento", {
-      cliente_id_input: Number(clienteId),
-      validade_input: validade || null,
-      itens_input: itensValidos.map((i) => ({
-        produto_id: i.produto_id,
-        quantidade: i.quantidade,
-        preco_unitario: i.preco_unitario,
-      })),
-    });
+    const itensPayload = itensValidos.map((i) => ({
+      produto_id: i.produto_id,
+      quantidade: i.quantidade,
+      preco_unitario: i.preco_unitario,
+    }));
+    const validadeCalculada = calcularDataFutura(diasValidade) || null;
+
+    const { error } = editingId
+      ? await supabase.rpc("atualizar_orcamento", {
+          orcamento_id_input: editingId,
+          cliente_id_input: Number(clienteId),
+          validade_input: validadeCalculada,
+          itens_input: itensPayload,
+        })
+      : await supabase.rpc("criar_orcamento", {
+          cliente_id_input: Number(clienteId),
+          validade_input: validadeCalculada,
+          itens_input: itensPayload,
+        });
 
     if (error) {
-      setErro("Erro ao salvar orçamento: " + error.message);
+      setErro(
+        (editingId
+          ? "Erro ao atualizar orçamento: "
+          : "Erro ao salvar orçamento: ") + error.message
+      );
       setSalvando(false);
       return;
     }
 
-    setMensagem("Orçamento criado com sucesso.");
+    setMensagem(
+      editingId ? "Orçamento atualizado com sucesso." : "Orçamento criado com sucesso."
+    );
     setModo("lista");
+    setEditingId(null);
     limparFormulario();
     setSalvando(false);
     await carregarTudo();
@@ -270,8 +332,8 @@ export default function OrcamentosPage() {
     "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
   const labelClasse = "block text-xs font-medium text-slate-600 mb-1";
 
-  // ---------- TELA DE INCLUSÃO ----------
-  if (modo === "novo") {
+  // ---------- TELA DE INCLUSÃO / EDIÇÃO ----------
+  if (modo === "novo" || modo === "editar") {
     return (
       <div>
         <button
@@ -281,9 +343,13 @@ export default function OrcamentosPage() {
         >
           ← Voltar
         </button>
-        <h1 className="text-2xl font-bold mb-1">Novo orçamento</h1>
+        <h1 className="text-2xl font-bold mb-1">
+          {modo === "editar" ? "Editar orçamento" : "Novo orçamento"}
+        </h1>
         <p className="text-slate-500 mb-6">
-          Monte a proposta com cliente, produtos e quantidades.
+          {modo === "editar"
+            ? `Código #${editingId}`
+            : "Monte a proposta com cliente, produtos e quantidades."}
         </p>
 
         {erro && (
@@ -331,13 +397,20 @@ export default function OrcamentosPage() {
               </select>
             </div>
             <div>
-              <label className={labelClasse}>Válido até</label>
+              <label className={labelClasse}>Validade da proposta (dias)</label>
               <input
-                type="date"
-                value={validade}
-                onChange={(e) => setValidade(e.target.value)}
+                type="number"
+                min="1"
+                value={diasValidade}
+                onChange={(e) => setDiasValidade(e.target.value)}
+                placeholder="Ex: 10"
                 className={campoClasse}
               />
+              {diasValidade && Number(diasValidade) > 0 && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Válido até {formatarDataSimples(calcularDataFutura(diasValidade))}
+                </p>
+              )}
             </div>
           </div>
 
@@ -482,7 +555,11 @@ export default function OrcamentosPage() {
                 disabled={salvando}
                 className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 transition"
               >
-                {salvando ? "Salvando..." : "Salvar orçamento"}
+                {salvando
+                  ? "Salvando..."
+                  : modo === "editar"
+                    ? "Salvar alterações"
+                    : "Salvar orçamento"}
               </button>
             </div>
           </div>
@@ -583,15 +660,23 @@ export default function OrcamentosPage() {
                       {expandidoId === o.id ? "Ocultar itens" : "Ver itens"}
                     </button>
                     {o.status !== "aprovado" && (
-                      <button
-                        onClick={() => handleConverter(o.id)}
-                        disabled={convertendoId === o.id}
-                        className="text-emerald-700 hover:text-emerald-900 disabled:opacity-50 text-xs font-medium"
-                      >
-                        {convertendoId === o.id
-                          ? "Convertendo..."
-                          : "Converter em venda"}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => abrirEdicao(o)}
+                          className="text-emerald-700 hover:text-emerald-900 text-xs font-medium mr-3"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => handleConverter(o.id)}
+                          disabled={convertendoId === o.id}
+                          className="text-emerald-700 hover:text-emerald-900 disabled:opacity-50 text-xs font-medium"
+                        >
+                          {convertendoId === o.id
+                            ? "Convertendo..."
+                            : "Converter em venda"}
+                        </button>
+                      </>
                     )}
                   </td>
                 </tr>
