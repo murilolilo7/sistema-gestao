@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
+const NOMES_MESES = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+
 function formatarMoeda(valor) {
   if (valor === null || valor === undefined) return "-";
   return Number(valor).toLocaleString("pt-BR", {
@@ -14,6 +19,27 @@ function formatarMoeda(valor) {
 function formatarDataHora(valor) {
   if (!valor) return "-";
   return new Date(valor).toLocaleString("pt-BR");
+}
+
+function agruparPorMes(vendas) {
+  const grupos = {};
+  for (const v of vendas) {
+    if (!v.created_at) continue;
+    const data = new Date(v.created_at);
+    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}`;
+    if (!grupos[chave]) {
+      grupos[chave] = {
+        chave,
+        ano: data.getFullYear(),
+        mes: data.getMonth(),
+        quantidade: 0,
+        total: 0,
+      };
+    }
+    grupos[chave].quantidade += 1;
+    grupos[chave].total += Number(v.total || 0);
+  }
+  return Object.values(grupos).sort((a, b) => (a.chave < b.chave ? 1 : -1));
 }
 
 export default function VendasPage() {
@@ -56,6 +82,7 @@ export default function VendasPage() {
     (soma, v) => soma + Number(v.total || 0),
     0
   );
+  const resumoMensal = agruparPorMes(vendas);
 
   return (
     <div>
@@ -71,7 +98,7 @@ export default function VendasPage() {
       )}
 
       {!loading && vendas.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-4">
+        <div className="mb-6 flex flex-wrap gap-4">
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
             <p className="text-xs text-slate-500">Total de vendas</p>
             <p className="text-lg font-semibold">{vendas.length}</p>
@@ -85,6 +112,43 @@ export default function VendasPage() {
         </div>
       )}
 
+      {!loading && resumoMensal.length > 0 && (
+        <div className="mb-6">
+          <p className="text-sm font-semibold text-slate-700 mb-2">
+            Faturamento por mês
+          </p>
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100 text-slate-600 text-left">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Mês</th>
+                  <th className="px-4 py-2 font-medium">Nº de vendas</th>
+                  <th className="px-4 py-2 font-medium">Faturamento</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resumoMensal.map((r) => (
+                  <tr key={r.chave} className="border-t border-slate-100">
+                    <td className="px-4 py-2 font-medium whitespace-nowrap">
+                      {NOMES_MESES[r.mes]} de {r.ano}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {r.quantidade}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {formatarMoeda(r.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <p className="text-sm font-semibold text-slate-700 mb-2">
+        Todas as vendas
+      </p>
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
         {loading ? (
           <p className="p-6 text-sm text-slate-500">Carregando vendas...</p>
