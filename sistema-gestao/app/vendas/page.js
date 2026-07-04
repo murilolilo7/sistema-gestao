@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 
 const NOMES_MESES = [
@@ -86,6 +87,12 @@ export default function VendasPage() {
 
   return (
     <div>
+      <Link
+        href="/"
+        className="mb-4 inline-block text-sm text-slate-600 hover:text-slate-900 font-medium"
+      >
+        ← Voltar
+      </Link>
       <h1 className="text-2xl font-bold mb-1">Vendas</h1>
       <p className="text-slate-500 mb-6">
         Histórico de vendas geradas a partir de orçamentos aprovados.
