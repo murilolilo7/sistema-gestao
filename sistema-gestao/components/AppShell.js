@@ -76,7 +76,7 @@ export default function AppShell({ children }) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="bg-slate-900 text-white">
+      <header className="bg-slate-900 text-white print:hidden">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-2">
           <Link href="/" className="font-bold text-lg tracking-tight">
             MR7 <span className="text-emerald-400">Pré-Moldados</span>
@@ -127,10 +127,10 @@ export default function AppShell({ children }) {
           </nav>
         </div>
       </header>
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-8 print:p-0 print:max-w-none">
         {children}
       </main>
-      <footer className="text-center text-xs text-slate-400 py-4">
+      <footer className="text-center text-xs text-slate-400 py-4 print:hidden">
         Sistema de Gestão MR7 · Feito com Next.js + Supabase
       </footer>
     </div>
