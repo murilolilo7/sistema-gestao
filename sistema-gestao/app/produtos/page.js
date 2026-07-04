@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Pencil, Trash2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
 
@@ -31,11 +33,12 @@ export default function ProdutosPage() {
   const [mensagem, setMensagem] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [editingCodigo, setEditingCodigo] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
   const [form, setForm] = useState(FORM_VAZIO);
 
   function buscarProdutosDB() {
-    return supabase.from("produtos").select("*").order("id", { ascending: false });
+    return supabase.from("produtos").select("*").order("codigo", { ascending: false });
   }
 
   function aplicarResultado(data, error) {
@@ -74,6 +77,7 @@ export default function ProdutosPage() {
   function abrirNovo() {
     setForm(FORM_VAZIO);
     setEditingId(null);
+    setEditingCodigo(null);
     setErro("");
     setMensagem("");
     setModo("novo");
@@ -81,6 +85,7 @@ export default function ProdutosPage() {
 
   function abrirEdicao(produto) {
     setEditingId(produto.id);
+    setEditingCodigo(produto.codigo);
     setErro("");
     setMensagem("");
     setForm({
@@ -98,6 +103,7 @@ export default function ProdutosPage() {
     setModo("lista");
     setForm(FORM_VAZIO);
     setEditingId(null);
+    setEditingCodigo(null);
     setErro("");
   }
 
@@ -140,6 +146,7 @@ export default function ProdutosPage() {
     setModo("lista");
     setForm(FORM_VAZIO);
     setEditingId(null);
+    setEditingCodigo(null);
     setSalvando(false);
     await carregarProdutos();
   }
@@ -170,7 +177,7 @@ export default function ProdutosPage() {
     return (
       p.nome?.toLowerCase().includes(termo) ||
       p.categoria?.toLowerCase().includes(termo) ||
-      String(p.id).includes(termo)
+      String(p.codigo).includes(termo)
     );
   });
 
@@ -194,7 +201,7 @@ export default function ProdutosPage() {
         </h1>
         <p className="text-slate-500 mb-6">
           {modo === "editar"
-            ? `Código #${editingId}`
+            ? `Código #${editingCodigo}`
             : "Preencha os dados do produto."}
         </p>
 
@@ -227,7 +234,7 @@ export default function ProdutosPage() {
                 <label className={labelClasse}>Código</label>
                 <input
                   type="text"
-                  value={editingId ? String(editingId) : "gerado automaticamente"}
+                  value={editingId ? String(editingCodigo) : "gerado automaticamente"}
                   disabled
                   className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500"
                 />
@@ -325,6 +332,12 @@ export default function ProdutosPage() {
   // ---------- TELA DE LISTAGEM ----------
   return (
     <div>
+      <Link
+        href="/"
+        className="mb-4 inline-block text-sm text-slate-600 hover:text-slate-900 font-medium"
+      >
+        ← Voltar
+      </Link>
       <h1 className="text-2xl font-bold mb-1">Produtos</h1>
       <p className="text-slate-500 mb-6">
         Cadastre produtos e controle o estoque disponível.
@@ -387,7 +400,7 @@ export default function ProdutosPage() {
               {produtosFiltrados.map((p) => (
                 <tr key={p.id} className="border-t border-slate-100">
                   <td className="px-4 py-2 whitespace-nowrap text-slate-400">
-                    {p.id}
+                    {p.codigo}
                   </td>
                   <td className="px-4 py-2 font-medium whitespace-nowrap">
                     {p.nome}
@@ -405,18 +418,22 @@ export default function ProdutosPage() {
                     {p.quantidade_estoque ?? 0}
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    <button
-                      onClick={() => abrirEdicao(p)}
-                      className="text-emerald-700 hover:text-emerald-900 text-xs font-medium mr-3"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      className="text-red-600 hover:text-red-800 text-xs font-medium"
-                    >
-                      Excluir
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => abrirEdicao(p)}
+                        className="text-emerald-700 hover:text-emerald-900"
+                        title="Editar"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(p.id)}
+                        className="text-red-600 hover:text-red-800"
+                        title="Excluir"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
