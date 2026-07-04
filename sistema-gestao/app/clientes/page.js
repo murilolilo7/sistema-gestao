@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Pencil, Trash2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
 
@@ -62,11 +64,12 @@ export default function ClientesPage() {
   const [salvando, setSalvando] = useState(false);
   const [buscandoCep, setBuscandoCep] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [editingCodigo, setEditingCodigo] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
   const [form, setForm] = useState(FORM_VAZIO);
 
   function buscarClientesDB() {
-    return supabase.from("clientes").select("*").order("id", { ascending: false });
+    return supabase.from("clientes").select("*").order("codigo", { ascending: false });
   }
 
   function aplicarResultado(data, error) {
@@ -150,6 +153,7 @@ export default function ClientesPage() {
   function abrirNovo() {
     setForm(FORM_VAZIO);
     setEditingId(null);
+    setEditingCodigo(null);
     setErro("");
     setMensagem("");
     setModo("novo");
@@ -157,6 +161,7 @@ export default function ClientesPage() {
 
   function abrirEdicao(cliente) {
     setEditingId(cliente.id);
+    setEditingCodigo(cliente.codigo);
     setErro("");
     setMensagem("");
     setForm({
@@ -181,6 +186,7 @@ export default function ClientesPage() {
     setModo("lista");
     setForm(FORM_VAZIO);
     setEditingId(null);
+    setEditingCodigo(null);
     setErro("");
   }
 
@@ -229,6 +235,7 @@ export default function ClientesPage() {
     setModo("lista");
     setForm(FORM_VAZIO);
     setEditingId(null);
+    setEditingCodigo(null);
     setSalvando(false);
     await carregarClientes();
   }
@@ -259,7 +266,7 @@ export default function ClientesPage() {
     return (
       c.nome?.toLowerCase().includes(termo) ||
       c.cpf_cnpj?.toLowerCase().includes(termo) ||
-      String(c.id).includes(termo)
+      String(c.codigo).includes(termo)
     );
   });
 
@@ -283,7 +290,7 @@ export default function ClientesPage() {
         </h1>
         <p className="text-slate-500 mb-6">
           {modo === "editar"
-            ? `Código #${editingId}`
+            ? `Código #${editingCodigo}`
             : "Preencha os dados do cliente."}
         </p>
 
@@ -316,7 +323,7 @@ export default function ClientesPage() {
                 <label className={labelClasse}>Código</label>
                 <input
                   type="text"
-                  value={editingId ? String(editingId) : "gerado automaticamente"}
+                  value={editingId ? String(editingCodigo) : "gerado automaticamente"}
                   disabled
                   className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500"
                 />
@@ -504,6 +511,12 @@ export default function ClientesPage() {
   // ---------- TELA DE LISTAGEM ----------
   return (
     <div>
+      <Link
+        href="/"
+        className="mb-4 inline-block text-sm text-slate-600 hover:text-slate-900 font-medium"
+      >
+        ← Voltar
+      </Link>
       <h1 className="text-2xl font-bold mb-1">Clientes</h1>
       <p className="text-slate-500 mb-6">
         Cadastre clientes e mantenha os dados de contato atualizados.
@@ -565,7 +578,7 @@ export default function ClientesPage() {
               {clientesFiltrados.map((c) => (
                 <tr key={c.id} className="border-t border-slate-100">
                   <td className="px-4 py-2 whitespace-nowrap text-slate-400">
-                    {c.id}
+                    {c.codigo}
                   </td>
                   <td className="px-4 py-2 font-medium whitespace-nowrap">
                     {c.nome}
@@ -580,18 +593,22 @@ export default function ClientesPage() {
                     {c.telefone || "-"}
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    <button
-                      onClick={() => abrirEdicao(c)}
-                      className="text-emerald-700 hover:text-emerald-900 text-xs font-medium mr-3"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(c.id)}
-                      className="text-red-600 hover:text-red-800 text-xs font-medium"
-                    >
-                      Excluir
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => abrirEdicao(c)}
+                        className="text-emerald-700 hover:text-emerald-900"
+                        title="Editar"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(c.id)}
+                        className="text-red-600 hover:text-red-800"
+                        title="Excluir"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
