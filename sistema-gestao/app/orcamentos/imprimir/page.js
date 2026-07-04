@@ -31,6 +31,10 @@ function formatarDataSimples(valor) {
   return new Date(valor + "T00:00:00").toLocaleDateString("pt-BR");
 }
 
+function nomeArquivoSeguro(texto) {
+  return texto.replace(/[\\/:*?"<>|]/g, "").trim();
+}
+
 function ConteudoImpressao() {
   const searchParams = useSearchParams();
   const codigo = searchParams.get("codigo");
@@ -67,6 +71,17 @@ function ConteudoImpressao() {
     };
   }, [codigo]);
 
+  // Controla o nome sugerido ao "Salvar como PDF" e o que aparece no
+  // cabeçalho de impressão do navegador (que usa o título da página).
+  useEffect(() => {
+    if (orcamento) {
+      const nomeCliente = orcamento.clientes?.nome || "Consumidor Final";
+      document.title = nomeArquivoSeguro(
+        `Orcamento ${orcamento.codigo} - ${nomeCliente}`
+      );
+    }
+  }, [orcamento]);
+
   if (loading) {
     return <p className="p-8 text-sm text-slate-500">Carregando...</p>;
   }
@@ -81,7 +96,6 @@ function ConteudoImpressao() {
     0
   );
   const desconto = Number(orcamento.desconto || 0);
-  const somaQtdes = itens.reduce((soma, i) => soma + Number(i.quantidade), 0);
   const cliente = orcamento.clientes;
   const enderecoCliente = [
     cliente?.endereco,
@@ -123,19 +137,17 @@ function ConteudoImpressao() {
         Orçamento Nº {orcamento.codigo}
       </h1>
 
-      {/* Cliente + dados do orçamento */}
-      <div className="grid grid-cols-2 gap-6 mb-6 text-sm">
+      {/* Cliente + dados do orçamento, numa única caixa */}
+      <div className="border border-slate-300 rounded-md p-4 mb-6 text-sm grid grid-cols-2 gap-6">
         <div>
           <p className="font-semibold text-xs text-slate-500 mb-1">CLIENTE</p>
-          <div className="border border-slate-300 rounded-md p-3">
-            <p className="font-medium">{cliente?.nome || "Consumidor Final"}</p>
-            {cliente?.cpf_cnpj && <p className="text-xs">{cliente.cpf_cnpj}</p>}
-            {enderecoCliente && <p className="text-xs">{enderecoCliente}</p>}
-            {cidadeUfCliente && <p className="text-xs">{cidadeUfCliente}</p>}
-            {cliente?.telefone && <p className="text-xs">{cliente.telefone}</p>}
-          </div>
+          <p className="font-medium">{cliente?.nome || "Consumidor Final"}</p>
+          {cliente?.cpf_cnpj && <p className="text-xs">{cliente.cpf_cnpj}</p>}
+          {enderecoCliente && <p className="text-xs">{enderecoCliente}</p>}
+          {cidadeUfCliente && <p className="text-xs">{cidadeUfCliente}</p>}
+          {cliente?.telefone && <p className="text-xs">{cliente.telefone}</p>}
         </div>
-        <div className="border border-slate-300 rounded-md p-3 text-xs space-y-1">
+        <div className="text-xs space-y-1">
           <p>
             <span className="font-semibold">Data:</span>{" "}
             {formatarDataHora(orcamento.created_at)}
@@ -217,23 +229,17 @@ function ConteudoImpressao() {
               <td className="px-2 py-0.5 text-right">{itens.length}</td>
             </tr>
             <tr>
-              <td className="px-2 py-0.5 text-slate-500">Soma das quantidades</td>
-              <td className="px-2 py-0.5 text-right">{somaQtdes}</td>
-            </tr>
-            <tr>
               <td className="px-2 py-0.5 text-slate-500">Subtotal</td>
               <td className="px-2 py-0.5 text-right">
                 {formatarMoeda(subtotal)}
               </td>
             </tr>
-            {desconto > 0 && (
-              <tr>
-                <td className="px-2 py-0.5 text-slate-500">Desconto</td>
-                <td className="px-2 py-0.5 text-right">
-                  − {formatarMoeda(desconto)}
-                </td>
-              </tr>
-            )}
+            <tr>
+              <td className="px-2 py-0.5 text-slate-500">Desconto</td>
+              <td className="px-2 py-0.5 text-right">
+                {desconto > 0 ? `− ${formatarMoeda(desconto)}` : formatarMoeda(0)}
+              </td>
+            </tr>
             <tr className="border-t border-slate-400">
               <td className="px-2 py-1 font-bold">Total do orçamento</td>
               <td className="px-2 py-1 text-right font-bold">
