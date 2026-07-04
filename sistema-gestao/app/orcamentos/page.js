@@ -77,12 +77,25 @@ export default function OrcamentosPage() {
   const [termoBusca, setTermoBusca] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editingCodigo, setEditingCodigo] = useState(null);
+  const [nomeUsuario, setNomeUsuario] = useState("");
 
   const [clienteId, setClienteId] = useState("");
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
   const [produtoParaAdicionar, setProdutoParaAdicionar] = useState("");
   const [quantidadeParaAdicionar, setQuantidadeParaAdicionar] = useState("1");
+  const [desconto, setDesconto] = useState("");
+  const [observacao, setObservacao] = useState("");
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      const nome =
+        data.session?.user?.user_metadata?.nome_completo ||
+        data.session?.user?.email ||
+        "";
+      setNomeUsuario(nome);
+    });
+  }, []);
 
   function buscarClientes() {
     return supabase.from("clientes").select("id, nome").order("nome");
@@ -192,10 +205,15 @@ export default function OrcamentosPage() {
     return produtos.find((p) => p.id === produtoId)?.quantidade_estoque ?? 0;
   }
 
-  const totalOrcamento = itens.reduce(
+  const subtotalOrcamento = itens.reduce(
     (soma, i) => soma + i.quantidade * i.preco_unitario,
     0
   );
+  const descontoNumerico = Math.min(
+    Math.max(0, Number(desconto) || 0),
+    subtotalOrcamento
+  );
+  const totalComDesconto = subtotalOrcamento - descontoNumerico;
 
   function limparFormulario() {
     setClienteId("");
@@ -203,6 +221,8 @@ export default function OrcamentosPage() {
     setItens([]);
     setProdutoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
+    setDesconto("");
+    setObservacao("");
   }
 
   function abrirNovo() {
@@ -219,6 +239,8 @@ export default function OrcamentosPage() {
     setEditingCodigo(orcamento.codigo);
     setClienteId(String(orcamento.cliente_id));
     setDiasValidade(diasAPartirDeHoje(orcamento.validade));
+    setDesconto(orcamento.desconto ? String(orcamento.desconto) : "");
+    setObservacao(orcamento.observacao || "");
     setItens(
       (orcamento.itens_orcamento || []).map((item) => ({
         produto_id: item.produto_id,
@@ -270,11 +292,17 @@ export default function OrcamentosPage() {
           cliente_id_input: Number(clienteId),
           validade_input: validadeCalculada,
           itens_input: itensPayload,
+          desconto_input: descontoNumerico,
+          observacao_input: observacao.trim() || null,
+          vendedor_input: nomeUsuario || null,
         })
       : await supabase.rpc("criar_orcamento", {
           cliente_id_input: Number(clienteId),
           validade_input: validadeCalculada,
           itens_input: itensPayload,
+          desconto_input: descontoNumerico,
+          observacao_input: observacao.trim() || null,
+          vendedor_input: nomeUsuario || null,
         });
 
     if (error) {
@@ -540,12 +568,48 @@ export default function OrcamentosPage() {
             )}
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+            <div>
+              <label className={labelClasse}>Desconto (R$)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={desconto}
+                onChange={(e) => setDesconto(e.target.value)}
+                placeholder="0,00"
+                className={campoClasse}
+              />
+            </div>
+            <div>
+              <label className={labelClasse}>Observações</label>
+              <input
+                type="text"
+                value={observacao}
+                onChange={(e) => setObservacao(e.target.value)}
+                placeholder="Ex: Frete CIF, forma de pagamento..."
+                className={campoClasse}
+              />
+            </div>
+          </div>
+
           <div className="flex items-center justify-between mt-4">
-            <div className="text-sm">
-              <span className="text-slate-500">Total do orçamento: </span>
-              <span className="font-semibold text-lg">
-                {formatarMoeda(totalOrcamento)}
-              </span>
+            <div className="text-sm space-y-0.5">
+              <p className="text-slate-500">
+                Subtotal: {formatarMoeda(subtotalOrcamento)}
+              </p>
+              {descontoNumerico > 0 && (
+                <p className="text-slate-500">
+                  Desconto: − {formatarMoeda(descontoNumerico)}
+                </p>
+              )}
+              <p>
+                <span className="text-slate-500">Total do orçamento: </span>
+                <span className="font-semibold text-lg">
+                  {formatarMoeda(totalComDesconto)}
+                </span>
+              </p>
+              <p className="text-xs text-slate-400">Vendedor: {nomeUsuario}</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -670,6 +734,13 @@ export default function OrcamentosPage() {
                     >
                       {expandidoId === o.id ? "Ocultar itens" : "Ver itens"}
                     </button>
+                    <Link
+                      href={`/orcamentos/imprimir?codigo=${o.codigo}`}
+                      target="_blank"
+                      className="text-slate-600 hover:text-slate-900 text-xs font-medium mr-3"
+                    >
+                      Imprimir
+                    </Link>
                     {o.status !== "aprovado" && (
                       <>
                         <button
