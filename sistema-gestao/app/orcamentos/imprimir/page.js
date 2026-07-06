@@ -97,6 +97,15 @@ function ConteudoImpressao() {
   );
   const desconto = Number(orcamento.desconto || 0);
   const cliente = orcamento.clientes;
+  const vencido =
+    orcamento.status !== "aprovado" &&
+    orcamento.validade &&
+    new Date(orcamento.validade + "T00:00:00") < new Date(new Date().setHours(0, 0, 0, 0));
+  const rotuloStatus = orcamento.status === "aprovado"
+    ? "Aprovado"
+    : vencido
+      ? "Vencido"
+      : "Pendente";
   const enderecoCliente = [
     cliente?.endereco,
     cliente?.numero,
@@ -161,8 +170,7 @@ function ConteudoImpressao() {
             {orcamento.vendedor || "-"}
           </p>
           <p>
-            <span className="font-semibold">Status:</span>{" "}
-            {orcamento.status === "aprovado" ? "Aprovado" : "Pendente"}
+            <span className="font-semibold">Status:</span> {rotuloStatus}
           </p>
         </div>
       </div>
