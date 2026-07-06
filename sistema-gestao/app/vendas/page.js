@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 const NOMES_MESES = [
@@ -53,7 +54,7 @@ export default function VendasPage() {
     return supabase
       .from("vendas")
       .select(
-        "*, clientes(nome), itens_venda(id, quantidade, preco_unitario, produtos(nome))"
+        "*, clientes(nome), orcamentos(codigo), itens_venda(id, quantidade, preco_unitario, produtos(nome))"
       )
       .order("id", { ascending: false });
   }
@@ -185,7 +186,7 @@ export default function VendasPage() {
                     {formatarDataHora(v.created_at)}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
-                    {v.orcamento_id ? `#${v.orcamento_id}` : "-"}
+                    {v.orcamentos?.codigo ? `#${v.orcamentos.codigo}` : "-"}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap font-medium">
                     {formatarMoeda(v.total)}
@@ -195,9 +196,14 @@ export default function VendasPage() {
                       onClick={() =>
                         setExpandidoId(expandidoId === v.id ? null : v.id)
                       }
-                      className="text-slate-600 hover:text-slate-900 text-xs font-medium"
+                      className="text-slate-600 hover:text-slate-900"
+                      title={expandidoId === v.id ? "Ocultar itens" : "Ver itens"}
                     >
-                      {expandidoId === v.id ? "Ocultar itens" : "Ver itens"}
+                      {expandidoId === v.id ? (
+                        <EyeOff size={16} />
+                      ) : (
+                        <Eye size={16} />
+                      )}
                     </button>
                   </td>
                 </tr>
