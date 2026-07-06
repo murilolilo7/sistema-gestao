@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const cards = [
   {
     href: "/produtos",
@@ -23,6 +25,12 @@ const cards = [
     desc: "Propostas enviadas a clientes",
     color: "bg-violet-600",
   },
+  {
+    href: "/orcamentos-galpao",
+    title: "Orçamentos Galpão",
+    desc: "Levantamento de peças pré-moldadas para galpões",
+    color: "bg-rose-600",
+  },
 ];
 
 export default function Home() {
@@ -34,7 +42,7 @@ export default function Home() {
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {cards.map((c) => (
-          <a
+          <Link
             key={c.href}
             href={c.href}
             className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition flex items-start gap-4"
@@ -44,7 +52,7 @@ export default function Home() {
               <h2 className="font-semibold text-lg">{c.title}</h2>
               <p className="text-sm text-slate-500">{c.desc}</p>
             </div>
-          </a>
+          </Link>
         ))}
       </div>
     </div>
