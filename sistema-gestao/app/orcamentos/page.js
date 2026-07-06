@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Eye, EyeOff, Pencil, Printer, ShoppingCart, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 function formatarMoeda(valor) {
@@ -47,18 +48,35 @@ function diasAPartirDeHoje(dataISO) {
   return diffDias > 0 ? String(diffDias) : "";
 }
 
+// Um orçamento pendente cuja validade já passou continua existindo e
+// pode ser editado ou convertido normalmente — nada é apagado. Isso só
+// controla o que aparece no badge de status, pra avisar visualmente.
+function estaVencido(orcamento) {
+  if (orcamento.status === "aprovado" || !orcamento.validade) return false;
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const validade = new Date(orcamento.validade + "T00:00:00");
+  return validade < hoje;
+}
+
 function BadgeStatus({ status }) {
   const estilos = {
     pendente: "bg-amber-50 text-amber-700 border-amber-200",
+    vencido: "bg-rose-50 text-rose-700 border-rose-200",
     aprovado: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  };
+  const rotulos = {
+    pendente: "Pendente",
+    vencido: "Vencido",
+    aprovado: "Aprovado",
   };
   const classe =
     estilos[status] || "bg-slate-50 text-slate-700 border-slate-200";
   return (
     <span
-      className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${classe}`}
+      className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${classe}`}
     >
-      {status || "-"}
+      {rotulos[status] || status || "-"}
     </span>
   );
 }
@@ -723,43 +741,57 @@ export default function OrcamentosPage() {
                     {formatarMoeda(o.total)}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
-                    <BadgeStatus status={o.status} />
+                    <BadgeStatus
+                      status={estaVencido(o) ? "vencido" : o.status}
+                    />
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    <button
-                      onClick={() =>
-                        setExpandidoId(expandidoId === o.id ? null : o.id)
-                      }
-                      className="text-slate-600 hover:text-slate-900 text-xs font-medium mr-3"
-                    >
-                      {expandidoId === o.id ? "Ocultar itens" : "Ver itens"}
-                    </button>
-                    <Link
-                      href={`/orcamentos/imprimir?codigo=${o.codigo}`}
-                      target="_blank"
-                      className="text-slate-600 hover:text-slate-900 text-xs font-medium mr-3"
-                    >
-                      Imprimir
-                    </Link>
-                    {o.status !== "aprovado" && (
-                      <>
-                        <button
-                          onClick={() => abrirEdicao(o)}
-                          className="text-emerald-700 hover:text-emerald-900 text-xs font-medium mr-3"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => handleConverter(o.id)}
-                          disabled={convertendoId === o.id}
-                          className="text-emerald-700 hover:text-emerald-900 disabled:opacity-50 text-xs font-medium"
-                        >
-                          {convertendoId === o.id
-                            ? "Convertendo..."
-                            : "Converter em venda"}
-                        </button>
-                      </>
-                    )}
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() =>
+                          setExpandidoId(expandidoId === o.id ? null : o.id)
+                        }
+                        className="text-slate-600 hover:text-slate-900"
+                        title={expandidoId === o.id ? "Ocultar itens" : "Ver itens"}
+                      >
+                        {expandidoId === o.id ? (
+                          <EyeOff size={16} />
+                        ) : (
+                          <Eye size={16} />
+                        )}
+                      </button>
+                      <Link
+                        href={`/orcamentos/imprimir?codigo=${o.codigo}`}
+                        target="_blank"
+                        className="text-slate-600 hover:text-slate-900"
+                        title="Imprimir"
+                      >
+                        <Printer size={16} />
+                      </Link>
+                      {o.status !== "aprovado" && (
+                        <>
+                          <button
+                            onClick={() => abrirEdicao(o)}
+                            className="text-emerald-700 hover:text-emerald-900"
+                            title="Editar"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleConverter(o.id)}
+                            disabled={convertendoId === o.id}
+                            className="text-emerald-700 hover:text-emerald-900 disabled:opacity-50"
+                            title="Converter em venda"
+                          >
+                            {convertendoId === o.id ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                              <ShoppingCart size={16} />
+                            )}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
                 {expandidoId === o.id && (
