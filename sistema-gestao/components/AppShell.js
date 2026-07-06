@@ -95,6 +95,9 @@ export default function AppShell({ children }) {
             <Link href="/orcamentos" className="hover:text-emerald-400 transition">
               Orçamentos
             </Link>
+            <Link href="/orcamentos-galpao" className="hover:text-emerald-400 transition">
+              Orçamentos Galpão
+            </Link>
             <span className="text-slate-600">|</span>
 
             {editandoNome ? (
