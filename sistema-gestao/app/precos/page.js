@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
+import { Trash2, Plus, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 function formatarMoeda(valor) {
@@ -76,7 +76,7 @@ export default function PrecosPage() {
   function buscarComposicoes() {
     return supabase
       .from("composicoes_galpao")
-      .select("id, codigo, nome, papel, unidade, custo, preco, bdi_pct")
+      .select("id, codigo, nome, papel, unidade, custo, preco, bdi_pct, area_referencia")
       .order("codigo");
   }
 
@@ -282,6 +282,20 @@ export default function PrecosPage() {
     setSalvandoId(null);
   }
 
+  function duplicarComposicao(comp) {
+    setNovaComposicao({
+      nome: comp.nome + " (cópia)",
+      unidade: comp.unidade || "UN",
+      papel: comp.papel || "",
+      custo: String(comp.custo ?? ""),
+      preco: String(comp.preco ?? ""),
+    });
+    setCategoriaAberta(comp.papel || "Sem categoria");
+    setMostrarFormComposicao(true);
+    setErro("");
+    setMensagem('Peça duplicada no formulário abaixo — ajuste o nome e os valores, depois clique em "Adicionar peça".');
+  }
+
   async function adicionarComposicao(e) {
     e.preventDefault();
     if (!novaComposicao.nome.trim()) {
@@ -337,7 +351,9 @@ export default function PrecosPage() {
   function buscarReceita(composicaoId) {
     return supabase
       .from("composicao_itens")
-      .select("id, insumo_id, mao_de_obra_id, quantidade, insumos(nome, unidade), mao_de_obra(funcao)")
+      .select(
+        "id, insumo_id, mao_de_obra_id, quantidade, insumos(nome, unidade, valor_unitario), mao_de_obra(funcao, valor_hora)"
+      )
       .eq("composicao_produto_id", composicaoId);
   }
 
@@ -365,6 +381,7 @@ export default function PrecosPage() {
           quantidade: item.quantidade,
           nome: item.insumos?.nome || item.mao_de_obra?.funcao || "?",
           unidade: item.insumos?.unidade || "HORA",
+          valor_unitario: item.insumos?.valor_unitario ?? item.mao_de_obra?.valor_hora ?? 0,
         }))
       );
     }
@@ -389,6 +406,7 @@ export default function PrecosPage() {
           quantidade: Number(novoItemQtd) || 0,
           nome: insumo.nome,
           unidade: insumo.unidade,
+          valor_unitario: Number(insumo.valor_unitario) || 0,
         },
       ]);
     } else {
@@ -403,6 +421,7 @@ export default function PrecosPage() {
           quantidade: Number(novoItemQtd) || 0,
           nome: mdo.funcao,
           unidade: "HORA",
+          valor_unitario: Number(mdo.valor_hora) || 0,
         },
       ]);
     }
@@ -951,6 +970,13 @@ export default function PrecosPage() {
                       {salvandoId === c.id ? "..." : "Salvar"}
                     </button>
                     <button
+                      onClick={() => duplicarComposicao(c)}
+                      className="text-slate-500 hover:text-slate-800"
+                      title="Duplicar (cria uma peça nova parecida)"
+                    >
+                      <Copy size={15} />
+                    </button>
+                    <button
                       onClick={() => excluirComposicao(c)}
                       disabled={salvandoId === c.id}
                       className="text-red-600 hover:text-red-800 disabled:opacity-40"
@@ -983,6 +1009,8 @@ export default function PrecosPage() {
                                 <th className="py-1 font-medium">Insumo / Mão de obra</th>
                                 <th className="py-1 font-medium w-24">Un.</th>
                                 <th className="py-1 font-medium w-28">Quantidade</th>
+                                <th className="py-1 font-medium w-24">Valor unit.</th>
+                                <th className="py-1 font-medium w-24 text-right">Subtotal</th>
                                 <th className="py-1 font-medium w-10"></th>
                               </tr>
                             </thead>
@@ -1003,6 +1031,12 @@ export default function PrecosPage() {
                                       className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                     />
                                   </td>
+                                  <td className="py-1 pr-2 text-slate-500">
+                                    {formatarMoeda(item.valor_unitario)}
+                                  </td>
+                                  <td className="py-1 pr-2 text-right font-medium">
+                                    {formatarMoeda(Number(item.quantidade || 0) * Number(item.valor_unitario || 0))}
+                                  </td>
                                   <td className="py-1 text-right">
                                     {souAdmin && (
                                     <button
@@ -1016,6 +1050,22 @@ export default function PrecosPage() {
                                   </td>
                                 </tr>
                               ))}
+                              <tr className="border-t border-slate-300">
+                                <td colSpan={4} className="py-1 pr-2 text-right font-medium text-slate-500">
+                                  Custo total da receita
+                                  {c.area_referencia > 0 && ` (÷ ${c.area_referencia}m² de referência)`}
+                                </td>
+                                <td className="py-1 pr-2 text-right font-semibold">
+                                  {formatarMoeda(
+                                    (receitaItens.reduce(
+                                      (soma, item) =>
+                                        soma + Number(item.quantidade || 0) * Number(item.valor_unitario || 0),
+                                      0
+                                    )) / (c.area_referencia > 0 ? Number(c.area_referencia) : 1)
+                                  )}
+                                </td>
+                                <td></td>
+                              </tr>
                             </tbody>
                           </table>
                         )}
