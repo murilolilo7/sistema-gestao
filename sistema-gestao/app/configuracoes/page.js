@@ -134,7 +134,7 @@ export default function ConfiguracoesPage() {
               type="file"
               accept="image/*"
               onChange={handleArquivo}
-              className="w-full text-sm"
+              className="w-full text-sm text-slate-600 cursor-pointer file:cursor-pointer file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800 file:transition"
             />
             <p className="text-xs text-slate-400 mt-1">
               PNG ou JPG, fundo transparente ou branco, até {TAMANHO_MAXIMO_MB}MB.
