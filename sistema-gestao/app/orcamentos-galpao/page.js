@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, Pencil, Printer } from "lucide-react";
+import { Eye, EyeOff, Pencil, Printer, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
@@ -89,6 +89,7 @@ export default function OrcamentosGalpaoPage() {
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [salvando, setSalvando] = useState(false);
+  const [convertendoId, setConvertendoId] = useState(null);
   const [expandidoId, setExpandidoId] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -101,7 +102,7 @@ export default function OrcamentosGalpaoPage() {
   const [comprimento, setComprimento] = useState("");
   const [peDireito, setPeDireito] = useState("");
   const [numeroVaos, setNumeroVaos] = useState("");
-  const [numeroGalpoesGerminados, setNumeroGalpoesGerminados] = useState("1");
+  const [numeroGalpoesGerminados, setNumeroGalpoesGerminados] = useState("0");
   const [telhaId, setTelhaId] = useState("");
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
@@ -201,7 +202,10 @@ export default function OrcamentosGalpaoPage() {
   useEffect(() => {
     if (!vao || !comprimento) return;
     const area = Number(vao) * Number(comprimento);
-    const germinados = Math.max(1, Number(numeroGalpoesGerminados) || 1);
+    // O campo é "quantos galpões germinados A MAIS" (0 = avulso, sem
+    // germinação). +1 converte pro total de unidades físicas coladas,
+    // que é o que as fórmulas de calha/capote realmente precisam.
+    const germinados = Math.max(0, Number(numeroGalpoesGerminados) || 0) + 1;
 
     setItens((atual) => {
       if (atual.length === 0) return atual;
@@ -420,7 +424,7 @@ export default function OrcamentosGalpaoPage() {
     setComprimento("");
     setPeDireito("");
     setNumeroVaos("");
-    setNumeroGalpoesGerminados("1");
+    setNumeroGalpoesGerminados("0");
     setTelhaId("");
     setDiasValidade("");
     setItens([]);
@@ -459,7 +463,9 @@ export default function OrcamentosGalpaoPage() {
     setPeDireito(orcamento.pe_direito ? String(orcamento.pe_direito) : "");
     setNumeroVaos(orcamento.numero_vaos ? String(orcamento.numero_vaos) : "");
     setNumeroGalpoesGerminados(
-      orcamento.numero_galpoes_germinados ? String(orcamento.numero_galpoes_germinados) : "1"
+      orcamento.numero_galpoes_germinados === null || orcamento.numero_galpoes_germinados === undefined
+        ? "0"
+        : String(orcamento.numero_galpoes_germinados)
     );
     setDiasValidade(diasAPartirDeHoje(orcamento.validade));
     setDesconto(orcamento.desconto ? String(orcamento.desconto) : "");
@@ -545,7 +551,7 @@ export default function OrcamentosGalpaoPage() {
           observacao_input: observacao.trim() || null,
           vendedor_input: nomeUsuario || null,
           observacao_interna_input: observacaoInterna.trim() || null,
-          numero_galpoes_germinados_input: Math.max(1, Number(numeroGalpoesGerminados) || 1),
+          numero_galpoes_germinados_input: Math.max(0, Number(numeroGalpoesGerminados) || 0),
         })
       : await supabase.rpc("criar_orcamento_galpao", {
           cliente_id_input: Number(clienteId),
@@ -561,7 +567,7 @@ export default function OrcamentosGalpaoPage() {
           observacao_input: observacao.trim() || null,
           vendedor_input: nomeUsuario || null,
           observacao_interna_input: observacaoInterna.trim() || null,
-          numero_galpoes_germinados_input: Math.max(1, Number(numeroGalpoesGerminados) || 1),
+          numero_galpoes_germinados_input: Math.max(0, Number(numeroGalpoesGerminados) || 0),
         });
 
     if (error) {
@@ -582,6 +588,29 @@ export default function OrcamentosGalpaoPage() {
     limparFormulario();
     setSalvando(false);
     await carregarTudo();
+  }
+
+  async function handleConverter(orcamentoId) {
+    const confirmar = window.confirm(
+      "Converter este orçamento em venda? Essa ação não pode ser desfeita."
+    );
+    if (!confirmar) return;
+
+    setConvertendoId(orcamentoId);
+    setErro("");
+    setMensagem("");
+
+    const { error } = await supabase.rpc("converter_orcamento_em_venda_galpao", {
+      orcamento_id_input: orcamentoId,
+    });
+
+    if (error) {
+      setErro("Não foi possível converter em venda: " + error.message);
+    } else {
+      setMensagem("Orçamento convertido em venda com sucesso! Confira em Vendas.");
+      await carregarTudo();
+    }
+    setConvertendoId(null);
   }
 
   const orcamentosFiltrados = orcamentos.filter((o) => {
@@ -714,13 +743,13 @@ export default function OrcamentosGalpaoPage() {
                 />
               </div>
               <div>
-                <label className={labelClasse}>Nº de galpões germinados</label>
+                <label className={labelClasse}>Galpões germinados a mais (0 = avulso)</label>
                 <input
                   type="number"
-                  min="1"
+                  min="0"
                   value={numeroGalpoesGerminados}
                   onChange={(e) => setNumeroGalpoesGerminados(e.target.value)}
-                  placeholder="1 = avulso"
+                  placeholder="Ex: 1 (um a mais colado)"
                   className={campoClasse}
                 />
               </div>
@@ -1198,13 +1227,23 @@ export default function OrcamentosGalpaoPage() {
                         <Printer size={16} />
                       </Link>
                       {o.status !== "aprovado" && (
-                        <button
-                          onClick={() => abrirEdicao(o)}
-                          className="text-emerald-700 hover:text-emerald-900"
-                          title="Editar"
-                        >
-                          <Pencil size={16} />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => abrirEdicao(o)}
+                            className="text-emerald-700 hover:text-emerald-900"
+                            title="Editar"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleConverter(o.id)}
+                            disabled={convertendoId === o.id}
+                            className="text-emerald-700 hover:text-emerald-900 disabled:opacity-50"
+                            title="Converter em venda"
+                          >
+                            <ShoppingCart size={16} />
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
