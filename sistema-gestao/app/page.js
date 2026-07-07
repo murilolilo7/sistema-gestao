@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
@@ -34,6 +34,18 @@ const grupos = [
 
 export default function Home() {
   const [aberto, setAberto] = useState(null);
+  const containerRef = useRef(null);
+
+  // Fecha o bloco aberto ao clicar fora de qualquer um dos dois.
+  useEffect(() => {
+    function aoClicarFora(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setAberto(null);
+      }
+    }
+    document.addEventListener("mousedown", aoClicarFora);
+    return () => document.removeEventListener("mousedown", aoClicarFora);
+  }, []);
 
   return (
     <div>
@@ -41,7 +53,7 @@ export default function Home() {
       <p className="text-slate-500 mb-8">
         Escolha um módulo abaixo para começar.
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div ref={containerRef} className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
         {grupos.map((g) => {
           const expandido = aberto === g.id;
           return (
@@ -50,7 +62,8 @@ export default function Home() {
               className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden"
             >
               <button
-                onClick={() => setAberto(expandido ? null : g.id)}
+                type="button"
+                onClick={() => setAberto((atual) => (atual === g.id ? null : g.id))}
                 className="w-full p-5 flex items-start gap-4 hover:bg-slate-50 transition text-left"
               >
                 <div className={`${g.color} w-2 self-stretch rounded-full`} />
