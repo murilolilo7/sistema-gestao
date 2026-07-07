@@ -31,6 +31,12 @@ const cards = [
     desc: "Levantamento de peças pré-moldadas para galpões",
     color: "bg-rose-600",
   },
+  {
+    href: "/configuracoes",
+    title: "Configurações",
+    desc: "Nome e assinatura do diretor para os orçamentos",
+    color: "bg-slate-500",
+  },
 ];
 
 export default function Home() {
