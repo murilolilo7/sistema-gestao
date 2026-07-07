@@ -38,6 +38,7 @@ function ConteudoImpressao() {
   const searchParams = useSearchParams();
   const codigo = searchParams.get("codigo");
   const [orcamento, setOrcamento] = useState(null);
+  const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
 
@@ -49,18 +50,22 @@ function ConteudoImpressao() {
         setLoading(false);
         return;
       }
-      const { data, error } = await supabase
-        .from("orcamentos_galpao")
-        .select(
-          "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), modelos_galpao(nome), itens_orcamento_galpao(id, quantidade, preco_unitario, descricao_livre, unidade_livre, composicoes_galpao(nome, codigo, unidade))"
-        )
-        .eq("codigo", codigo)
-        .single();
+      const [resOrcamento, resConfig] = await Promise.all([
+        supabase
+          .from("orcamentos_galpao")
+          .select(
+            "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), modelos_galpao(nome), itens_orcamento_galpao(id, quantidade, preco_unitario, descricao_livre, unidade_livre, composicoes_galpao(nome, codigo, unidade))"
+          )
+          .eq("codigo", codigo)
+          .single(),
+        supabase.from("configuracao_empresa").select("nome_diretor, assinatura_base64").eq("id", 1).single(),
+      ]);
       if (!ativo) return;
-      if (error) {
+      if (resOrcamento.error) {
         setErro("Orçamento não encontrado.");
       } else {
-        setOrcamento(data);
+        setOrcamento(resOrcamento.data);
+        setConfig(resConfig.data || null);
       }
       setLoading(false);
     }
@@ -193,12 +198,6 @@ function ConteudoImpressao() {
           </tr>
         </tbody>
       </table>
-      {orcamento.area_m2 > 0 && (
-        <p className="text-xs text-slate-600 mb-6">
-          Valor por m²:{" "}
-          <strong>{formatarMoeda(Number(orcamento.total) / Number(orcamento.area_m2))}</strong>
-        </p>
-      )}
 
       {orcamento.observacao && (
         <div className="mb-8">
@@ -211,9 +210,17 @@ function ConteudoImpressao() {
 
       <div className="mt-16 text-xs">
         <div className="text-center max-w-xs">
+          {config?.assinatura_base64 && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={config.assinatura_base64}
+              alt="Assinatura"
+              className="max-h-16 mx-auto mb-1"
+            />
+          )}
           <div className="border-t border-slate-800 pt-2">
-            <p>{orcamento.vendedor || EMPRESA.nome}</p>
-            <p className="text-slate-500">Vendedor</p>
+            <p>{config?.nome_diretor || EMPRESA.nome}</p>
+            <p className="text-slate-500">Diretor</p>
           </div>
         </div>
       </div>
