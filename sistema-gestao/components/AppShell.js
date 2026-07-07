@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Pencil, Settings, Tag, Users } from "lucide-react";
+import { Pencil, Settings, Tag, Users, History } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function AppShell({ children }) {
@@ -136,6 +136,13 @@ export default function AppShell({ children }) {
               className="text-slate-300 hover:text-white transition"
             >
               <Users size={16} />
+            </Link>
+            <Link
+              href="/historico-precos"
+              title="Histórico de Preços"
+              className="text-slate-300 hover:text-white transition"
+            >
+              <History size={16} />
             </Link>
             <Link
               href="/configuracoes"
