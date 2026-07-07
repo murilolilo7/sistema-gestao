@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ChevronDown, Pencil, Settings, Users } from "lucide-react";
+import { ChevronDown, Settings, Users } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 const GRUPO_CADASTROS = [
@@ -67,8 +67,6 @@ function MenuSuspenso({ rotulo, icone, itens, aberto, onAlternar, onFechar, alin
 
 export default function AppShell({ children }) {
   const [session, setSession] = useState(undefined);
-  const [editandoNome, setEditandoNome] = useState(false);
-  const [nomeTemp, setNomeTemp] = useState("");
   const [menuAberto, setMenuAberto] = useState(null); // null | 'cadastros' | 'vendas' | 'config'
   const navRef = useRef(null);
   const router = useRouter();
@@ -111,25 +109,6 @@ export default function AppShell({ children }) {
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace("/login");
-  }
-
-  function iniciarEdicaoNome() {
-    setNomeTemp(session.user.user_metadata?.nome_completo || "");
-    setEditandoNome(true);
-  }
-
-  async function salvarNome() {
-    if (!nomeTemp.trim()) {
-      setEditandoNome(false);
-      return;
-    }
-    const { data, error } = await supabase.auth.updateUser({
-      data: { nome_completo: nomeTemp.trim() },
-    });
-    if (!error && data?.user) {
-      setSession((s) => ({ ...s, user: data.user }));
-    }
-    setEditandoNome(false);
   }
 
   if (session === undefined) {
@@ -175,28 +154,7 @@ export default function AppShell({ children }) {
             />
             <span className="text-slate-600">|</span>
 
-            {editandoNome ? (
-              <span className="flex items-center gap-1">
-                <input
-                  autoFocus
-                  value={nomeTemp}
-                  onChange={(e) => setNomeTemp(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && salvarNome()}
-                  onBlur={salvarNome}
-                  placeholder="Seu nome completo"
-                  className="text-xs text-slate-900 rounded px-2 py-1 w-36"
-                />
-              </span>
-            ) : (
-              <button
-                onClick={iniciarEdicaoNome}
-                title="Clique para editar seu nome"
-                className="hidden sm:flex items-center gap-1 text-slate-300 text-xs hover:text-white transition"
-              >
-                {nomeExibido}
-                <Pencil size={12} />
-              </button>
-            )}
+            <span className="hidden sm:inline text-slate-300 text-xs">{nomeExibido}</span>
 
             <Link
               href="/usuarios"
