@@ -87,14 +87,6 @@ function ConteudoImpressao() {
   }
   if (!orcamento) return null;
 
-  const itens = orcamento.itens_orcamento_galpao || [];
-  const subtotal = itens.reduce(
-    (soma, i) => soma + i.quantidade * Number(i.preco_unitario),
-    0
-  );
-  const margem = Number(orcamento.margem_comercial_pct || 0);
-  const totalComMargem = subtotal * (1 + margem / 100);
-  const desconto = Number(orcamento.desconto || 0);
   const cliente = orcamento.clientes;
   const enderecoCliente = [cliente?.endereco, cliente?.numero, cliente?.bairro]
     .filter(Boolean)
@@ -134,10 +126,8 @@ function ConteudoImpressao() {
       <h1 className="text-center text-lg font-bold mb-1">
         Orçamento de Galpão Nº {orcamento.codigo}
       </h1>
-      {(orcamento.modelos_galpao?.nome || orcamento.titulo) && (
-        <p className="text-center text-sm text-slate-600 mb-6">
-          {orcamento.modelos_galpao?.nome} {orcamento.titulo ? `— ${orcamento.titulo}` : ""}
-        </p>
+      {orcamento.titulo && (
+        <p className="text-center text-sm text-slate-600 mb-6">{orcamento.titulo}</p>
       )}
 
       <div className="border border-slate-300 rounded-md p-4 mb-6 text-sm grid grid-cols-2 gap-6">
@@ -171,93 +161,62 @@ function ConteudoImpressao() {
         </div>
       </div>
 
-      <p className="font-semibold text-xs text-slate-500 mb-1">PEÇAS DO ORÇAMENTO</p>
-      <table className="w-full border-collapse text-xs mb-4">
+      <table className="w-full border-collapse text-xs mb-2">
         <thead>
           <tr className="bg-slate-100">
             <th className="border border-slate-400 px-2 py-1.5 text-left">Descrição</th>
-            <th className="border border-slate-400 px-2 py-1.5 text-left">Código</th>
-            <th className="border border-slate-400 px-2 py-1.5 text-left">Un.</th>
-            <th className="border border-slate-400 px-2 py-1.5 text-right">Qtd.</th>
-            <th className="border border-slate-400 px-2 py-1.5 text-right">Valor unitário</th>
-            <th className="border border-slate-400 px-2 py-1.5 text-right">Total</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-right">Quantidade</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-right">Valor Unitário</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-right">Valor Total</th>
           </tr>
         </thead>
         <tbody>
-          {itens.map((item) => (
-            <tr key={item.id}>
-              <td className="border border-slate-300 px-2 py-1.5">
-                {item.composicoes_galpao?.nome || item.descricao_livre || "Item"}
-              </td>
-              <td className="border border-slate-300 px-2 py-1.5">
-                {item.composicoes_galpao?.codigo ?? "-"}
-              </td>
-              <td className="border border-slate-300 px-2 py-1.5">
-                {item.composicoes_galpao?.unidade || item.unidade_livre || "-"}
-              </td>
-              <td className="border border-slate-300 px-2 py-1.5 text-right">
-                {item.quantidade}
-              </td>
-              <td className="border border-slate-300 px-2 py-1.5 text-right">
-                {formatarMoeda(item.preco_unitario)}
-              </td>
-              <td className="border border-slate-300 px-2 py-1.5 text-right">
-                {formatarMoeda(item.quantidade * item.preco_unitario)}
-              </td>
-            </tr>
-          ))}
+          <tr>
+            <td className="border border-slate-300 px-2 py-1.5">
+              {orcamento.titulo || "Galpão pré-moldado"}
+            </td>
+            <td className="border border-slate-300 px-2 py-1.5 text-right">1</td>
+            <td className="border border-slate-300 px-2 py-1.5 text-right">
+              {formatarMoeda(orcamento.total)}
+            </td>
+            <td className="border border-slate-300 px-2 py-1.5 text-right">
+              {formatarMoeda(orcamento.total)}
+            </td>
+          </tr>
+          <tr>
+            <td colSpan={3} className="border border-slate-300 px-2 py-1.5 text-right font-bold">
+              TOTAL
+            </td>
+            <td className="border border-slate-300 px-2 py-1.5 text-right font-bold">
+              {formatarMoeda(orcamento.total)}
+            </td>
+          </tr>
         </tbody>
       </table>
-
-      <div className="flex justify-end mb-6">
-        <table className="text-xs">
-          <tbody>
-            <tr>
-              <td className="px-2 py-0.5 text-slate-500">Nº de peças</td>
-              <td className="px-2 py-0.5 text-right">{itens.length}</td>
-            </tr>
-            <tr>
-              <td className="px-2 py-0.5 text-slate-500">Subtotal</td>
-              <td className="px-2 py-0.5 text-right">{formatarMoeda(subtotal)}</td>
-            </tr>
-            {margem > 0 && (
-              <tr>
-                <td className="px-2 py-0.5 text-slate-500">Margem comercial ({margem}%)</td>
-                <td className="px-2 py-0.5 text-right">{formatarMoeda(totalComMargem)}</td>
-              </tr>
-            )}
-            <tr>
-              <td className="px-2 py-0.5 text-slate-500">Desconto</td>
-              <td className="px-2 py-0.5 text-right">
-                {desconto > 0 ? `− ${formatarMoeda(desconto)}` : formatarMoeda(0)}
-              </td>
-            </tr>
-            <tr className="border-t border-slate-400">
-              <td className="px-2 py-1 font-bold">Total do orçamento</td>
-              <td className="px-2 py-1 text-right font-bold">
-                {formatarMoeda(orcamento.total)}
-              </td>
-            </tr>
-            {orcamento.area_m2 > 0 && (
-              <tr>
-                <td className="px-2 py-0.5 text-slate-500">Valor por m²</td>
-                <td className="px-2 py-0.5 text-right">
-                  {formatarMoeda(Number(orcamento.total) / Number(orcamento.area_m2))}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {orcamento.area_m2 > 0 && (
+        <p className="text-xs text-slate-600 mb-6">
+          Valor por m²:{" "}
+          <strong>{formatarMoeda(Number(orcamento.total) / Number(orcamento.area_m2))}</strong>
+        </p>
+      )}
 
       {orcamento.observacao && (
-        <div>
+        <div className="mb-8">
           <p className="font-semibold text-xs text-slate-500 mb-1">OBSERVAÇÕES</p>
           <div className="border border-slate-300 rounded-md p-3 text-xs whitespace-pre-line">
             {orcamento.observacao}
           </div>
         </div>
       )}
+
+      <div className="mt-16 text-xs">
+        <div className="text-center max-w-xs">
+          <div className="border-t border-slate-800 pt-2">
+            <p>{orcamento.vendedor || EMPRESA.nome}</p>
+            <p className="text-slate-500">Vendedor</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
