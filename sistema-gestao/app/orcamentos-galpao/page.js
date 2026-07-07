@@ -6,13 +6,10 @@ import { Eye, EyeOff, Pencil, Printer, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
-const NOMES_ITENS_ESPECIAIS = [
-  "TELHAS METÁLICAS",
-  "CALHA FIBRA",
-  "CAPOTE",
-  "MONTAGEM",
-  "FUNDAÇÃO",
-];
+// Categorias tratadas em campos dedicados (telha, calha, capote,
+// montagem, fundação) — excluídas do seletor genérico de peças pra não
+// duplicar, não importa o nome específico de cada uma.
+const PAPEIS_COM_CAMPO_DEDICADO = ["TELHA", "CALHA", "CAPOTE", "MONTAGEM", "FUNDACAO"];
 
 function formatarMoeda(valor) {
   if (valor === null || valor === undefined) return "-";
@@ -265,7 +262,7 @@ export default function OrcamentosGalpaoPage() {
 
   const composicoesSelecionaveis = composicoes.filter((c) => {
     if (PAPEIS_EXCLUIDOS.includes(c.papel)) return false;
-    if (NOMES_ITENS_ESPECIAIS.includes(c.nome)) return false;
+    if (PAPEIS_COM_CAMPO_DEDICADO.includes(c.papel)) return false;
     if (c.papel === "LAJE" && tipoSelecionado === "simples") return false;
     return true;
   });
@@ -743,13 +740,13 @@ export default function OrcamentosGalpaoPage() {
                 />
               </div>
               <div>
-                <label className={labelClasse}>Galpões germinados a mais (0 = avulso)</label>
+                <label className={labelClasse}>Germinados a mais</label>
                 <input
                   type="number"
                   min="0"
                   value={numeroGalpoesGerminados}
                   onChange={(e) => setNumeroGalpoesGerminados(e.target.value)}
-                  placeholder="Ex: 1 (um a mais colado)"
+                  placeholder="0 = avulso"
                   className={campoClasse}
                 />
               </div>
