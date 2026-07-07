@@ -52,7 +52,7 @@ function ConteudoImpressao() {
       const { data, error } = await supabase
         .from("orcamentos_galpao")
         .select(
-          "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), itens_orcamento_galpao(id, quantidade, preco_unitario, composicoes_galpao(nome, codigo, unidade))"
+          "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), modelos_galpao(nome), itens_orcamento_galpao(id, quantidade, preco_unitario, descricao_livre, unidade_livre, composicoes_galpao(nome, codigo, unidade))"
         )
         .eq("codigo", codigo)
         .single();
@@ -134,8 +134,10 @@ function ConteudoImpressao() {
       <h1 className="text-center text-lg font-bold mb-1">
         Orçamento de Galpão Nº {orcamento.codigo}
       </h1>
-      {orcamento.titulo && (
-        <p className="text-center text-sm text-slate-600 mb-6">{orcamento.titulo}</p>
+      {(orcamento.modelos_galpao?.nome || orcamento.titulo) && (
+        <p className="text-center text-sm text-slate-600 mb-6">
+          {orcamento.modelos_galpao?.nome} {orcamento.titulo ? `— ${orcamento.titulo}` : ""}
+        </p>
       )}
 
       <div className="border border-slate-300 rounded-md p-4 mb-6 text-sm grid grid-cols-2 gap-6">
@@ -185,13 +187,13 @@ function ConteudoImpressao() {
           {itens.map((item) => (
             <tr key={item.id}>
               <td className="border border-slate-300 px-2 py-1.5">
-                {item.composicoes_galpao?.nome || "Peça removida"}
+                {item.composicoes_galpao?.nome || item.descricao_livre || "Item"}
               </td>
               <td className="border border-slate-300 px-2 py-1.5">
                 {item.composicoes_galpao?.codigo ?? "-"}
               </td>
               <td className="border border-slate-300 px-2 py-1.5">
-                {item.composicoes_galpao?.unidade || "-"}
+                {item.composicoes_galpao?.unidade || item.unidade_livre || "-"}
               </td>
               <td className="border border-slate-300 px-2 py-1.5 text-right">
                 {item.quantidade}
