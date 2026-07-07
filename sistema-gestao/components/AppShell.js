@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { Pencil, Settings } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function AppShell({ children }) {
@@ -123,6 +123,13 @@ export default function AppShell({ children }) {
               </button>
             )}
 
+            <Link
+              href="/configuracoes"
+              title="Configurações"
+              className="text-slate-300 hover:text-white transition"
+            >
+              <Settings size={16} />
+            </Link>
             <button
               onClick={handleLogout}
               className="text-red-400 hover:text-red-300 text-xs font-medium"
