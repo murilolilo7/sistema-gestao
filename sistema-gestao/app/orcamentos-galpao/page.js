@@ -199,32 +199,19 @@ export default function OrcamentosGalpaoPage() {
   }
 
   function itensObrigatoriosBase() {
-    const lista = [];
-    const montagem = buscarComposicao("MONTAGEM");
-    const fundacao = buscarComposicao("FUNDAÇÃO");
-    if (montagem) {
-      lista.push({
+    const nomes = ["MONTAGEM", "FUNDAÇÃO", "CALHA FIBRA", "CAPOTE"];
+    return nomes
+      .map((nome) => buscarComposicao(nome))
+      .filter(Boolean)
+      .map((c) => ({
         chave: proximaChave.current++,
-        composicao_id: montagem.id,
-        nome: montagem.nome,
-        unidade: montagem.unidade,
-        quantidade: 1,
-        preco_unitario: Number(montagem.preco) || 0,
+        composicao_id: c.id,
+        nome: c.nome,
+        unidade: c.unidade,
+        quantidade: 0,
+        preco_unitario: Number(c.preco) || 0,
         obrigatorio: true,
-      });
-    }
-    if (fundacao) {
-      lista.push({
-        chave: proximaChave.current++,
-        composicao_id: fundacao.id,
-        nome: fundacao.nome,
-        unidade: fundacao.unidade,
-        quantidade: 1,
-        preco_unitario: Number(fundacao.preco) || 0,
-        obrigatorio: true,
-      });
-    }
-    return lista;
+      }));
   }
 
   function adicionarItem() {
@@ -255,50 +242,41 @@ export default function OrcamentosGalpaoPage() {
       return;
     }
     const area = Number(vao) * Number(comprimento);
-    const novos = [];
 
-    const telha = telhaId ? composicoes.find((c) => String(c.id) === String(telhaId)) : null;
-    if (telha) {
-      novos.push({
-        chave: proximaChave.current++,
-        composicao_id: telha.id,
-        nome: telha.nome,
-        unidade: telha.unidade,
-        quantidade: Math.round(area * 1.1 * 100) / 100,
-        preco_unitario: Number(telha.preco) || 0,
-        automatico: true,
-      });
-    }
+    setItens((atual) => {
+      let novos = [...atual];
 
-    const calha = buscarComposicao("CALHA FIBRA");
-    if (calha && numeroVaos) {
-      const qtd = (Number(vao) + 0.5) * Number(numeroVaos) * 2;
-      novos.push({
-        chave: proximaChave.current++,
-        composicao_id: calha.id,
-        nome: calha.nome,
-        unidade: calha.unidade,
-        quantidade: Math.round(qtd * 100) / 100,
-        preco_unitario: Number(calha.preco) || 0,
-        automatico: true,
-      });
-    }
+      const telha = telhaId ? composicoes.find((c) => String(c.id) === String(telhaId)) : null;
+      if (telha) {
+        const qtdTelha = Math.round(area * 1.1 * 100) / 100;
+        const jaExiste = novos.some((i) => i.composicao_id === telha.id);
+        if (jaExiste) {
+          novos = novos.map((i) =>
+            i.composicao_id === telha.id ? { ...i, quantidade: qtdTelha } : i
+          );
+        } else {
+          novos.push({
+            chave: proximaChave.current++,
+            composicao_id: telha.id,
+            nome: telha.nome,
+            unidade: telha.unidade,
+            quantidade: qtdTelha,
+            preco_unitario: Number(telha.preco) || 0,
+            automatico: true,
+          });
+        }
+      }
 
-    const capote = buscarComposicao("CAPOTE");
-    if (capote) {
-      const qtd = Number(comprimento) + 2;
-      novos.push({
-        chave: proximaChave.current++,
-        composicao_id: capote.id,
-        nome: capote.nome,
-        unidade: capote.unidade,
-        quantidade: qtd,
-        preco_unitario: Number(capote.preco) || 0,
-        automatico: true,
-      });
-    }
+      if (numeroVaos) {
+        const qtdCalha = Math.round((Number(vao) + 0.5) * Number(numeroVaos) * 2 * 100) / 100;
+        novos = novos.map((i) => (i.nome === "CALHA FIBRA" ? { ...i, quantidade: qtdCalha } : i));
+      }
 
-    setItens((atual) => [...atual.filter((i) => !i.automatico), ...novos]);
+      const qtdCapote = Math.round((Number(comprimento) + 2) * 100) / 100;
+      novos = novos.map((i) => (i.nome === "CAPOTE" ? { ...i, quantidade: qtdCapote } : i));
+
+      return novos;
+    });
     setErro("");
     setMensagem("Telha, calha e capote calculados a partir das medidas.");
   }
@@ -404,7 +382,9 @@ export default function OrcamentosGalpaoPage() {
       unidade: item.composicoes_galpao?.unidade || item.unidade_livre,
       quantidade: Number(item.quantidade),
       preco_unitario: Number(item.preco_unitario),
-      obrigatorio: ["MONTAGEM", "FUNDAÇÃO"].includes(item.composicoes_galpao?.nome),
+      obrigatorio: ["MONTAGEM", "FUNDAÇÃO", "CALHA FIBRA", "CAPOTE"].includes(
+        item.composicoes_galpao?.nome
+      ),
     }));
     setItens(itensCarregados);
     setErro("");
