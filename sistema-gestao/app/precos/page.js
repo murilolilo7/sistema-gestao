@@ -26,6 +26,12 @@ export default function PrecosPage() {
   const [recalculando, setRecalculando] = useState(false);
   const [termoBusca, setTermoBusca] = useState("");
   const [secaoAberta, setSecaoAberta] = useState(null); // null | 'insumos' | 'maoDeObra' | 'composicoes'
+  const [categoriaAberta, setCategoriaAberta] = useState(null); // qual papel está aberto dentro de Peças
+  const [souAdmin, setSouAdmin] = useState(false);
+
+  useEffect(() => {
+    supabase.rpc("eh_admin").then(({ data }) => setSouAdmin(!!data));
+  }, []);
 
   function alternarSecao(nome) {
     setSecaoAberta((atual) => (atual === nome ? null : nome));
@@ -462,6 +468,13 @@ export default function PrecosPage() {
     if (!termo) return true;
     return c.nome.toLowerCase().includes(termo) || (c.papel || "").toLowerCase().includes(termo);
   });
+  const composicoesPorPapel = composicoesFiltradas.reduce((acc, c) => {
+    const grupo = c.papel || "Sem categoria";
+    if (!acc[grupo]) acc[grupo] = [];
+    acc[grupo].push(c);
+    return acc;
+  }, {});
+  const papeisOrdenados = Object.keys(composicoesPorPapel).sort();
 
   const campoClasse =
     "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
@@ -486,6 +499,12 @@ export default function PrecosPage() {
       <p className="text-slate-500 mb-6">
         Insumos, mão de obra e peças de galpão — inclua, edite ou remova conforme o negócio muda.
       </p>
+
+      {!souAdmin && (
+        <div className="mb-4 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 px-4 py-3 text-sm">
+          Você pode consultar os preços, mas só um administrador pode alterá-los, incluir ou excluir itens.
+        </div>
+      )}
 
       {erro && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">
@@ -513,9 +532,11 @@ export default function PrecosPage() {
       {secaoAberta === "insumos" && (
       <div className="mb-6">
       <div className="flex justify-end mb-2">
+        {souAdmin && (
         <button onClick={() => setMostrarFormInsumo((v) => !v)} className={botaoIncluir}>
           <Plus size={14} /> Incluir insumo
         </button>
+        )}
       </div>
       {mostrarFormInsumo && (
         <form
@@ -568,6 +589,7 @@ export default function PrecosPage() {
                   <input
                     value={i.nome}
                     onChange={(e) => atualizarCampo(insumos, setInsumos, i.id, "nome", e.target.value)}
+                    disabled={!souAdmin}
                     className={campoTexto + " w-full"}
                   />
                 </td>
@@ -575,6 +597,7 @@ export default function PrecosPage() {
                   <input
                     value={i.unidade || ""}
                     onChange={(e) => atualizarCampo(insumos, setInsumos, i.id, "unidade", e.target.value)}
+                    disabled={!souAdmin}
                     className={campoTexto + " w-20"}
                   />
                 </td>
@@ -584,10 +607,12 @@ export default function PrecosPage() {
                     step="0.01"
                     value={i.valor_unitario}
                     onChange={(e) => atualizarCampo(insumos, setInsumos, i.id, "valor_unitario", e.target.value)}
+                    disabled={!souAdmin}
                     className={campoNumero}
                   />
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
+                  {souAdmin && (
                   <div className="flex items-center justify-end gap-3">
                     <button onClick={() => salvarInsumo(i)} disabled={salvandoId === i.id} className={botaoSalvar}>
                       {salvandoId === i.id ? "..." : "Salvar"}
@@ -601,6 +626,7 @@ export default function PrecosPage() {
                       <Trash2 size={15} />
                     </button>
                   </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -625,9 +651,11 @@ export default function PrecosPage() {
       {secaoAberta === "maoDeObra" && (
       <div className="mb-4">
       <div className="flex justify-end mb-2">
+        {souAdmin && (
         <button onClick={() => setMostrarFormMaoDeObra((v) => !v)} className={botaoIncluir}>
           <Plus size={14} /> Incluir função
         </button>
+        )}
       </div>
       {mostrarFormMaoDeObra && (
         <form
@@ -683,6 +711,7 @@ export default function PrecosPage() {
                   <input
                     value={m.funcao}
                     onChange={(e) => atualizarCampo(maoDeObra, setMaoDeObra, m.id, "funcao", e.target.value)}
+                    disabled={!souAdmin}
                     className={campoTexto + " w-full"}
                   />
                 </td>
@@ -692,6 +721,7 @@ export default function PrecosPage() {
                     step="0.01"
                     value={m.salario_bruto}
                     onChange={(e) => atualizarCampo(maoDeObra, setMaoDeObra, m.id, "salario_bruto", e.target.value)}
+                    disabled={!souAdmin}
                     className={campoNumero}
                   />
                 </td>
@@ -701,11 +731,13 @@ export default function PrecosPage() {
                     step="1"
                     value={m.encargos_pct}
                     onChange={(e) => atualizarCampo(maoDeObra, setMaoDeObra, m.id, "encargos_pct", e.target.value)}
+                    disabled={!souAdmin}
                     className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </td>
                 <td className="px-4 py-2 text-slate-500">{formatarMoeda(m.valor_hora)}</td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
+                  {souAdmin && (
                   <div className="flex items-center justify-end gap-3">
                     <button onClick={() => salvarMaoDeObra(m)} disabled={salvandoId === m.id} className={botaoSalvar}>
                       {salvandoId === m.id ? "..." : "Salvar"}
@@ -719,6 +751,7 @@ export default function PrecosPage() {
                       <Trash2 size={15} />
                     </button>
                   </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -728,6 +761,7 @@ export default function PrecosPage() {
       </div>
       )}
 
+      {souAdmin && (
       <div className="mb-6">
         <button
           onClick={recalcularTudo}
@@ -741,6 +775,7 @@ export default function PrecosPage() {
           Fundação, e peças incluídas manualmente) não são afetadas.
         </p>
       </div>
+      )}
 
       {/* COMPOSIÇÕES */}
       <button
@@ -757,9 +792,11 @@ export default function PrecosPage() {
       {secaoAberta === "composicoes" && (
       <div>
       <div className="flex justify-end mb-2">
+        {souAdmin && (
         <button onClick={() => setMostrarFormComposicao((v) => !v)} className={botaoIncluir}>
           <Plus size={14} /> Incluir peça
         </button>
+        )}
       </div>
       {mostrarFormComposicao && (
         <form
@@ -826,7 +863,21 @@ export default function PrecosPage() {
         placeholder="Pesquisar peça..."
         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
       />
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+      {papeisOrdenados.map((papel) => (
+        <div key={papel} className="mb-3">
+          <button
+            type="button"
+            onClick={() => setCategoriaAberta((atual) => (atual === papel ? null : papel))}
+            className="w-full flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 shadow-sm hover:bg-slate-100 transition"
+          >
+            <span className="text-sm font-medium text-slate-700">{papel}</span>
+            <span className="flex items-center gap-2 text-slate-400">
+              <span className="text-xs">{composicoesPorPapel[papel].length} itens</span>
+              {categoriaAberta === papel ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </span>
+          </button>
+          {categoriaAberta === papel && (
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto mt-2">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600 text-left">
             <tr>
@@ -838,7 +889,7 @@ export default function PrecosPage() {
               <th className="px-4 py-2 font-medium"></th>
             </tr>
           </thead>
-          {composicoesFiltradas.map((c) => (
+          {composicoesPorPapel[papel].map((c) => (
             <tbody key={c.id} className="border-t border-slate-100">
               <tr>
                 <td className="px-2 py-2">
@@ -861,6 +912,7 @@ export default function PrecosPage() {
                     onChange={(e) =>
                       atualizarCampo(composicoes, setComposicoes, c.id, "nome", e.target.value)
                     }
+                    disabled={!souAdmin}
                     className={campoTexto + " w-full"}
                   />
                 </td>
@@ -872,6 +924,7 @@ export default function PrecosPage() {
                     onChange={(e) =>
                       atualizarCampo(composicoes, setComposicoes, c.id, "custo", e.target.value)
                     }
+                    disabled={!souAdmin}
                     className={campoNumero}
                   />
                 </td>
@@ -883,10 +936,12 @@ export default function PrecosPage() {
                     onChange={(e) =>
                       atualizarCampo(composicoes, setComposicoes, c.id, "preco", e.target.value)
                     }
+                    disabled={!souAdmin}
                     className={campoNumero}
                   />
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
+                  {souAdmin && (
                   <div className="flex items-center justify-end gap-3">
                     <button
                       onClick={() => salvarComposicao(c)}
@@ -904,6 +959,7 @@ export default function PrecosPage() {
                       <Trash2 size={15} />
                     </button>
                   </div>
+                  )}
                 </td>
               </tr>
               {receitaExpandidaId === c.id && (
@@ -943,10 +999,12 @@ export default function PrecosPage() {
                                       onChange={(e) =>
                                         atualizarQuantidadeReceita(item.id, e.target.value)
                                       }
+                                      disabled={!souAdmin}
                                       className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                     />
                                   </td>
                                   <td className="py-1 text-right">
+                                    {souAdmin && (
                                     <button
                                       onClick={() => removerLinhaReceita(item.id)}
                                       className="text-red-600 hover:text-red-800"
@@ -954,6 +1012,7 @@ export default function PrecosPage() {
                                     >
                                       <Trash2 size={13} />
                                     </button>
+                                    )}
                                   </td>
                                 </tr>
                               ))}
@@ -961,6 +1020,8 @@ export default function PrecosPage() {
                           </table>
                         )}
 
+                        {souAdmin && (
+                        <>
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2">
                           <select
                             value={novoItemTipo}
@@ -1013,6 +1074,8 @@ export default function PrecosPage() {
                         >
                           {salvandoReceita ? "Salvando..." : "Salvar receita e recalcular esta peça"}
                         </button>
+                        </>
+                        )}
                       </>
                     )}
                   </td>
@@ -1022,6 +1085,9 @@ export default function PrecosPage() {
           ))}
         </table>
       </div>
+          )}
+        </div>
+      ))}
       </div>
       )}
     </div>
