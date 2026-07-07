@@ -69,6 +69,16 @@ function BadgeStatus({ status }) {
   );
 }
 
+// Recalcula a quantidade de FUNDAÇÃO = soma das quantidades de todos os
+// itens cujo papel é PILAR (1 dia de fundação por pilar).
+function recalcularFundacao(listaItens) {
+  const totalPilares = listaItens.reduce(
+    (soma, i) => (i.papel === "PILAR" ? soma + Number(i.quantidade || 0) : soma),
+    0
+  );
+  return listaItens.map((i) => (i.nome === "FUNDAÇÃO" ? { ...i, quantidade: totalPilares } : i));
+}
+
 export default function OrcamentosGalpaoPage() {
   const [modo, setModo] = useState("lista"); // 'lista' | 'novo' | 'editar'
   const [clientes, setClientes] = useState([]);
@@ -91,6 +101,7 @@ export default function OrcamentosGalpaoPage() {
   const [comprimento, setComprimento] = useState("");
   const [peDireito, setPeDireito] = useState("");
   const [numeroVaos, setNumeroVaos] = useState("");
+  const [numeroGalpoesGerminados, setNumeroGalpoesGerminados] = useState("1");
   const [telhaId, setTelhaId] = useState("");
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
@@ -99,6 +110,7 @@ export default function OrcamentosGalpaoPage() {
   const [desconto, setDesconto] = useState("");
   const [margemComercial, setMargemComercial] = useState("");
   const [observacao, setObservacao] = useState("");
+  const [observacaoInterna, setObservacaoInterna] = useState("");
 
   const [vigaLargura, setVigaLargura] = useState("");
   const [vigaAltura, setVigaAltura] = useState("");
@@ -137,7 +149,7 @@ export default function OrcamentosGalpaoPage() {
     return supabase
       .from("orcamentos_galpao")
       .select(
-        "*, clientes(nome), modelos_galpao(nome, tipo), itens_orcamento_galpao(id, composicao_id, descricao_livre, unidade_livre, quantidade, preco_unitario, composicoes_galpao(nome, unidade))"
+        "*, clientes(nome), modelos_galpao(nome, tipo), itens_orcamento_galpao(id, composicao_id, descricao_livre, unidade_livre, quantidade, preco_unitario, composicoes_galpao(nome, unidade, papel))"
       )
       .order("codigo", { ascending: false });
   }
@@ -184,15 +196,22 @@ export default function OrcamentosGalpaoPage() {
   const tipoSelecionado = modeloSelecionado?.tipo || "";
   const areaCalculada = vao && comprimento ? Number(vao) * Number(comprimento) : null;
 
-  // Recalcula telha/calha/capote automaticamente, ao vivo, sempre que
-  // as medidas ou o tipo de telha mudam — sem precisar clicar em botão.
+  // Recalcula telha/calha/capote automaticamente, ao vivo, sempre que as
+  // medidas, o nº de galpões germinados ou o tipo de telha mudam.
   useEffect(() => {
     if (!vao || !comprimento) return;
     const area = Number(vao) * Number(comprimento);
+    const germinados = Math.max(1, Number(numeroGalpoesGerminados) || 1);
 
     setItens((atual) => {
       if (atual.length === 0) return atual;
       let novos = [...atual];
+
+      // Remove qualquer linha de um tipo de telha diferente do que está
+      // selecionado agora (evita duplicar se o usuário trocar o tipo).
+      novos = novos.filter(
+        (i) => !(i.papel === "TELHA" && (!telhaId || i.composicao_id !== Number(telhaId)))
+      );
 
       const telha = telhaId ? composicoes.find((c) => String(c.id) === String(telhaId)) : null;
       if (telha) {
@@ -208,6 +227,7 @@ export default function OrcamentosGalpaoPage() {
             composicao_id: telha.id,
             nome: telha.nome,
             unidade: telha.unidade,
+            papel: telha.papel,
             quantidade: qtdTelha,
             preco_unitario: Number(telha.preco) || 0,
             automatico: true,
@@ -215,20 +235,29 @@ export default function OrcamentosGalpaoPage() {
         }
       }
 
-      // Calha: 2 x comprimento + número de vãos (NÃO usa a largura/vão —
-      // a calha corre ao longo do comprimento, nos dois lados).
+      // Calha: cada galpão germinado soma mais uma "linha" de calha (as
+      // bordas externas + 1 calha central por cada junção entre galpões).
+      // multiplicador = nº de galpões germinados + 1 (1 galpão => 2, como
+      // antes; 2 galpões germinados => 3; 3 => 4; e assim por diante).
       if (numeroVaos) {
+        const multiplicadorCalha = germinados + 1;
         const qtdCalha =
-          Math.round((2 * Number(comprimento) + Number(numeroVaos)) * 100) / 100;
+          Math.round(
+            (multiplicadorCalha * Number(comprimento) +
+              0.5 * multiplicadorCalha * Number(numeroVaos)) *
+              100
+          ) / 100;
         novos = novos.map((i) => (i.nome === "CALHA FIBRA" ? { ...i, quantidade: qtdCalha } : i));
       }
 
-      const qtdCapote = Math.round((Number(comprimento) + 2) * 100) / 100;
+      // Capote: um jogo de capotes por galpão (multiplicador = nº de
+      // galpões germinados, direto — 1 galpão => 1x, 2 germinados => 2x).
+      const qtdCapote = Math.round((Number(comprimento) + 2) * germinados * 100) / 100;
       novos = novos.map((i) => (i.nome === "CAPOTE" ? { ...i, quantidade: qtdCapote } : i));
 
       return novos;
     });
-  }, [vao, comprimento, numeroVaos, telhaId, composicoes]);
+  }, [vao, comprimento, numeroVaos, numeroGalpoesGerminados, telhaId, composicoes]);
 
   const composicoesSelecionaveis = composicoes.filter((c) => {
     if (PAPEIS_EXCLUIDOS.includes(c.papel)) return false;
@@ -242,7 +271,9 @@ export default function OrcamentosGalpaoPage() {
     acc[grupo].push(c);
     return acc;
   }, {});
-  const telhasDisponiveis = composicoes.filter((c) => c.nome.toLowerCase().includes("telha"));
+  // Papel = TELHA é a forma de marcar um tipo de telha/cobertura no
+  // catálogo (em Preços). Adicionar um tipo novo lá já aparece aqui.
+  const telhasDisponiveis = composicoes.filter((c) => c.papel === "TELHA");
   const tesourasComReferencia = composicoes.filter(
     (c) => c.papel === "TESOURA" && Number(c.comprimento_referencia) > 0
   );
@@ -261,6 +292,7 @@ export default function OrcamentosGalpaoPage() {
         composicao_id: c.id,
         nome: c.nome,
         unidade: c.unidade,
+        papel: c.papel,
         quantidade: 0,
         preco_unitario: Number(c.preco) || 0,
         obrigatorio: true,
@@ -274,17 +306,21 @@ export default function OrcamentosGalpaoPage() {
     );
     if (!composicao) return;
     const quantidade = Math.max(1, Number(quantidadeParaAdicionar) || 1);
-    setItens((atual) => [
-      ...atual,
-      {
-        chave: proximaChave.current++,
-        composicao_id: composicao.id,
-        nome: composicao.nome,
-        unidade: composicao.unidade,
-        quantidade,
-        preco_unitario: Number(composicao.preco) || 0,
-      },
-    ]);
+    setItens((atual) => {
+      const novos = [
+        ...atual,
+        {
+          chave: proximaChave.current++,
+          composicao_id: composicao.id,
+          nome: composicao.nome,
+          unidade: composicao.unidade,
+          papel: composicao.papel,
+          quantidade,
+          preco_unitario: Number(composicao.preco) || 0,
+        },
+      ];
+      return composicao.papel === "PILAR" ? recalcularFundacao(novos) : novos;
+    });
     setComposicaoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
   }
@@ -306,6 +342,7 @@ export default function OrcamentosGalpaoPage() {
         composicao_id: null,
         nome: `Viga para laje ${l.toFixed(2)}x${a.toFixed(2)}x${v.toFixed(2)}m`,
         unidade: "M3",
+        papel: null,
         quantidade: volume,
         preco_unitario: valorM3,
       },
@@ -334,25 +371,38 @@ export default function OrcamentosGalpaoPage() {
         composicao_id: null,
         nome: `Tesoura ${tamanho}M de vão livre (calculada proporcionalmente a partir da ${ref.nome})`,
         unidade: "PÇ",
+        papel: "TESOURA",
         quantidade: qtd,
         preco_unitario: precoProporcional,
       },
     ]);
+    setTesouraRefId("");
     setTesouraTamanho("");
     setTesouraQtd("1");
     setErro("");
   }
 
   function removerItem(chave) {
-    setItens((atual) => atual.filter((i) => i.chave !== chave));
+    setItens((atual) => {
+      const itemRemovido = atual.find((i) => i.chave === chave);
+      const restantes = atual.filter((i) => i.chave !== chave);
+      return itemRemovido?.papel === "PILAR" ? recalcularFundacao(restantes) : restantes;
+    });
   }
 
   function atualizarItem(chave, campo, valor) {
-    setItens((atual) =>
-      atual.map((i) =>
+    setItens((atual) => {
+      const itemAlvo = atual.find((i) => i.chave === chave);
+      const atualizados = atual.map((i) =>
         i.chave === chave ? { ...i, [campo]: Math.max(0, Number(valor) || 0) } : i
-      )
-    );
+      );
+      // Só recalcula a fundação sozinha quando quem mudou foi um PILAR —
+      // editar a fundação diretamente não é sobrescrito (fica manual).
+      if (campo === "quantidade" && itemAlvo?.papel === "PILAR") {
+        return recalcularFundacao(atualizados);
+      }
+      return atualizados;
+    });
   }
 
   const subtotal = itens.reduce((soma, i) => soma + i.quantidade * i.preco_unitario, 0);
@@ -370,6 +420,7 @@ export default function OrcamentosGalpaoPage() {
     setComprimento("");
     setPeDireito("");
     setNumeroVaos("");
+    setNumeroGalpoesGerminados("1");
     setTelhaId("");
     setDiasValidade("");
     setItens([]);
@@ -378,6 +429,7 @@ export default function OrcamentosGalpaoPage() {
     setDesconto("");
     setMargemComercial("");
     setObservacao("");
+    setObservacaoInterna("");
     setVigaLargura("");
     setVigaAltura("");
     setVigaVao("");
@@ -406,17 +458,22 @@ export default function OrcamentosGalpaoPage() {
     setComprimento(orcamento.comprimento ? String(orcamento.comprimento) : "");
     setPeDireito(orcamento.pe_direito ? String(orcamento.pe_direito) : "");
     setNumeroVaos(orcamento.numero_vaos ? String(orcamento.numero_vaos) : "");
+    setNumeroGalpoesGerminados(
+      orcamento.numero_galpoes_germinados ? String(orcamento.numero_galpoes_germinados) : "1"
+    );
     setDiasValidade(diasAPartirDeHoje(orcamento.validade));
     setDesconto(orcamento.desconto ? String(orcamento.desconto) : "");
     setMargemComercial(
       orcamento.margem_comercial_pct ? String(orcamento.margem_comercial_pct) : ""
     );
     setObservacao(orcamento.observacao || "");
+    setObservacaoInterna(orcamento.observacao_interna || "");
     const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => ({
       chave: proximaChave.current++,
       composicao_id: item.composicao_id,
       nome: item.composicoes_galpao?.nome || item.descricao_livre || "Item removido",
       unidade: item.composicoes_galpao?.unidade || item.unidade_livre,
+      papel: item.composicoes_galpao?.papel || null,
       quantidade: Number(item.quantidade),
       preco_unitario: Number(item.preco_unitario),
       obrigatorio: ["MONTAGEM", "FUNDAÇÃO", "CALHA FIBRA", "CAPOTE"].includes(
@@ -448,6 +505,13 @@ export default function OrcamentosGalpaoPage() {
       return;
     }
     const itensValidos = itens.filter((i) => i.quantidade > 0);
+    const obrigatorioFaltando = itens.find((i) => i.obrigatorio && i.quantidade <= 0);
+    if (obrigatorioFaltando) {
+      setErro(
+        `Informe a quantidade de "${obrigatorioFaltando.nome}" antes de salvar (esse item é obrigatório e não pode ficar zerado).`
+      );
+      return;
+    }
     if (itensValidos.length === 0) {
       setErro("Adicione ao menos uma peça com quantidade maior que zero.");
       return;
@@ -480,6 +544,8 @@ export default function OrcamentosGalpaoPage() {
           margem_comercial_pct_input: margemNumerica,
           observacao_input: observacao.trim() || null,
           vendedor_input: nomeUsuario || null,
+          observacao_interna_input: observacaoInterna.trim() || null,
+          numero_galpoes_germinados_input: Math.max(1, Number(numeroGalpoesGerminados) || 1),
         })
       : await supabase.rpc("criar_orcamento_galpao", {
           cliente_id_input: Number(clienteId),
@@ -494,6 +560,8 @@ export default function OrcamentosGalpaoPage() {
           margem_comercial_pct_input: margemNumerica,
           observacao_input: observacao.trim() || null,
           vendedor_input: nomeUsuario || null,
+          observacao_interna_input: observacaoInterna.trim() || null,
+          numero_galpoes_germinados_input: Math.max(1, Number(numeroGalpoesGerminados) || 1),
         });
 
     if (error) {
@@ -597,7 +665,7 @@ export default function OrcamentosGalpaoPage() {
           </div>
 
           {modeloId && (
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-3">
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 mb-3">
               <div>
                 <label className={labelClasse}>Largura / vão (m)</label>
                 <input
@@ -645,6 +713,17 @@ export default function OrcamentosGalpaoPage() {
                   className={campoClasse}
                 />
               </div>
+              <div>
+                <label className={labelClasse}>Nº de galpões germinados</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={numeroGalpoesGerminados}
+                  onChange={(e) => setNumeroGalpoesGerminados(e.target.value)}
+                  placeholder="1 = avulso"
+                  className={campoClasse}
+                />
+              </div>
             </div>
           )}
 
@@ -668,7 +747,9 @@ export default function OrcamentosGalpaoPage() {
           {modeloId && (
             <div className="rounded-lg border border-slate-200 p-4 bg-slate-50 mb-4">
               <p className="text-xs font-medium text-slate-600 mb-2">
-                Tipo de telha (telha, calha e capote calculam sozinhos a partir das medidas acima)
+                Tipo de telha — ao escolher, a telha entra na lista sozinha (área x 1,10). Calha e
+                capote (fixos, abaixo) também recalculam sozinhos a partir das medidas e do nº de
+                galpões germinados.
               </p>
               <select
                 value={telhaId}
@@ -729,6 +810,10 @@ export default function OrcamentosGalpaoPage() {
                 Adicionar peça
               </button>
             </div>
+            <p className="text-xs text-slate-400 mb-3">
+              Pilares adicionados aqui atualizam a quantidade de dias de FUNDAÇÃO automaticamente
+              (1 dia por pilar) — pode ajustar manualmente depois se precisar.
+            </p>
 
             {tesourasComReferencia.length > 0 && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
@@ -945,15 +1030,27 @@ export default function OrcamentosGalpaoPage() {
             </div>
           </div>
 
-          <div className="mt-3">
-            <label className={labelClasse}>Observações</label>
-            <input
-              type="text"
-              value={observacao}
-              onChange={(e) => setObservacao(e.target.value)}
-              placeholder="Ex: Frete CIF, forma de pagamento..."
-              className={campoClasse}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            <div>
+              <label className={labelClasse}>Observações (aparece no PDF do cliente)</label>
+              <input
+                type="text"
+                value={observacao}
+                onChange={(e) => setObservacao(e.target.value)}
+                placeholder="Ex: Frete CIF, forma de pagamento..."
+                className={campoClasse}
+              />
+            </div>
+            <div>
+              <label className={labelClasse}>Observação interna (só você vê, não vai pro PDF)</label>
+              <input
+                type="text"
+                value={observacaoInterna}
+                onChange={(e) => setObservacaoInterna(e.target.value)}
+                placeholder="Ex: cliente pediu desconto extra, aguardando aprovação..."
+                className={campoClasse}
+              />
+            </div>
           </div>
 
           <div className="flex items-center justify-between mt-4">
@@ -1119,6 +1216,11 @@ export default function OrcamentosGalpaoPage() {
                         {o.modelos_galpao?.nome || "Peças"}
                         {o.area_m2 ? ` — ${o.area_m2} m²` : ""}
                       </p>
+                      {o.observacao_interna && (
+                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-2 inline-block">
+                          Nota interna: {o.observacao_interna}
+                        </p>
+                      )}
                       <ul className="text-xs text-slate-600 space-y-1">
                         {(o.itens_orcamento_galpao || []).map((item) => (
                           <li key={item.id}>
