@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 function formatarMoeda(valor) {
@@ -43,6 +43,15 @@ export default function PrecosPage() {
     custo: "",
     preco: "",
   });
+
+  // Receita (composição) expandida
+  const [receitaExpandidaId, setReceitaExpandidaId] = useState(null);
+  const [receitaItens, setReceitaItens] = useState([]);
+  const [carregandoReceita, setCarregandoReceita] = useState(false);
+  const [salvandoReceita, setSalvandoReceita] = useState(false);
+  const [novoItemTipo, setNovoItemTipo] = useState("insumo");
+  const [novoItemRefId, setNovoItemRefId] = useState("");
+  const [novoItemQtd, setNovoItemQtd] = useState("");
 
   function buscarInsumos() {
     return supabase.from("insumos").select("id, codigo, nome, unidade, valor_unitario").order("nome");
@@ -116,7 +125,7 @@ export default function PrecosPage() {
     if (error) {
       setErro(
         error.code === "23503"
-          ? `Não é possível excluir "${insumo.nome}": ele é usado na receita de uma ou mais peças. Remova esse uso primeiro.`
+          ? `Não é possível excluir "${insumo.nome}": ele é usado na receita de uma ou mais peças. Remova esse uso primeiro (na receita da peça).`
           : "Erro ao excluir: " + error.message
       );
     } else {
@@ -184,7 +193,7 @@ export default function PrecosPage() {
     if (error) {
       setErro(
         error.code === "23503"
-          ? `Não é possível excluir "${item.funcao}": ela é usada na receita de uma ou mais peças. Remova esse uso primeiro.`
+          ? `Não é possível excluir "${item.funcao}": ela é usada na receita de uma ou mais peças. Remova esse uso primeiro (na receita da peça).`
           : "Erro ao excluir: " + error.message
       );
     } else {
@@ -242,20 +251,22 @@ export default function PrecosPage() {
   }
 
   async function excluirComposicao(comp) {
-    if (!window.confirm(`Excluir a peça "${comp.nome}"?`)) return;
+    if (
+      !window.confirm(
+        `Excluir a peça "${comp.nome}"?\n\nOrçamentos que já usaram essa peça não são afetados — eles guardam o nome/valor de quando foram feitos.`
+      )
+    )
+      return;
     setSalvandoId(comp.id);
     setErro("");
     setMensagem("");
     const { error } = await supabase.from("composicoes_galpao").delete().eq("id", comp.id);
     if (error) {
-      setErro(
-        error.code === "23503"
-          ? `Não é possível excluir "${comp.nome}": ela já foi usada em algum orçamento (ou tem receita própria). Remova esse uso primeiro.`
-          : "Erro ao excluir: " + error.message
-      );
+      setErro("Erro ao excluir: " + error.message);
     } else {
       setMensagem(`${comp.nome} excluída.`);
       setComposicoes((atual) => atual.filter((c) => c.id !== comp.id));
+      if (receitaExpandidaId === comp.id) setReceitaExpandidaId(null);
     }
     setSalvandoId(null);
   }
@@ -271,7 +282,7 @@ export default function PrecosPage() {
     setMensagem("");
     const custo = Number(novaComposicao.custo) || 0;
     const preco = novaComposicao.preco === "" ? custo : Number(novaComposicao.preco) || 0;
-    const bdiPct = custo > 0 ? Math.round(((preco / custo - 1) * 100) * 100) / 100 : 0;
+    const bdiPct = custo > 0 ? Math.round((preco / custo - 1) * 100 * 100) / 100 : 0;
     const { error } = await supabase.from("composicoes_galpao").insert({
       nome: novaComposicao.nome.trim(),
       papel: novaComposicao.papel.trim() || null,
@@ -283,7 +294,7 @@ export default function PrecosPage() {
     if (error) {
       setErro("Erro ao adicionar peça: " + error.message);
     } else {
-      setMensagem("Peça adicionada. Como não tem receita de insumos, o preço fica manual (não muda no \"Recalcular\").");
+      setMensagem('Peça adicionada. Sem receita ainda — o preço fica manual até você adicionar insumos na "Receita".');
       setNovaComposicao({ nome: "", unidade: "UN", papel: "", custo: "", preco: "" });
       setMostrarFormComposicao(false);
       const { data } = await buscarComposicoes();
@@ -294,7 +305,7 @@ export default function PrecosPage() {
 
   async function recalcularTudo() {
     const confirmar = window.confirm(
-      "Recalcular vai atualizar o custo/preço de todas as peças que têm receita de insumos, com base nos valores atuais. Peças sem receita (adicionadas manualmente, Telha, Montagem, Fundação etc.) não são afetadas. Continuar?"
+      "Recalcular vai atualizar o custo/preço de todas as peças que têm receita de insumos, com base nos valores atuais. Peças sem receita (Telha, Montagem, Fundação etc.) não são afetadas. Continuar?"
     );
     if (!confirmar) return;
     setRecalculando(true);
@@ -309,6 +320,136 @@ export default function PrecosPage() {
       if (novasComposicoes) setComposicoes(novasComposicoes);
     }
     setRecalculando(false);
+  }
+
+  // ---------- RECEITA DE UMA PEÇA ----------
+  function buscarReceita(composicaoId) {
+    return supabase
+      .from("composicao_itens")
+      .select("id, insumo_id, mao_de_obra_id, quantidade, insumos(nome, unidade), mao_de_obra(funcao)")
+      .eq("composicao_produto_id", composicaoId);
+  }
+
+  async function alternarReceita(composicaoId) {
+    if (receitaExpandidaId === composicaoId) {
+      setReceitaExpandidaId(null);
+      return;
+    }
+    setErro("");
+    setMensagem("");
+    setCarregandoReceita(true);
+    setReceitaExpandidaId(composicaoId);
+    setNovoItemRefId("");
+    setNovoItemQtd("");
+    const { data, error } = await buscarReceita(composicaoId);
+    if (error) {
+      setErro("Erro ao carregar receita: " + error.message);
+      setReceitaItens([]);
+    } else {
+      setReceitaItens(
+        data.map((item) => ({
+          id: item.id,
+          insumo_id: item.insumo_id,
+          mao_de_obra_id: item.mao_de_obra_id,
+          quantidade: item.quantidade,
+          nome: item.insumos?.nome || item.mao_de_obra?.funcao || "?",
+          unidade: item.insumos?.unidade || "HORA",
+        }))
+      );
+    }
+    setCarregandoReceita(false);
+  }
+
+  function adicionarLinhaReceita() {
+    if (!novoItemRefId || novoItemQtd === "") {
+      setErro("Selecione o insumo/função e informe a quantidade.");
+      return;
+    }
+    setErro("");
+    if (novoItemTipo === "insumo") {
+      const insumo = insumos.find((i) => String(i.id) === String(novoItemRefId));
+      if (!insumo) return;
+      setReceitaItens((atual) => [
+        ...atual,
+        {
+          id: `novo-${Date.now()}`,
+          insumo_id: insumo.id,
+          mao_de_obra_id: null,
+          quantidade: Number(novoItemQtd) || 0,
+          nome: insumo.nome,
+          unidade: insumo.unidade,
+        },
+      ]);
+    } else {
+      const mdo = maoDeObra.find((m) => String(m.id) === String(novoItemRefId));
+      if (!mdo) return;
+      setReceitaItens((atual) => [
+        ...atual,
+        {
+          id: `novo-${Date.now()}`,
+          insumo_id: null,
+          mao_de_obra_id: mdo.id,
+          quantidade: Number(novoItemQtd) || 0,
+          nome: mdo.funcao,
+          unidade: "HORA",
+        },
+      ]);
+    }
+    setNovoItemRefId("");
+    setNovoItemQtd("");
+  }
+
+  function removerLinhaReceita(id) {
+    setReceitaItens((atual) => atual.filter((item) => item.id !== id));
+  }
+
+  function atualizarQuantidadeReceita(id, valor) {
+    setReceitaItens((atual) =>
+      atual.map((item) => (item.id === id ? { ...item, quantidade: valor } : item))
+    );
+  }
+
+  async function salvarReceita(composicaoId) {
+    setSalvandoReceita(true);
+    setErro("");
+    setMensagem("");
+
+    const { error: erroDelete } = await supabase
+      .from("composicao_itens")
+      .delete()
+      .eq("composicao_produto_id", composicaoId);
+    if (erroDelete) {
+      setErro("Erro ao salvar receita: " + erroDelete.message);
+      setSalvandoReceita(false);
+      return;
+    }
+
+    if (receitaItens.length > 0) {
+      const payload = receitaItens.map((item) => ({
+        composicao_produto_id: composicaoId,
+        insumo_id: item.insumo_id,
+        mao_de_obra_id: item.mao_de_obra_id,
+        quantidade: Number(item.quantidade) || 0,
+      }));
+      const { error: erroInsert } = await supabase.from("composicao_itens").insert(payload);
+      if (erroInsert) {
+        setErro("Erro ao salvar receita: " + erroInsert.message);
+        setSalvandoReceita(false);
+        return;
+      }
+    }
+
+    const { error: erroRecalc } = await supabase.rpc("recalcular_composicao", {
+      composicao_id_input: composicaoId,
+    });
+    if (erroRecalc) {
+      setErro("Receita salva, mas houve erro ao recalcular o preço: " + erroRecalc.message);
+    } else {
+      setMensagem("Receita salva e o preço da peça foi recalculado.");
+      const { data } = await buscarComposicoes();
+      if (data) setComposicoes(data);
+    }
+    setSalvandoReceita(false);
   }
 
   const composicoesFiltradas = composicoes.filter((c) => {
@@ -563,9 +704,8 @@ export default function PrecosPage() {
           {recalculando ? "Recalculando..." : "Recalcular todas as peças a partir dos insumos/mão de obra acima"}
         </button>
         <p className="text-xs text-slate-400 mt-1">
-          Use depois de salvar mudanças de insumo/mão de obra. Peças sem receita cadastrada (Telha, Calha, Capote,
-          Montagem, Fundação, e qualquer peça incluída manualmente aqui) não são afetadas — ajuste o preço delas
-          direto na tabela abaixo.
+          Use depois de salvar mudanças de insumo/mão de obra. Peças sem receita (Telha, Calha, Capote, Montagem,
+          Fundação, e peças incluídas manualmente) não são afetadas.
         </p>
       </div>
 
@@ -632,9 +772,6 @@ export default function PrecosPage() {
               {salvandoId === "nova-composicao" ? "Salvando..." : "Adicionar peça"}
             </button>
           </div>
-          <p className="text-xs text-slate-400">
-            Peça incluída aqui entra com preço manual (fixo), sem receita de insumos — como Telha ou Montagem.
-          </p>
         </form>
       )}
       <input
@@ -648,6 +785,7 @@ export default function PrecosPage() {
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600 text-left">
             <tr>
+              <th className="px-4 py-2 font-medium"></th>
               <th className="px-4 py-2 font-medium">Código</th>
               <th className="px-4 py-2 font-medium">Nome</th>
               <th className="px-4 py-2 font-medium">Custo</th>
@@ -655,9 +793,22 @@ export default function PrecosPage() {
               <th className="px-4 py-2 font-medium"></th>
             </tr>
           </thead>
-          <tbody>
-            {composicoesFiltradas.map((c) => (
-              <tr key={c.id} className="border-t border-slate-100">
+          {composicoesFiltradas.map((c) => (
+            <tbody key={c.id} className="border-t border-slate-100">
+              <tr>
+                <td className="px-2 py-2">
+                  <button
+                    onClick={() => alternarReceita(c.id)}
+                    className="text-slate-500 hover:text-slate-900"
+                    title="Ver/editar receita (insumos e mão de obra)"
+                  >
+                    {receitaExpandidaId === c.id ? (
+                      <ChevronDown size={16} />
+                    ) : (
+                      <ChevronRight size={16} />
+                    )}
+                  </button>
+                </td>
                 <td className="px-4 py-2 text-slate-400">{c.codigo}</td>
                 <td className="px-4 py-2">
                   <input
@@ -710,8 +861,120 @@ export default function PrecosPage() {
                   </div>
                 </td>
               </tr>
-            ))}
-          </tbody>
+              {receitaExpandidaId === c.id && (
+                <tr>
+                  <td colSpan={6} className="bg-slate-50 px-4 py-3">
+                    <p className="text-xs font-medium text-slate-500 mb-2">
+                      Receita de &quot;{c.nome}&quot; (insumos e mão de obra)
+                    </p>
+                    {carregandoReceita ? (
+                      <p className="text-xs text-slate-400">Carregando receita...</p>
+                    ) : (
+                      <>
+                        {receitaItens.length === 0 ? (
+                          <p className="text-xs text-slate-400 mb-2">
+                            Nenhum insumo/mão de obra cadastrado — o preço desta peça é manual.
+                          </p>
+                        ) : (
+                          <table className="w-full text-xs mb-2">
+                            <thead className="text-slate-500 text-left">
+                              <tr>
+                                <th className="py-1 font-medium">Insumo / Mão de obra</th>
+                                <th className="py-1 font-medium w-24">Un.</th>
+                                <th className="py-1 font-medium w-28">Quantidade</th>
+                                <th className="py-1 font-medium w-10"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {receitaItens.map((item) => (
+                                <tr key={item.id} className="border-t border-slate-200">
+                                  <td className="py-1 pr-2">{item.nome}</td>
+                                  <td className="py-1 pr-2 text-slate-500">{item.unidade}</td>
+                                  <td className="py-1 pr-2">
+                                    <input
+                                      type="number"
+                                      step="0.0001"
+                                      value={item.quantidade}
+                                      onChange={(e) =>
+                                        atualizarQuantidadeReceita(item.id, e.target.value)
+                                      }
+                                      className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                    />
+                                  </td>
+                                  <td className="py-1 text-right">
+                                    <button
+                                      onClick={() => removerLinhaReceita(item.id)}
+                                      className="text-red-600 hover:text-red-800"
+                                      title="Remover"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2">
+                          <select
+                            value={novoItemTipo}
+                            onChange={(e) => {
+                              setNovoItemTipo(e.target.value);
+                              setNovoItemRefId("");
+                            }}
+                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          >
+                            <option value="insumo">Insumo</option>
+                            <option value="mao_de_obra">Mão de obra</option>
+                          </select>
+                          <select
+                            value={novoItemRefId}
+                            onChange={(e) => setNovoItemRefId(e.target.value)}
+                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 sm:col-span-2"
+                          >
+                            <option value="">
+                              {novoItemTipo === "insumo" ? "Selecione o insumo" : "Selecione a função"}
+                            </option>
+                            {(novoItemTipo === "insumo" ? insumos : maoDeObra).map((opt) => (
+                              <option key={opt.id} value={opt.id}>
+                                {novoItemTipo === "insumo" ? opt.nome : opt.funcao}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="flex gap-2">
+                            <input
+                              type="number"
+                              step="0.0001"
+                              placeholder="Qtd."
+                              value={novoItemQtd}
+                              onChange={(e) => setNovoItemQtd(e.target.value)}
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={adicionarLinhaReceita}
+                              className="rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium px-3 py-1 transition whitespace-nowrap"
+                            >
+                              + Item
+                            </button>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => salvarReceita(c.id)}
+                          disabled={salvandoReceita}
+                          className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 transition"
+                        >
+                          {salvandoReceita ? "Salvando..." : "Salvar receita e recalcular esta peça"}
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          ))}
         </table>
       </div>
     </div>
