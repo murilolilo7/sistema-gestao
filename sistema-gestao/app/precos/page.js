@@ -25,6 +25,11 @@ export default function PrecosPage() {
   const [salvandoId, setSalvandoId] = useState(null);
   const [recalculando, setRecalculando] = useState(false);
   const [termoBusca, setTermoBusca] = useState("");
+  const [secaoAberta, setSecaoAberta] = useState(null); // null | 'insumos' | 'maoDeObra' | 'composicoes'
+
+  function alternarSecao(nome) {
+    setSecaoAberta((atual) => (atual === nome ? null : nome));
+  }
 
   const [mostrarFormInsumo, setMostrarFormInsumo] = useState(false);
   const [novoInsumo, setNovoInsumo] = useState({ nome: "", unidade: "", valor_unitario: "" });
@@ -494,8 +499,20 @@ export default function PrecosPage() {
       )}
 
       {/* INSUMOS */}
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-sm font-semibold text-slate-700">Insumos (materiais)</p>
+      <button
+        type="button"
+        onClick={() => alternarSecao("insumos")}
+        className="w-full flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 mb-2 shadow-sm hover:bg-slate-50 transition"
+      >
+        <span className="text-sm font-semibold text-slate-700">Insumos (materiais)</span>
+        <span className="flex items-center gap-2 text-slate-400">
+          <span className="text-xs">{insumos.length} itens</span>
+          {secaoAberta === "insumos" ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </span>
+      </button>
+      {secaoAberta === "insumos" && (
+      <div className="mb-6">
+      <div className="flex justify-end mb-2">
         <button onClick={() => setMostrarFormInsumo((v) => !v)} className={botaoIncluir}>
           <Plus size={14} /> Incluir insumo
         </button>
@@ -590,10 +607,24 @@ export default function PrecosPage() {
           </tbody>
         </table>
       </div>
+      </div>
+      )}
 
       {/* MÃO DE OBRA */}
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-sm font-semibold text-slate-700">Mão de obra</p>
+      <button
+        type="button"
+        onClick={() => alternarSecao("maoDeObra")}
+        className="w-full flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 mb-2 shadow-sm hover:bg-slate-50 transition"
+      >
+        <span className="text-sm font-semibold text-slate-700">Mão de obra</span>
+        <span className="flex items-center gap-2 text-slate-400">
+          <span className="text-xs">{maoDeObra.length} funções</span>
+          {secaoAberta === "maoDeObra" ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </span>
+      </button>
+      {secaoAberta === "maoDeObra" && (
+      <div className="mb-4">
+      <div className="flex justify-end mb-2">
         <button onClick={() => setMostrarFormMaoDeObra((v) => !v)} className={botaoIncluir}>
           <Plus size={14} /> Incluir função
         </button>
@@ -694,6 +725,8 @@ export default function PrecosPage() {
           </tbody>
         </table>
       </div>
+      </div>
+      )}
 
       <div className="mb-6">
         <button
@@ -710,8 +743,20 @@ export default function PrecosPage() {
       </div>
 
       {/* COMPOSIÇÕES */}
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-sm font-semibold text-slate-700">Peças de galpão</p>
+      <button
+        type="button"
+        onClick={() => alternarSecao("composicoes")}
+        className="w-full flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 mb-2 shadow-sm hover:bg-slate-50 transition"
+      >
+        <span className="text-sm font-semibold text-slate-700">Peças de galpão</span>
+        <span className="flex items-center gap-2 text-slate-400">
+          <span className="text-xs">{composicoes.length} peças</span>
+          {secaoAberta === "composicoes" ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </span>
+      </button>
+      {secaoAberta === "composicoes" && (
+      <div>
+      <div className="flex justify-end mb-2">
         <button onClick={() => setMostrarFormComposicao((v) => !v)} className={botaoIncluir}>
           <Plus size={14} /> Incluir peça
         </button>
@@ -977,6 +1022,8 @@ export default function PrecosPage() {
           ))}
         </table>
       </div>
+      </div>
+      )}
     </div>
   );
 }
