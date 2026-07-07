@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Pencil, Settings } from "lucide-react";
+import { Pencil, Settings, Tag } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function AppShell({ children }) {
@@ -123,6 +123,13 @@ export default function AppShell({ children }) {
               </button>
             )}
 
+            <Link
+              href="/precos"
+              title="Preços"
+              className="text-slate-300 hover:text-white transition"
+            >
+              <Tag size={16} />
+            </Link>
             <Link
               href="/configuracoes"
               title="Configurações"
