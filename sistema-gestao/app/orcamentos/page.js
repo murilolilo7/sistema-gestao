@@ -768,7 +768,7 @@ export default function OrcamentosPage() {
                       >
                         <Printer size={16} />
                       </Link>
-                      {o.status !== "aprovado" && (
+                      {o.status !== "aprovado" && !estaVencido(o) && (
                         <>
                           <button
                             onClick={() => abrirEdicao(o)}
@@ -790,6 +790,11 @@ export default function OrcamentosPage() {
                             )}
                           </button>
                         </>
+                      )}
+                      {o.status !== "aprovado" && estaVencido(o) && (
+                        <span className="text-xs text-slate-400" title="Vencido — crie um novo orçamento">
+                          Vencido
+                        </span>
                       )}
                     </div>
                   </td>
