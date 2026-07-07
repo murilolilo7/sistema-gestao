@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { Eye, EyeOff, Pencil, Printer } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+
+const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
+const NOMES_ITENS_ESPECIAIS = [
+  "TELHAS METÁLICAS",
+  "CALHA FIBRA",
+  "CAPOTE",
+  "MONTAGEM",
+  "FUNDAÇÃO",
+];
 
 function formatarMoeda(valor) {
   if (valor === null || valor === undefined) return "-";
@@ -11,11 +20,6 @@ function formatarMoeda(valor) {
     style: "currency",
     currency: "BRL",
   });
-}
-
-function formatarDataHora(valor) {
-  if (!valor) return "-";
-  return new Date(valor).toLocaleDateString("pt-BR");
 }
 
 function formatarDataSimples(valor) {
@@ -65,12 +69,11 @@ function BadgeStatus({ status }) {
   );
 }
 
-let proximaChave = 1;
-
 export default function OrcamentosGalpaoPage() {
   const [modo, setModo] = useState("lista"); // 'lista' | 'novo' | 'editar'
   const [clientes, setClientes] = useState([]);
   const [composicoes, setComposicoes] = useState([]);
+  const [modelos, setModelos] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
@@ -83,8 +86,12 @@ export default function OrcamentosGalpaoPage() {
   const [nomeUsuario, setNomeUsuario] = useState("");
 
   const [clienteId, setClienteId] = useState("");
-  const [titulo, setTitulo] = useState("");
-  const [areaM2, setAreaM2] = useState("");
+  const [modeloId, setModeloId] = useState("");
+  const [vao, setVao] = useState("");
+  const [comprimento, setComprimento] = useState("");
+  const [peDireito, setPeDireito] = useState("");
+  const [numeroVaos, setNumeroVaos] = useState("");
+  const [telhaId, setTelhaId] = useState("");
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
@@ -92,6 +99,13 @@ export default function OrcamentosGalpaoPage() {
   const [desconto, setDesconto] = useState("");
   const [margemComercial, setMargemComercial] = useState("");
   const [observacao, setObservacao] = useState("");
+
+  const [vigaLargura, setVigaLargura] = useState("");
+  const [vigaAltura, setVigaAltura] = useState("");
+  const [vigaVao, setVigaVao] = useState("");
+  const [vigaValorM3, setVigaValorM3] = useState("");
+
+  const proximaChave = useRef(1);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -112,22 +126,27 @@ export default function OrcamentosGalpaoPage() {
       .select("id, codigo, nome, unidade, preco, papel")
       .order("nome");
   }
+  function buscarModelos() {
+    return supabase.from("modelos_galpao").select("id, nome, tipo").order("id");
+  }
   function buscarOrcamentosGalpao() {
     return supabase
       .from("orcamentos_galpao")
       .select(
-        "*, clientes(nome), itens_orcamento_galpao(id, composicao_id, quantidade, preco_unitario, composicoes_galpao(nome, unidade))"
+        "*, clientes(nome), modelos_galpao(nome, tipo), itens_orcamento_galpao(id, composicao_id, descricao_livre, unidade_livre, quantidade, preco_unitario, composicoes_galpao(nome, unidade))"
       )
       .order("codigo", { ascending: false });
   }
 
-  function aplicarResultados(resClientes, resComposicoes, resOrcamentos) {
-    const erroEncontrado = resClientes.error || resComposicoes.error || resOrcamentos.error;
+  function aplicarResultados(resClientes, resComposicoes, resModelos, resOrcamentos) {
+    const erroEncontrado =
+      resClientes.error || resComposicoes.error || resModelos.error || resOrcamentos.error;
     if (erroEncontrado) {
       setErro("Não foi possível carregar os dados: " + erroEncontrado.message);
     } else {
       setClientes(resClientes.data);
       setComposicoes(resComposicoes.data);
+      setModelos(resModelos.data);
       setOrcamentos(resOrcamentos.data);
     }
     setLoading(false);
@@ -136,25 +155,77 @@ export default function OrcamentosGalpaoPage() {
   async function carregarTudo() {
     setLoading(true);
     setErro("");
-    const [resClientes, resComposicoes, resOrcamentos] = await Promise.all([
+    const [resClientes, resComposicoes, resModelos, resOrcamentos] = await Promise.all([
       buscarClientes(),
       buscarComposicoes(),
+      buscarModelos(),
       buscarOrcamentosGalpao(),
     ]);
-    aplicarResultados(resClientes, resComposicoes, resOrcamentos);
+    aplicarResultados(resClientes, resComposicoes, resModelos, resOrcamentos);
   }
 
   useEffect(() => {
     let ativo = true;
-    Promise.all([buscarClientes(), buscarComposicoes(), buscarOrcamentosGalpao()]).then(
-      ([resClientes, resComposicoes, resOrcamentos]) => {
-        if (ativo) aplicarResultados(resClientes, resComposicoes, resOrcamentos);
+    Promise.all([buscarClientes(), buscarComposicoes(), buscarModelos(), buscarOrcamentosGalpao()]).then(
+      ([resClientes, resComposicoes, resModelos, resOrcamentos]) => {
+        if (ativo) aplicarResultados(resClientes, resComposicoes, resModelos, resOrcamentos);
       }
     );
     return () => {
       ativo = false;
     };
   }, []);
+
+  const modeloSelecionado = modelos.find((m) => String(m.id) === String(modeloId));
+  const tipoSelecionado = modeloSelecionado?.tipo || "";
+  const areaCalculada = vao && comprimento ? Number(vao) * Number(comprimento) : null;
+
+  const composicoesSelecionaveis = composicoes.filter((c) => {
+    if (PAPEIS_EXCLUIDOS.includes(c.papel)) return false;
+    if (NOMES_ITENS_ESPECIAIS.includes(c.nome)) return false;
+    if (c.papel === "LAJE" && tipoSelecionado === "simples") return false;
+    return true;
+  });
+  const composicoesPorPapel = composicoesSelecionaveis.reduce((acc, c) => {
+    const grupo = c.papel || "Outras peças";
+    if (!acc[grupo]) acc[grupo] = [];
+    acc[grupo].push(c);
+    return acc;
+  }, {});
+  const telhasDisponiveis = composicoes.filter((c) => c.nome.toLowerCase().includes("telha"));
+
+  function buscarComposicao(nome) {
+    return composicoes.find((c) => c.nome === nome);
+  }
+
+  function itensObrigatoriosBase() {
+    const lista = [];
+    const montagem = buscarComposicao("MONTAGEM");
+    const fundacao = buscarComposicao("FUNDAÇÃO");
+    if (montagem) {
+      lista.push({
+        chave: proximaChave.current++,
+        composicao_id: montagem.id,
+        nome: montagem.nome,
+        unidade: montagem.unidade,
+        quantidade: 1,
+        preco_unitario: Number(montagem.preco) || 0,
+        obrigatorio: true,
+      });
+    }
+    if (fundacao) {
+      lista.push({
+        chave: proximaChave.current++,
+        composicao_id: fundacao.id,
+        nome: fundacao.nome,
+        unidade: fundacao.unidade,
+        quantidade: 1,
+        preco_unitario: Number(fundacao.preco) || 0,
+        obrigatorio: true,
+      });
+    }
+    return lista;
+  }
 
   function adicionarItem() {
     if (!composicaoParaAdicionar) return;
@@ -166,7 +237,7 @@ export default function OrcamentosGalpaoPage() {
     setItens((atual) => [
       ...atual,
       {
-        chave: proximaChave++,
+        chave: proximaChave.current++,
         composicao_id: composicao.id,
         nome: composicao.nome,
         unidade: composicao.unidade,
@@ -176,6 +247,88 @@ export default function OrcamentosGalpaoPage() {
     ]);
     setComposicaoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
+  }
+
+  function calcularItensAutomaticos() {
+    if (!vao || !comprimento) {
+      setErro("Preencha largura e comprimento para calcular telha/calha/capote.");
+      return;
+    }
+    const area = Number(vao) * Number(comprimento);
+    const novos = [];
+
+    const telha = telhaId ? composicoes.find((c) => String(c.id) === String(telhaId)) : null;
+    if (telha) {
+      novos.push({
+        chave: proximaChave.current++,
+        composicao_id: telha.id,
+        nome: telha.nome,
+        unidade: telha.unidade,
+        quantidade: Math.round(area * 1.1 * 100) / 100,
+        preco_unitario: Number(telha.preco) || 0,
+        automatico: true,
+      });
+    }
+
+    const calha = buscarComposicao("CALHA FIBRA");
+    if (calha && numeroVaos) {
+      const qtd = (Number(vao) + 0.5) * Number(numeroVaos) * 2;
+      novos.push({
+        chave: proximaChave.current++,
+        composicao_id: calha.id,
+        nome: calha.nome,
+        unidade: calha.unidade,
+        quantidade: Math.round(qtd * 100) / 100,
+        preco_unitario: Number(calha.preco) || 0,
+        automatico: true,
+      });
+    }
+
+    const capote = buscarComposicao("CAPOTE");
+    if (capote) {
+      const qtd = Number(comprimento) + 2;
+      novos.push({
+        chave: proximaChave.current++,
+        composicao_id: capote.id,
+        nome: capote.nome,
+        unidade: capote.unidade,
+        quantidade: qtd,
+        preco_unitario: Number(capote.preco) || 0,
+        automatico: true,
+      });
+    }
+
+    setItens((atual) => [...atual.filter((i) => !i.automatico), ...novos]);
+    setErro("");
+    setMensagem("Telha, calha e capote calculados a partir das medidas.");
+  }
+
+  function adicionarVigaLaje() {
+    const l = Number(vigaLargura) || 0;
+    const a = Number(vigaAltura) || 0;
+    const v = Number(vigaVao) || 0;
+    const valorM3 = Number(vigaValorM3) || 0;
+    if (l <= 0 || a <= 0 || v <= 0 || valorM3 <= 0) {
+      setErro("Preencha largura, altura, vão e valor do m³ para adicionar a viga para laje.");
+      return;
+    }
+    const volume = Math.round(l * a * v * 10000) / 10000;
+    setItens((atual) => [
+      ...atual,
+      {
+        chave: proximaChave.current++,
+        composicao_id: null,
+        nome: `Viga para laje ${l.toFixed(2)}x${a.toFixed(2)}x${v.toFixed(2)}m`,
+        unidade: "M3",
+        quantidade: volume,
+        preco_unitario: valorM3,
+      },
+    ]);
+    setVigaLargura("");
+    setVigaAltura("");
+    setVigaVao("");
+    setVigaValorM3("");
+    setErro("");
   }
 
   function removerItem(chave) {
@@ -196,19 +349,16 @@ export default function OrcamentosGalpaoPage() {
   const descontoNumerico = Math.min(Math.max(0, Number(desconto) || 0), totalComMargem);
   const totalFinal = totalComMargem - descontoNumerico;
   const valorPorM2 =
-    areaM2 && Number(areaM2) > 0 ? totalFinal / Number(areaM2) : null;
-
-  const composicoesPorPapel = composicoes.reduce((acc, c) => {
-    const grupo = c.papel || "Outras peças";
-    if (!acc[grupo]) acc[grupo] = [];
-    acc[grupo].push(c);
-    return acc;
-  }, {});
+    areaCalculada && areaCalculada > 0 ? totalFinal / areaCalculada : null;
 
   function limparFormulario() {
     setClienteId("");
-    setTitulo("");
-    setAreaM2("");
+    setModeloId("");
+    setVao("");
+    setComprimento("");
+    setPeDireito("");
+    setNumeroVaos("");
+    setTelhaId("");
     setDiasValidade("");
     setItens([]);
     setComposicaoParaAdicionar("");
@@ -216,6 +366,10 @@ export default function OrcamentosGalpaoPage() {
     setDesconto("");
     setMargemComercial("");
     setObservacao("");
+    setVigaLargura("");
+    setVigaAltura("");
+    setVigaVao("");
+    setVigaValorM3("");
   }
 
   function abrirNovo() {
@@ -224,6 +378,7 @@ export default function OrcamentosGalpaoPage() {
     setEditingCodigo(null);
     setErro("");
     setMensagem("");
+    setItens(itensObrigatoriosBase());
     setModo("novo");
   }
 
@@ -231,24 +386,27 @@ export default function OrcamentosGalpaoPage() {
     setEditingId(orcamento.id);
     setEditingCodigo(orcamento.codigo);
     setClienteId(String(orcamento.cliente_id || ""));
-    setTitulo(orcamento.titulo || "");
-    setAreaM2(orcamento.area_m2 ? String(orcamento.area_m2) : "");
+    setModeloId(orcamento.modelo_id ? String(orcamento.modelo_id) : "");
+    setVao(orcamento.vao ? String(orcamento.vao) : "");
+    setComprimento(orcamento.comprimento ? String(orcamento.comprimento) : "");
+    setPeDireito(orcamento.pe_direito ? String(orcamento.pe_direito) : "");
+    setNumeroVaos(orcamento.numero_vaos ? String(orcamento.numero_vaos) : "");
     setDiasValidade(diasAPartirDeHoje(orcamento.validade));
     setDesconto(orcamento.desconto ? String(orcamento.desconto) : "");
     setMargemComercial(
       orcamento.margem_comercial_pct ? String(orcamento.margem_comercial_pct) : ""
     );
     setObservacao(orcamento.observacao || "");
-    setItens(
-      (orcamento.itens_orcamento_galpao || []).map((item) => ({
-        chave: proximaChave++,
-        composicao_id: item.composicao_id,
-        nome: item.composicoes_galpao?.nome || "Peça removida",
-        unidade: item.composicoes_galpao?.unidade,
-        quantidade: Number(item.quantidade),
-        preco_unitario: Number(item.preco_unitario),
-      }))
-    );
+    const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => ({
+      chave: proximaChave.current++,
+      composicao_id: item.composicao_id,
+      nome: item.composicoes_galpao?.nome || item.descricao_livre || "Item removido",
+      unidade: item.composicoes_galpao?.unidade || item.unidade_livre,
+      quantidade: Number(item.quantidade),
+      preco_unitario: Number(item.preco_unitario),
+      obrigatorio: ["MONTAGEM", "FUNDAÇÃO"].includes(item.composicoes_galpao?.nome),
+    }));
+    setItens(itensCarregados);
     setErro("");
     setMensagem("");
     setModo("editar");
@@ -268,6 +426,10 @@ export default function OrcamentosGalpaoPage() {
       setErro("Selecione um cliente.");
       return;
     }
+    if (!modeloId) {
+      setErro("Selecione o tipo de galpão.");
+      return;
+    }
     const itensValidos = itens.filter((i) => i.quantidade > 0);
     if (itensValidos.length === 0) {
       setErro("Adicione ao menos uma peça com quantidade maior que zero.");
@@ -278,7 +440,9 @@ export default function OrcamentosGalpaoPage() {
     setMensagem("");
 
     const itensPayload = itensValidos.map((i) => ({
-      composicao_id: i.composicao_id,
+      composicao_id: i.composicao_id || null,
+      descricao_livre: i.composicao_id ? null : i.nome,
+      unidade_livre: i.composicao_id ? null : i.unidade,
       quantidade: i.quantidade,
       preco_unitario: i.preco_unitario,
     }));
@@ -288,8 +452,11 @@ export default function OrcamentosGalpaoPage() {
       ? await supabase.rpc("atualizar_orcamento_galpao", {
           orcamento_id_input: editingId,
           cliente_id_input: Number(clienteId),
-          titulo_input: titulo.trim() || null,
-          area_m2_input: areaM2 ? Number(areaM2) : null,
+          modelo_id_input: Number(modeloId),
+          vao_input: vao ? Number(vao) : null,
+          comprimento_input: comprimento ? Number(comprimento) : null,
+          pe_direito_input: peDireito ? Number(peDireito) : null,
+          numero_vaos_input: numeroVaos ? Number(numeroVaos) : null,
           validade_input: validadeCalculada,
           itens_input: itensPayload,
           desconto_input: descontoNumerico,
@@ -299,8 +466,11 @@ export default function OrcamentosGalpaoPage() {
         })
       : await supabase.rpc("criar_orcamento_galpao", {
           cliente_id_input: Number(clienteId),
-          titulo_input: titulo.trim() || null,
-          area_m2_input: areaM2 ? Number(areaM2) : null,
+          modelo_id_input: Number(modeloId),
+          vao_input: vao ? Number(vao) : null,
+          comprimento_input: comprimento ? Number(comprimento) : null,
+          pe_direito_input: peDireito ? Number(peDireito) : null,
+          numero_vaos_input: numeroVaos ? Number(numeroVaos) : null,
           validade_input: validadeCalculada,
           itens_input: itensPayload,
           desconto_input: descontoNumerico,
@@ -358,7 +528,7 @@ export default function OrcamentosGalpaoPage() {
           {modo === "editar" ? "Editar orçamento de galpão" : "Novo orçamento de galpão"}
         </h1>
         <p className="text-slate-500 mb-6">
-          {modo === "editar" ? `Código #${editingCodigo}` : "Monte o levantamento peça por peça."}
+          {modo === "editar" ? `Código #${editingCodigo}` : "Escolha o tipo, informe as medidas e monte o levantamento."}
         </p>
 
         {erro && (
@@ -366,18 +536,9 @@ export default function OrcamentosGalpaoPage() {
             {erro}
           </div>
         )}
-        {!loading && clientes.length === 0 && (
-          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 text-sm">
-            Nenhum cliente cadastrado ainda.{" "}
-            <Link href="/clientes" className="underline font-medium">
-              Cadastre um cliente
-            </Link>{" "}
-            antes de criar um orçamento.
-          </div>
-        )}
-        {!loading && composicoes.length === 0 && (
-          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 text-sm">
-            Nenhuma composição de galpão cadastrada ainda.
+        {mensagem && (
+          <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-3 text-sm">
+            {mensagem}
           </div>
         )}
 
@@ -402,59 +563,107 @@ export default function OrcamentosGalpaoPage() {
               </select>
             </div>
             <div>
-              <label className={labelClasse}>Título do galpão</label>
-              <input
-                type="text"
-                value={titulo}
-                onChange={(e) => setTitulo(e.target.value)}
-                placeholder='Ex: Galpão Simples 10,00x20,00m com pé direito 7,50m + Fundação'
+              <label className={labelClasse}>Tipo de galpão</label>
+              <select
+                value={modeloId}
+                onChange={(e) => setModeloId(e.target.value)}
                 className={campoClasse}
-              />
+              >
+                <option value="">Selecione o tipo</option>
+                {modelos.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nome}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-            <div>
-              <label className={labelClasse}>Área coberta (m²)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={areaM2}
-                onChange={(e) => setAreaM2(e.target.value)}
-                placeholder="Ex: 200"
-                className={campoClasse}
-              />
-            </div>
-            <div>
-              <label className={labelClasse}>Validade da proposta (dias)</label>
-              <input
-                type="number"
-                min="1"
-                value={diasValidade}
-                onChange={(e) => setDiasValidade(e.target.value)}
-                placeholder="Ex: 10"
-                className={campoClasse}
-              />
-              {diasValidade && Number(diasValidade) > 0 && (
-                <p className="text-xs text-slate-500 mt-1">
-                  Válido até {formatarDataSimples(calcularDataFutura(diasValidade))}
+          {modeloId && (
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
+              <div>
+                <label className={labelClasse}>Largura / vão (m)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={vao}
+                  onChange={(e) => setVao(e.target.value)}
+                  placeholder="Ex: 10"
+                  className={campoClasse}
+                />
+              </div>
+              <div>
+                <label className={labelClasse}>Comprimento (m)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={comprimento}
+                  onChange={(e) => setComprimento(e.target.value)}
+                  placeholder="Ex: 20"
+                  className={campoClasse}
+                />
+              </div>
+              <div>
+                <label className={labelClasse}>Pé direito (m)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={peDireito}
+                  onChange={(e) => setPeDireito(e.target.value)}
+                  placeholder="Ex: 7,5"
+                  className={campoClasse}
+                />
+              </div>
+              <div>
+                <label className={labelClasse}>Nº de vãos (tesouras)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={numeroVaos}
+                  onChange={(e) => setNumeroVaos(e.target.value)}
+                  placeholder="Ex: 4"
+                  className={campoClasse}
+                />
+              </div>
+              {areaCalculada && (
+                <p className="text-xs text-slate-500 sm:col-span-4">
+                  Área coberta calculada: <strong>{areaCalculada.toLocaleString("pt-BR")} m²</strong>
                 </p>
               )}
             </div>
-            <div>
-              <label className={labelClasse}>Margem comercial (%)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={margemComercial}
-                onChange={(e) => setMargemComercial(e.target.value)}
-                placeholder="Ex: 25"
-                className={campoClasse}
-              />
+          )}
+
+          {modeloId && (
+            <div className="rounded-lg border border-slate-200 p-4 bg-slate-50 mb-4">
+              <p className="text-xs font-medium text-slate-600 mb-2">
+                Calcular telha, calha e capote a partir das medidas
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <select
+                  value={telhaId}
+                  onChange={(e) => setTelhaId(e.target.value)}
+                  className={campoClasse}
+                >
+                  <option value="">Selecione o tipo de telha</option>
+                  {telhasDisponiveis.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nome} — {formatarMoeda(t.preco)}/m²
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={calcularItensAutomaticos}
+                  className="rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 transition sm:col-span-2"
+                >
+                  Calcular telha (área x 1,10) + calha + capote
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
             <p className="text-xs font-medium text-slate-600 mb-2">Adicionar peça</p>
@@ -501,6 +710,60 @@ export default function OrcamentosGalpaoPage() {
               </button>
             </div>
 
+            {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
+              <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
+                <p className="text-xs font-medium text-slate-600 mb-2">
+                  Calculadora: Viga para laje (volume × valor do m³)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Largura (m)"
+                    value={vigaLargura}
+                    onChange={(e) => setVigaLargura(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Altura (m)"
+                    value={vigaAltura}
+                    onChange={(e) => setVigaAltura(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Vão (m)"
+                    value={vigaVao}
+                    onChange={(e) => setVigaVao(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Valor do m³"
+                    value={vigaValorM3}
+                    onChange={(e) => setVigaValorM3(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarVigaLaje}
+                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 transition"
+                  >
+                    Adicionar viga
+                  </button>
+                </div>
+                {vigaLargura && vigaAltura && vigaVao && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Volume: {(Number(vigaLargura) * Number(vigaAltura) * Number(vigaVao)).toFixed(3)} m³
+                  </p>
+                )}
+              </div>
+            )}
+
             {itens.length === 0 ? (
               <p className="text-xs text-slate-400">Nenhuma peça adicionada ainda.</p>
             ) : (
@@ -512,17 +775,23 @@ export default function OrcamentosGalpaoPage() {
                     <th className="py-1 font-medium w-24">Qtd.</th>
                     <th className="py-1 font-medium w-28">Valor unit.</th>
                     <th className="py-1 font-medium text-right">Total</th>
-                    <th className="py-1 font-medium w-8"></th>
+                    <th className="py-1 font-medium w-16"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {itens.map((i) => (
                     <tr key={i.chave} className="border-t border-slate-200">
-                      <td className="py-1.5 pr-2">{i.nome}</td>
+                      <td className="py-1.5 pr-2">
+                        {i.nome}
+                        {i.obrigatorio && (
+                          <span className="ml-1 text-xs text-slate-400">(obrigatório)</span>
+                        )}
+                      </td>
                       <td className="py-1.5 pr-2 text-slate-500">{i.unidade || "-"}</td>
                       <td className="py-1.5 pr-2">
                         <input
                           type="number"
+                          step="0.01"
                           min="0"
                           value={i.quantidade}
                           onChange={(e) =>
@@ -547,13 +816,15 @@ export default function OrcamentosGalpaoPage() {
                         {formatarMoeda(i.quantidade * i.preco_unitario)}
                       </td>
                       <td className="py-1.5 text-right">
-                        <button
-                          type="button"
-                          onClick={() => removerItem(i.chave)}
-                          className="text-red-600 hover:text-red-800 text-xs font-medium"
-                        >
-                          Remover
-                        </button>
+                        {!i.obrigatorio && (
+                          <button
+                            type="button"
+                            onClick={() => removerItem(i.chave)}
+                            className="text-red-600 hover:text-red-800 text-xs font-medium"
+                          >
+                            Remover
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -562,7 +833,50 @@ export default function OrcamentosGalpaoPage() {
             )}
           </div>
 
-          <div className="mt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            <div>
+              <label className={labelClasse}>Validade da proposta (dias)</label>
+              <input
+                type="number"
+                min="1"
+                value={diasValidade}
+                onChange={(e) => setDiasValidade(e.target.value)}
+                placeholder="Ex: 10"
+                className={campoClasse}
+              />
+              {diasValidade && Number(diasValidade) > 0 && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Válido até {formatarDataSimples(calcularDataFutura(diasValidade))}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className={labelClasse}>Desconto (R$)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={desconto}
+                onChange={(e) => setDesconto(e.target.value)}
+                placeholder="0,00"
+                className={campoClasse}
+              />
+            </div>
+            <div>
+              <label className={labelClasse}>Margem comercial (%)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={margemComercial}
+                onChange={(e) => setMargemComercial(e.target.value)}
+                placeholder="Ex: 25"
+                className={campoClasse}
+              />
+            </div>
+          </div>
+
+          <div className="mt-3">
             <label className={labelClasse}>Observações</label>
             <input
               type="text"
@@ -738,13 +1052,14 @@ export default function OrcamentosGalpaoPage() {
                   <tr>
                     <td colSpan={7} className="bg-slate-50 px-4 py-3">
                       <p className="text-xs font-medium text-slate-500 mb-2">
-                        Peças do orçamento {o.area_m2 ? `— ${o.area_m2} m²` : ""}
+                        {o.modelos_galpao?.nome || "Peças"}
+                        {o.area_m2 ? ` — ${o.area_m2} m²` : ""}
                       </p>
                       <ul className="text-xs text-slate-600 space-y-1">
                         {(o.itens_orcamento_galpao || []).map((item) => (
                           <li key={item.id}>
                             {item.quantidade}x{" "}
-                            {item.composicoes_galpao?.nome ?? "peça removida"} —{" "}
+                            {item.composicoes_galpao?.nome ?? item.descricao_livre ?? "peça removida"} —{" "}
                             {formatarMoeda(item.preco_unitario)} cada ={" "}
                             {formatarMoeda(item.quantidade * item.preco_unitario)}
                           </li>
