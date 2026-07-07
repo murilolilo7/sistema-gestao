@@ -54,7 +54,7 @@ export default function VendasPage() {
     return supabase
       .from("vendas")
       .select(
-        "*, clientes(nome), orcamentos(codigo), itens_venda(id, quantidade, preco_unitario, produtos(nome))"
+        "*, clientes(nome), orcamentos(codigo), orcamentos_galpao(codigo), itens_venda(id, quantidade, preco_unitario, descricao_livre, produtos(nome), composicoes_galpao(nome))"
       )
       .order("id", { ascending: false });
   }
@@ -186,7 +186,11 @@ export default function VendasPage() {
                     {formatarDataHora(v.created_at)}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
-                    {v.orcamentos?.codigo ? `#${v.orcamentos.codigo}` : "-"}
+                    {v.orcamentos?.codigo
+                      ? `#${v.orcamentos.codigo}`
+                      : v.orcamentos_galpao?.codigo
+                        ? `Galpão #${v.orcamentos_galpao.codigo}`
+                        : "-"}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap font-medium">
                     {formatarMoeda(v.total)}
@@ -211,13 +215,16 @@ export default function VendasPage() {
                   <tr>
                     <td colSpan={5} className="bg-slate-50 px-4 py-3">
                       <p className="text-xs font-medium text-slate-500 mb-2">
-                        Produtos vendidos
+                        Itens vendidos
                       </p>
                       <ul className="text-xs text-slate-600 space-y-1">
                         {(v.itens_venda || []).map((item) => (
                           <li key={item.id}>
                             {item.quantidade}x{" "}
-                            {item.produtos?.nome ?? "produto removido"} —{" "}
+                            {item.produtos?.nome ??
+                              item.composicoes_galpao?.nome ??
+                              item.descricao_livre ??
+                              "item removido"} —{" "}
                             {formatarMoeda(item.preco_unitario)} cada ={" "}
                             {formatarMoeda(
                               item.quantidade * item.preco_unitario
