@@ -105,6 +105,10 @@ export default function OrcamentosGalpaoPage() {
   const [vigaVao, setVigaVao] = useState("");
   const [vigaValorM3, setVigaValorM3] = useState("");
 
+  const [tesouraRefId, setTesouraRefId] = useState("");
+  const [tesouraTamanho, setTesouraTamanho] = useState("");
+  const [tesouraQtd, setTesouraQtd] = useState("1");
+
   const proximaChave = useRef(1);
 
   useEffect(() => {
@@ -123,7 +127,7 @@ export default function OrcamentosGalpaoPage() {
   function buscarComposicoes() {
     return supabase
       .from("composicoes_galpao")
-      .select("id, codigo, nome, unidade, preco, papel")
+      .select("id, codigo, nome, unidade, preco, papel, comprimento_referencia")
       .order("nome");
   }
   function buscarModelos() {
@@ -180,6 +184,52 @@ export default function OrcamentosGalpaoPage() {
   const tipoSelecionado = modeloSelecionado?.tipo || "";
   const areaCalculada = vao && comprimento ? Number(vao) * Number(comprimento) : null;
 
+  // Recalcula telha/calha/capote automaticamente, ao vivo, sempre que
+  // as medidas ou o tipo de telha mudam — sem precisar clicar em botão.
+  useEffect(() => {
+    if (!vao || !comprimento) return;
+    const area = Number(vao) * Number(comprimento);
+
+    setItens((atual) => {
+      if (atual.length === 0) return atual;
+      let novos = [...atual];
+
+      const telha = telhaId ? composicoes.find((c) => String(c.id) === String(telhaId)) : null;
+      if (telha) {
+        const qtdTelha = Math.round(area * 1.1 * 100) / 100;
+        const jaExiste = novos.some((i) => i.composicao_id === telha.id);
+        if (jaExiste) {
+          novos = novos.map((i) =>
+            i.composicao_id === telha.id ? { ...i, quantidade: qtdTelha } : i
+          );
+        } else {
+          novos.push({
+            chave: proximaChave.current++,
+            composicao_id: telha.id,
+            nome: telha.nome,
+            unidade: telha.unidade,
+            quantidade: qtdTelha,
+            preco_unitario: Number(telha.preco) || 0,
+            automatico: true,
+          });
+        }
+      }
+
+      // Calha: 2 x comprimento + número de vãos (NÃO usa a largura/vão —
+      // a calha corre ao longo do comprimento, nos dois lados).
+      if (numeroVaos) {
+        const qtdCalha =
+          Math.round((2 * Number(comprimento) + Number(numeroVaos)) * 100) / 100;
+        novos = novos.map((i) => (i.nome === "CALHA FIBRA" ? { ...i, quantidade: qtdCalha } : i));
+      }
+
+      const qtdCapote = Math.round((Number(comprimento) + 2) * 100) / 100;
+      novos = novos.map((i) => (i.nome === "CAPOTE" ? { ...i, quantidade: qtdCapote } : i));
+
+      return novos;
+    });
+  }, [vao, comprimento, numeroVaos, telhaId, composicoes]);
+
   const composicoesSelecionaveis = composicoes.filter((c) => {
     if (PAPEIS_EXCLUIDOS.includes(c.papel)) return false;
     if (NOMES_ITENS_ESPECIAIS.includes(c.nome)) return false;
@@ -193,6 +243,9 @@ export default function OrcamentosGalpaoPage() {
     return acc;
   }, {});
   const telhasDisponiveis = composicoes.filter((c) => c.nome.toLowerCase().includes("telha"));
+  const tesourasComReferencia = composicoes.filter(
+    (c) => c.papel === "TESOURA" && Number(c.comprimento_referencia) > 0
+  );
 
   function buscarComposicao(nome) {
     return composicoes.find((c) => c.nome === nome);
@@ -236,51 +289,6 @@ export default function OrcamentosGalpaoPage() {
     setQuantidadeParaAdicionar("1");
   }
 
-  function calcularItensAutomaticos() {
-    if (!vao || !comprimento) {
-      setErro("Preencha largura e comprimento para calcular telha/calha/capote.");
-      return;
-    }
-    const area = Number(vao) * Number(comprimento);
-
-    setItens((atual) => {
-      let novos = [...atual];
-
-      const telha = telhaId ? composicoes.find((c) => String(c.id) === String(telhaId)) : null;
-      if (telha) {
-        const qtdTelha = Math.round(area * 1.1 * 100) / 100;
-        const jaExiste = novos.some((i) => i.composicao_id === telha.id);
-        if (jaExiste) {
-          novos = novos.map((i) =>
-            i.composicao_id === telha.id ? { ...i, quantidade: qtdTelha } : i
-          );
-        } else {
-          novos.push({
-            chave: proximaChave.current++,
-            composicao_id: telha.id,
-            nome: telha.nome,
-            unidade: telha.unidade,
-            quantidade: qtdTelha,
-            preco_unitario: Number(telha.preco) || 0,
-            automatico: true,
-          });
-        }
-      }
-
-      if (numeroVaos) {
-        const qtdCalha = Math.round((Number(vao) + 0.5) * Number(numeroVaos) * 2 * 100) / 100;
-        novos = novos.map((i) => (i.nome === "CALHA FIBRA" ? { ...i, quantidade: qtdCalha } : i));
-      }
-
-      const qtdCapote = Math.round((Number(comprimento) + 2) * 100) / 100;
-      novos = novos.map((i) => (i.nome === "CAPOTE" ? { ...i, quantidade: qtdCapote } : i));
-
-      return novos;
-    });
-    setErro("");
-    setMensagem("Telha, calha e capote calculados a partir das medidas.");
-  }
-
   function adicionarVigaLaje() {
     const l = Number(vigaLargura) || 0;
     const a = Number(vigaAltura) || 0;
@@ -306,6 +314,32 @@ export default function OrcamentosGalpaoPage() {
     setVigaAltura("");
     setVigaVao("");
     setVigaValorM3("");
+    setErro("");
+  }
+
+  function adicionarTesouraProporcional() {
+    const ref = tesourasComReferencia.find((t) => String(t.id) === String(tesouraRefId));
+    const tamanho = Number(tesouraTamanho) || 0;
+    const qtd = Math.max(1, Number(tesouraQtd) || 1);
+    if (!ref || tamanho <= 0) {
+      setErro("Selecione uma tesoura de referência e informe o tamanho desejado.");
+      return;
+    }
+    const precoProporcional =
+      Math.round((Number(ref.preco) / Number(ref.comprimento_referencia)) * tamanho * 100) / 100;
+    setItens((atual) => [
+      ...atual,
+      {
+        chave: proximaChave.current++,
+        composicao_id: null,
+        nome: `Tesoura ${tamanho}M de vão livre (calculada proporcionalmente a partir da ${ref.nome})`,
+        unidade: "PÇ",
+        quantidade: qtd,
+        preco_unitario: precoProporcional,
+      },
+    ]);
+    setTesouraTamanho("");
+    setTesouraQtd("1");
     setErro("");
   }
 
@@ -348,6 +382,9 @@ export default function OrcamentosGalpaoPage() {
     setVigaAltura("");
     setVigaVao("");
     setVigaValorM3("");
+    setTesouraRefId("");
+    setTesouraTamanho("");
+    setTesouraQtd("1");
   }
 
   function abrirNovo() {
@@ -560,7 +597,7 @@ export default function OrcamentosGalpaoPage() {
           </div>
 
           {modeloId && (
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-3">
               <div>
                 <label className={labelClasse}>Largura / vão (m)</label>
                 <input
@@ -604,44 +641,47 @@ export default function OrcamentosGalpaoPage() {
                   min="0"
                   value={numeroVaos}
                   onChange={(e) => setNumeroVaos(e.target.value)}
-                  placeholder="Ex: 4"
+                  placeholder="Ex: 6"
                   className={campoClasse}
                 />
               </div>
-              {areaCalculada && (
-                <p className="text-xs text-slate-500 sm:col-span-4">
-                  Área coberta calculada: <strong>{areaCalculada.toLocaleString("pt-BR")} m²</strong>
+            </div>
+          )}
+
+          {areaCalculada && (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 mb-4 flex flex-wrap gap-6">
+              <div>
+                <p className="text-xs text-emerald-700">Área coberta</p>
+                <p className="text-lg font-semibold text-emerald-900">
+                  {areaCalculada.toLocaleString("pt-BR")} m²
                 </p>
-              )}
+              </div>
+              <div>
+                <p className="text-xs text-emerald-700">Valor por m² (atual)</p>
+                <p className="text-lg font-semibold text-emerald-900">
+                  {valorPorM2 !== null ? formatarMoeda(valorPorM2) : "-"}
+                </p>
+              </div>
             </div>
           )}
 
           {modeloId && (
             <div className="rounded-lg border border-slate-200 p-4 bg-slate-50 mb-4">
               <p className="text-xs font-medium text-slate-600 mb-2">
-                Calcular telha, calha e capote a partir das medidas
+                Tipo de telha (telha, calha e capote calculam sozinhos a partir das medidas acima)
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <select
-                  value={telhaId}
-                  onChange={(e) => setTelhaId(e.target.value)}
-                  className={campoClasse}
-                >
-                  <option value="">Selecione o tipo de telha</option>
-                  {telhasDisponiveis.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.nome} — {formatarMoeda(t.preco)}/m²
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={calcularItensAutomaticos}
-                  className="rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 transition sm:col-span-2"
-                >
-                  Calcular telha (área x 1,10) + calha + capote
-                </button>
-              </div>
+              <select
+                value={telhaId}
+                onChange={(e) => setTelhaId(e.target.value)}
+                className={campoClasse}
+              >
+                <option value="">Selecione o tipo de telha</option>
+                {telhasDisponiveis.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.nome} — {formatarMoeda(t.preco)}/m²
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 
@@ -689,6 +729,55 @@ export default function OrcamentosGalpaoPage() {
                 Adicionar peça
               </button>
             </div>
+
+            {tesourasComReferencia.length > 0 && (
+              <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
+                <p className="text-xs font-medium text-slate-600 mb-2">
+                  Calculadora: Tesoura de tamanho variado (proporcional a uma peça de referência)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                  <select
+                    value={tesouraRefId}
+                    onChange={(e) => setTesouraRefId(e.target.value)}
+                    className={campoClasse}
+                  >
+                    <option value="">Tesoura de referência</option>
+                    {tesourasComReferencia.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nome} ({formatarMoeda(Number(t.preco) / Number(t.comprimento_referencia))}/m)
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Tamanho desejado (m)"
+                    value={tesouraTamanho}
+                    onChange={(e) => setTesouraTamanho(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Quantidade"
+                    value={tesouraQtd}
+                    onChange={(e) => setTesouraQtd(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarTesouraProporcional}
+                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 transition"
+                  >
+                    Adicionar tesoura
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Estimativa proporcional (preço da referência ÷ tamanho dela × tamanho desejado). Vale para
+                  tamanhos próximos da referência — vãos muito maiores podem exigir seção estrutural diferente.
+                </p>
+              </div>
+            )}
 
             {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
@@ -882,11 +971,6 @@ export default function OrcamentosGalpaoPage() {
                 <span className="text-slate-500">Total do orçamento: </span>
                 <span className="font-semibold text-lg">{formatarMoeda(totalFinal)}</span>
               </p>
-              {valorPorM2 !== null && (
-                <p className="text-xs text-slate-400">
-                  Valor por m²: {formatarMoeda(valorPorM2)}
-                </p>
-              )}
               <p className="text-xs text-slate-400">Vendedor: {nomeUsuario}</p>
             </div>
             <div className="flex gap-2">
