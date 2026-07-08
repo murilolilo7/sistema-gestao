@@ -6,6 +6,34 @@ import { Eye, EyeOff, Pencil, Printer, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
+
+// Ordem fixa das peças dentro de cada seção, seguindo a planilha da
+// empresa. Peças novas do mesmo tipo entram logo abaixo das existentes
+// (ex: outra terça vai parar embaixo da terça que já está na lista).
+const ORDEM_ESTRUTURA = [
+  "TESOURA", "PILAR", "TERCA", "VIGA_TRAVAMENTO",
+  "TELHA", "CAPOTE", "CALHA", "MONTAGEM", "FUNDACAO",
+];
+const ORDEM_LAJE = ["PILAR", "VIGA_LAJE", "LAJE", "MONTAGEM"];
+
+// Itens livres (sem peça do catálogo) têm papel deduzido pelo nome.
+function papelDoItem(item) {
+  if (item.papel) return item.papel;
+  const nome = (item.nome || "").toUpperCase();
+  if (nome.startsWith("VIGA PARA LAJE")) return "VIGA_LAJE";
+  if (nome.startsWith("TESOURA")) return "TESOURA";
+  return null;
+}
+
+function ordenarItensPorPapel(lista, ordem) {
+  const posicaoMontagem = ordem.indexOf("MONTAGEM");
+  const posicao = (item) => {
+    const idx = ordem.indexOf(papelDoItem(item));
+    // Tipos fora da lista (peças avulsas) ficam antes da montagem/fundação.
+    return idx !== -1 ? idx : posicaoMontagem - 0.5;
+  };
+  return [...lista].sort((a, b) => posicao(a) - posicao(b) || a.chave - b.chave);
+}
 // Categorias tratadas em campos dedicados (telha, calha, capote,
 // montagem, fundação) — excluídas do seletor genérico de peças pra não
 // duplicar, não importa o nome específico de cada uma.
@@ -111,7 +139,7 @@ export default function OrcamentosGalpaoPage() {
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
   const [quantidadeParaAdicionar, setQuantidadeParaAdicionar] = useState("1");
   const [desconto, setDesconto] = useState("");
-  const [margemComercial, setMargemComercial] = useState("");
+  const [margemComercial, setMargemComercial] = useState("25");
   const [observacao, setObservacao] = useState("");
   const [observacaoInterna, setObservacaoInterna] = useState("");
 
@@ -119,6 +147,7 @@ export default function OrcamentosGalpaoPage() {
   const [vigaAltura, setVigaAltura] = useState("");
   const [vigaVao, setVigaVao] = useState("");
   const [vigaValorM3, setVigaValorM3] = useState("");
+  const [vigaQtd, setVigaQtd] = useState("1");
 
   const [tesouraRefId, setTesouraRefId] = useState("");
   const [tesouraTamanho, setTesouraTamanho] = useState("");
@@ -380,21 +409,25 @@ export default function OrcamentosGalpaoPage() {
     const a = Number(vigaAltura) || 0;
     const v = Number(vigaVao) || 0;
     const valorM3 = Number(vigaValorM3) || 0;
+    const qtd = Math.max(1, Number(vigaQtd) || 1);
     if (l <= 0 || a <= 0 || v <= 0 || valorM3 <= 0) {
       setErro("Preencha largura, altura, vão e valor do m³ para adicionar a viga para laje.");
       return;
     }
+    // O volume (m³) serve pra chegar no PREÇO de cada viga; no orçamento
+    // ela entra como PEÇA: quantidade de vigas × preço por viga.
     const volume = Math.round(l * a * v * 10000) / 10000;
+    const precoPorViga = Math.round(volume * valorM3 * 100) / 100;
     setItens((atual) => [
       ...atual,
       {
         chave: proximaChave.current++,
         composicao_id: null,
-        nome: `Viga para laje ${l.toFixed(2)}x${a.toFixed(2)}x${v.toFixed(2)}m`,
-        unidade: "M3",
-        papel: null,
-        quantidade: volume,
-        preco_unitario: valorM3,
+        nome: `VIGA PARA LAJE ${l.toFixed(2)}X${a.toFixed(2)}X${v.toFixed(2)}M`,
+        unidade: "UND",
+        papel: "VIGA_LAJE",
+        quantidade: qtd,
+        preco_unitario: precoPorViga,
         secao: "laje",
       },
     ]);
@@ -402,6 +435,7 @@ export default function OrcamentosGalpaoPage() {
     setVigaAltura("");
     setVigaVao("");
     setVigaValorM3("");
+    setVigaQtd("1");
     setErro("");
   }
 
@@ -530,6 +564,8 @@ export default function OrcamentosGalpaoPage() {
   // valor/m² próprios, pela área da laje.
   const itensEstrutura = itens.filter((i) => i.secao !== "laje");
   const itensLaje = itens.filter((i) => i.secao === "laje");
+  const itensEstruturaOrdenados = ordenarItensPorPapel(itensEstrutura, ORDEM_ESTRUTURA);
+  const itensLajeOrdenados = ordenarItensPorPapel(itensLaje, ORDEM_LAJE);
   const subtotalEstrutura = itensEstrutura.reduce(
     (soma, i) => soma + i.quantidade * i.preco_unitario, 0
   );
@@ -564,13 +600,14 @@ export default function OrcamentosGalpaoPage() {
     setComposicaoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
     setDesconto("");
-    setMargemComercial("");
+    setMargemComercial("25");
     setObservacao("");
     setObservacaoInterna("");
     setVigaLargura("");
     setVigaAltura("");
     setVigaVao("");
     setVigaValorM3("");
+    setVigaQtd("1");
     setTesouraRefId("");
     setTesouraTamanho("");
     setTesouraQtd("1");
@@ -1159,9 +1196,10 @@ export default function OrcamentosGalpaoPage() {
             {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
                 <p className="text-xs font-medium text-slate-600 mb-2">
-                  Calculadora: Viga para laje (volume × valor do m³)
+                  Calculadora: Viga para laje — o volume (m³) × valor do m³ dá o preço de CADA viga;
+                  ela entra no orçamento como peça (quantidade × preço por viga)
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-6 gap-2">
                   <input
                     type="number"
                     step="0.01"
@@ -1194,6 +1232,14 @@ export default function OrcamentosGalpaoPage() {
                     onChange={(e) => setVigaValorM3(e.target.value)}
                     className={campoClasse}
                   />
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qtd. vigas"
+                    value={vigaQtd}
+                    onChange={(e) => setVigaQtd(e.target.value)}
+                    className={campoClasse}
+                  />
                   <button
                     type="button"
                     onClick={adicionarVigaLaje}
@@ -1204,7 +1250,26 @@ export default function OrcamentosGalpaoPage() {
                 </div>
                 {vigaLargura && vigaAltura && vigaVao && (
                   <p className="text-xs text-slate-500 mt-1">
-                    Volume: {(Number(vigaLargura) * Number(vigaAltura) * Number(vigaVao)).toFixed(3)} m³
+                    Volume por viga:{" "}
+                    {(Number(vigaLargura) * Number(vigaAltura) * Number(vigaVao)).toFixed(3)} m³
+                    {Number(vigaValorM3) > 0 && (
+                      <>
+                        {" "}— Preço por viga:{" "}
+                        {formatarMoeda(
+                          Math.round(
+                            Number(vigaLargura) * Number(vigaAltura) * Number(vigaVao) *
+                              Number(vigaValorM3) * 100
+                          ) / 100
+                        )}
+                        {Number(vigaQtd) > 1 &&
+                          ` — ${vigaQtd} vigas: ${formatarMoeda(
+                            (Math.round(
+                              Number(vigaLargura) * Number(vigaAltura) * Number(vigaVao) *
+                                Number(vigaValorM3) * 100
+                            ) / 100) * Number(vigaQtd)
+                          )}`}
+                      </>
+                    )}
                   </p>
                 )}
               </div>
@@ -1232,7 +1297,7 @@ export default function OrcamentosGalpaoPage() {
                       </td>
                     </tr>
                   )}
-                  {itensEstrutura.map((i) => (
+                  {itensEstruturaOrdenados.map((i) => (
                     <tr key={i.chave} className="border-t border-slate-200">
                       <td className="py-1.5 pr-2">
                         {i.nome}
@@ -1300,7 +1365,7 @@ export default function OrcamentosGalpaoPage() {
                           Estrutura da laje/mezanino
                         </td>
                       </tr>
-                      {itensLaje.map((i) => (
+                      {itensLajeOrdenados.map((i) => (
                         <tr key={i.chave} className="border-t border-slate-200 bg-emerald-50/30">
                           <td className="py-1.5 pr-2">{i.nome}</td>
                           <td className="py-1.5 pr-2 text-slate-500">{i.unidade || "-"}</td>
@@ -1611,13 +1676,24 @@ export default function OrcamentosGalpaoPage() {
                         </p>
                       )}
                       {(() => {
-                        const todosItens = o.itens_orcamento_galpao || [];
-                        const daEstrutura = todosItens.filter((item) => item.secao !== "laje");
-                        const daLaje = todosItens.filter((item) => item.secao === "laje");
+                        const todosItens = (o.itens_orcamento_galpao || []).map((item, idx) => ({
+                          ...item,
+                          chave: idx,
+                          papel: item.composicoes_galpao?.papel || null,
+                          nome: item.composicoes_galpao?.nome || item.descricao_livre || "",
+                        }));
+                        const daEstrutura = ordenarItensPorPapel(
+                          todosItens.filter((item) => item.secao !== "laje"),
+                          ORDEM_ESTRUTURA
+                        );
+                        const daLaje = ordenarItensPorPapel(
+                          todosItens.filter((item) => item.secao === "laje"),
+                          ORDEM_LAJE
+                        );
                         const linhaItem = (item) => (
                           <li key={item.id}>
                             {item.quantidade}x{" "}
-                            {item.composicoes_galpao?.nome ?? item.descricao_livre ?? "peça removida"} —{" "}
+                            {item.nome || "peça removida"} —{" "}
                             {formatarMoeda(item.preco_unitario)} cada ={" "}
                             {formatarMoeda(item.quantidade * item.preco_unitario)}
                           </li>
