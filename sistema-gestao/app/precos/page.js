@@ -76,8 +76,25 @@ export default function PrecosPage() {
   function buscarComposicoes() {
     return supabase
       .from("composicoes_galpao")
-      .select("id, codigo, nome, papel, unidade, custo, preco, bdi_pct, area_referencia, composicao_itens(count)")
+      .select("id, codigo, nome, papel, unidade, custo, preco, bdi_pct, area_referencia, composicao_itens(quantidade, insumos(valor_unitario), mao_de_obra(valor_hora))")
       .order("codigo");
+  }
+
+  // Custo ao vivo, direto da soma da composição (quantidade x valor de
+  // cada insumo/mão de obra) — nunca fica desatualizado, mesmo que o
+  // valor guardado no banco ainda não tenha sido recalculado/salvo.
+  function custoAoVivo(c) {
+    const itens = c.composicao_itens || [];
+    if (itens.length === 0) return Number(c.custo) || 0;
+    const soma = itens.reduce(
+      (total, item) =>
+        total +
+        Number(item.quantidade || 0) *
+          Number(item.insumos?.valor_unitario ?? item.mao_de_obra?.valor_hora ?? 0),
+      0
+    );
+    const area = Number(c.area_referencia) || 0;
+    return Math.round((area > 0 ? soma / area : soma) * 100) / 100;
   }
 
   function aplicarResultados(r1, r2, r3) {
@@ -940,14 +957,14 @@ export default function PrecosPage() {
                   <input
                     type="number"
                     step="0.01"
-                    value={c.custo}
+                    value={(c.composicao_itens || []).length > 0 ? custoAoVivo(c) : c.custo}
                     onChange={(e) =>
                       atualizarCampo(composicoes, setComposicoes, c.id, "custo", e.target.value)
                     }
-                    disabled={!souAdmin || (c.composicao_itens?.[0]?.count || 0) > 0}
+                    disabled={!souAdmin || (c.composicao_itens || []).length > 0}
                     title={
-                      (c.composicao_itens?.[0]?.count || 0) > 0
-                        ? "Custo calculado automaticamente pela composição da peça (abra a setinha pra ver) — ajuste as quantidades da composição e ele acompanha"
+                      (c.composicao_itens || []).length > 0
+                        ? "Custo calculado ao vivo pela composição da peça (abra a setinha pra ver) — ajuste as quantidades da composição e ele acompanha na hora"
                         : undefined
                     }
                     className={campoNumero}
