@@ -1351,12 +1351,21 @@ export default function OrcamentosGalpaoPage() {
                       <tr className="border-t border-slate-300">
                         <td colSpan={4} className="py-1 text-right text-xs font-medium text-slate-500">
                           Subtotal estrutura
+                        </td>
+                        <td className="py-1 text-right font-semibold whitespace-nowrap">
+                          {formatarMoeda(subtotalEstrutura)}
+                        </td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} className="py-1 text-right text-xs font-medium text-slate-500">
+                          Com BDI ({margemNumerica}%)
                           {areaCalculada && valorPorM2 !== null
                             ? ` — ${formatarMoeda(valorPorM2)}/m² (÷ ${areaCalculada.toLocaleString("pt-BR")}m²)`
                             : ""}
                         </td>
                         <td className="py-1 text-right font-semibold whitespace-nowrap">
-                          {formatarMoeda(subtotalEstrutura)}
+                          {formatarMoeda(subtotalEstrutura * fatorMargem)}
                         </td>
                         <td></td>
                       </tr>
@@ -1410,12 +1419,21 @@ export default function OrcamentosGalpaoPage() {
                       <tr className="border-t border-slate-300">
                         <td colSpan={4} className="py-1 text-right text-xs font-medium text-emerald-700">
                           Subtotal laje/mezanino
+                        </td>
+                        <td className="py-1 text-right font-semibold whitespace-nowrap">
+                          {formatarMoeda(subtotalLaje)}
+                        </td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} className="py-1 text-right text-xs font-medium text-emerald-700">
+                          Com BDI ({margemNumerica}%)
                           {valorPorM2Laje !== null
                             ? ` — ${formatarMoeda(valorPorM2Laje)}/m² (÷ ${areaLajeNumerica.toLocaleString("pt-BR")}m²)`
                             : ""}
                         </td>
                         <td className="py-1 text-right font-semibold whitespace-nowrap">
-                          {formatarMoeda(subtotalLaje)}
+                          {formatarMoeda(subtotalLaje * fatorMargem)}
                         </td>
                         <td></td>
                       </tr>
@@ -1456,7 +1474,7 @@ export default function OrcamentosGalpaoPage() {
               />
             </div>
             <div>
-              <label className={labelClasse}>Margem comercial (%)</label>
+              <label className={labelClasse}>BDI (%)</label>
               <input
                 type="number"
                 step="0.01"
@@ -1497,7 +1515,7 @@ export default function OrcamentosGalpaoPage() {
               <p className="text-slate-500">Subtotal (peças): {formatarMoeda(subtotal)}</p>
               {margemNumerica > 0 && (
                 <p className="text-slate-500">
-                  Com margem comercial ({margemNumerica}%): {formatarMoeda(totalComMargem)}
+                  Com BDI ({margemNumerica}%): {formatarMoeda(totalComMargem)}
                 </p>
               )}
               {descontoNumerico > 0 && (
