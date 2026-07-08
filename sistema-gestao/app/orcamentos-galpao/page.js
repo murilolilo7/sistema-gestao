@@ -101,6 +101,11 @@ export default function OrcamentosGalpaoPage() {
   const [numeroVaos, setNumeroVaos] = useState("");
   const [numeroGalpoesGerminados, setNumeroGalpoesGerminados] = useState("0");
   const [telhaId, setTelhaId] = useState("");
+  const [areaLaje, setAreaLaje] = useState("");
+  const [tipoLajeId, setTipoLajeId] = useState("");
+  const [pilarLajeId, setPilarLajeId] = useState("");
+  const [pilarLajeQtd, setPilarLajeQtd] = useState("1");
+  const [montagemLajeQtd, setMontagemLajeQtd] = useState("");
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
@@ -147,7 +152,7 @@ export default function OrcamentosGalpaoPage() {
     return supabase
       .from("orcamentos_galpao")
       .select(
-        "*, clientes(nome), modelos_galpao(nome, tipo), itens_orcamento_galpao(id, composicao_id, descricao_livre, unidade_livre, quantidade, preco_unitario, composicoes_galpao(nome, unidade, papel))"
+        "*, clientes(nome), modelos_galpao(nome, tipo), itens_orcamento_galpao(id, composicao_id, descricao_livre, unidade_livre, quantidade, preco_unitario, secao, composicoes_galpao(nome, unidade, papel))"
       )
       .order("codigo", { ascending: false });
   }
@@ -231,6 +236,7 @@ export default function OrcamentosGalpaoPage() {
             papel: telha.papel,
             quantidade: qtdTelha,
             preco_unitario: Number(telha.preco) || 0,
+            secao: "estrutura",
             automatico: true,
           });
         }
@@ -256,9 +262,49 @@ export default function OrcamentosGalpaoPage() {
       const qtdCapote = Math.round((Number(comprimento) + 2) * germinados * 100) / 100;
       novos = novos.map((i) => (i.nome === "CAPOTE" ? { ...i, quantidade: qtdCapote } : i));
 
+      // Laje/mezanino: vendida por m² direto (o preço já é por m², a
+      // área de referência de cada painel só entra no cálculo de custo
+      // por trás) — mesma lógica da telha, sem multiplicador de perda.
+      novos = novos.filter(
+        (i) => !(i.papel === "LAJE" && (!tipoLajeId || i.composicao_id !== Number(tipoLajeId)))
+      );
+      if (tipoLajeId && areaLaje) {
+        const laje = composicoes.find((c) => String(c.id) === String(tipoLajeId));
+        if (laje) {
+          const qtdLaje = Math.round(Number(areaLaje) * 100) / 100;
+          const jaExisteLaje = novos.some((i) => i.composicao_id === laje.id);
+          if (jaExisteLaje) {
+            novos = novos.map((i) =>
+              i.composicao_id === laje.id ? { ...i, quantidade: qtdLaje } : i
+            );
+          } else {
+            novos.push({
+              chave: proximaChave.current++,
+              composicao_id: laje.id,
+              nome: laje.nome,
+              unidade: laje.unidade,
+              papel: laje.papel,
+              quantidade: qtdLaje,
+              preco_unitario: Number(laje.preco) || 0,
+              secao: "laje",
+              automatico: true,
+            });
+          }
+        }
+      }
+
       return novos;
     });
-  }, [vao, comprimento, numeroVaos, numeroGalpoesGerminados, telhaId, composicoes]);
+  }, [
+    vao,
+    comprimento,
+    numeroVaos,
+    numeroGalpoesGerminados,
+    telhaId,
+    areaLaje,
+    tipoLajeId,
+    composicoes,
+  ]);
 
   const composicoesSelecionaveis = composicoes.filter((c) => {
     if (PAPEIS_EXCLUIDOS.includes(c.papel)) return false;
@@ -275,6 +321,7 @@ export default function OrcamentosGalpaoPage() {
   // Papel = TELHA é a forma de marcar um tipo de telha/cobertura no
   // catálogo (em Preços). Adicionar um tipo novo lá já aparece aqui.
   const telhasDisponiveis = composicoes.filter((c) => c.papel === "TELHA");
+  const lajesDisponiveis = composicoes.filter((c) => c.papel === "LAJE");
   const tesourasComReferencia = composicoes.filter(
     (c) => c.papel === "TESOURA" && Number(c.comprimento_referencia) > 0
   );
@@ -296,6 +343,7 @@ export default function OrcamentosGalpaoPage() {
         papel: c.papel,
         quantidade: 0,
         preco_unitario: Number(c.preco) || 0,
+        secao: "estrutura",
         obrigatorio: true,
       }));
   }
@@ -318,6 +366,7 @@ export default function OrcamentosGalpaoPage() {
           papel: composicao.papel,
           quantidade,
           preco_unitario: Number(composicao.preco) || 0,
+          secao: "estrutura",
         },
       ];
       return composicao.papel === "PILAR" ? recalcularFundacao(novos) : novos;
@@ -346,6 +395,7 @@ export default function OrcamentosGalpaoPage() {
         papel: null,
         quantidade: volume,
         preco_unitario: valorM3,
+        secao: "laje",
       },
     ]);
     setVigaLargura("");
@@ -375,11 +425,74 @@ export default function OrcamentosGalpaoPage() {
         papel: "TESOURA",
         quantidade: qtd,
         preco_unitario: precoProporcional,
+        secao: "estrutura",
       },
     ]);
     setTesouraRefId("");
     setTesouraTamanho("");
     setTesouraQtd("1");
+    setErro("");
+  }
+
+  function adicionarPilarLaje() {
+    const pilar = composicoes.find((c) => String(c.id) === String(pilarLajeId));
+    const qtd = Math.max(1, Number(pilarLajeQtd) || 1);
+    if (!pilar) {
+      setErro("Selecione o pilar da laje/mezanino.");
+      return;
+    }
+    setItens((atual) => {
+      const novos = [
+        ...atual,
+        {
+          chave: proximaChave.current++,
+          composicao_id: pilar.id,
+          nome: pilar.nome,
+          unidade: pilar.unidade,
+          papel: pilar.papel,
+          quantidade: qtd,
+          preco_unitario: Number(pilar.preco) || 0,
+          secao: "laje",
+        },
+      ];
+      // Pilar da laje também precisa de fundação (1 dia por pilar).
+      return recalcularFundacao(novos);
+    });
+    setPilarLajeId("");
+    setPilarLajeQtd("1");
+    setErro("");
+  }
+
+  function adicionarMontagemLaje() {
+    const montagem = buscarComposicao("MONTAGEM");
+    const qtd = Math.max(1, Number(montagemLajeQtd) || 0);
+    if (!montagem || !montagemLajeQtd || qtd <= 0) {
+      setErro("Informe a quantidade (VB) da montagem da laje/mezanino.");
+      return;
+    }
+    setItens((atual) => {
+      const jaExiste = atual.some((i) => i.nome === "MONTAGEM" && i.secao === "laje");
+      if (jaExiste) {
+        // Já tem montagem na seção da laje — só atualiza a quantidade.
+        return atual.map((i) =>
+          i.nome === "MONTAGEM" && i.secao === "laje" ? { ...i, quantidade: qtd } : i
+        );
+      }
+      return [
+        ...atual,
+        {
+          chave: proximaChave.current++,
+          composicao_id: montagem.id,
+          nome: montagem.nome,
+          unidade: montagem.unidade,
+          papel: montagem.papel,
+          quantidade: qtd,
+          preco_unitario: Number(montagem.preco) || 0,
+          secao: "laje",
+        },
+      ];
+    });
+    setMontagemLajeQtd("");
     setErro("");
   }
 
@@ -411,8 +524,26 @@ export default function OrcamentosGalpaoPage() {
   const totalComMargem = subtotal * (1 + margemNumerica / 100);
   const descontoNumerico = Math.min(Math.max(0, Number(desconto) || 0), totalComMargem);
   const totalFinal = totalComMargem - descontoNumerico;
+
+  // Seções separadas, como na planilha da empresa: a estrutura do galpão
+  // tem valor/m² pela área do galpão; a laje/mezanino tem subtotal e
+  // valor/m² próprios, pela área da laje.
+  const itensEstrutura = itens.filter((i) => i.secao !== "laje");
+  const itensLaje = itens.filter((i) => i.secao === "laje");
+  const subtotalEstrutura = itensEstrutura.reduce(
+    (soma, i) => soma + i.quantidade * i.preco_unitario, 0
+  );
+  const subtotalLaje = itensLaje.reduce((soma, i) => soma + i.quantidade * i.preco_unitario, 0);
+  const areaLajeNumerica = Number(areaLaje) || 0;
+  const fatorMargem = 1 + margemNumerica / 100;
   const valorPorM2 =
-    areaCalculada && areaCalculada > 0 ? totalFinal / areaCalculada : null;
+    areaCalculada && areaCalculada > 0
+      ? (subtotalEstrutura * fatorMargem) / areaCalculada
+      : null;
+  const valorPorM2Laje =
+    itensLaje.length > 0 && areaLajeNumerica > 0
+      ? (subtotalLaje * fatorMargem) / areaLajeNumerica
+      : null;
 
   function limparFormulario() {
     setClienteId("");
@@ -423,6 +554,11 @@ export default function OrcamentosGalpaoPage() {
     setNumeroVaos("");
     setNumeroGalpoesGerminados("0");
     setTelhaId("");
+    setAreaLaje("");
+    setTipoLajeId("");
+    setPilarLajeId("");
+    setPilarLajeQtd("1");
+    setMontagemLajeQtd("");
     setDiasValidade("");
     setItens([]);
     setComposicaoParaAdicionar("");
@@ -479,10 +615,29 @@ export default function OrcamentosGalpaoPage() {
       papel: item.composicoes_galpao?.papel || null,
       quantidade: Number(item.quantidade),
       preco_unitario: Number(item.preco_unitario),
-      obrigatorio: ["MONTAGEM", "FUNDAÇÃO", "CALHA FIBRA", "CAPOTE"].includes(
-        item.composicoes_galpao?.nome
-      ),
+      secao: item.secao === "laje" ? "laje" : "estrutura",
+      // Obrigatórios são só os da estrutura base — a montagem da laje,
+      // por exemplo, pode ser removida sem travar o orçamento.
+      obrigatorio:
+        item.secao !== "laje" &&
+        ["MONTAGEM", "FUNDAÇÃO", "CALHA FIBRA", "CAPOTE"].includes(
+          item.composicoes_galpao?.nome
+        ),
     }));
+    // IMPORTANTE: preencher os seletores de telha e laje a partir dos
+    // itens salvos — sem isso, o recálculo ao vivo (que confia nesses
+    // seletores) removeria as linhas de telha/laje ao editar.
+    const itemTelha = itensCarregados.find((i) => i.papel === "TELHA");
+    setTelhaId(itemTelha ? String(itemTelha.composicao_id) : "");
+    const itemLaje = itensCarregados.find((i) => i.papel === "LAJE");
+    setTipoLajeId(itemLaje ? String(itemLaje.composicao_id) : "");
+    setAreaLaje(
+      orcamento.area_laje
+        ? String(orcamento.area_laje)
+        : itemLaje
+          ? String(itemLaje.quantidade)
+          : ""
+    );
     setItens(itensCarregados);
     setErro("");
     setMensagem("");
@@ -529,6 +684,7 @@ export default function OrcamentosGalpaoPage() {
       unidade_livre: i.composicao_id ? null : i.unidade,
       quantidade: i.quantidade,
       preco_unitario: i.preco_unitario,
+      secao: i.secao === "laje" ? "laje" : "estrutura",
     }));
     const validadeCalculada = calcularDataFutura(diasValidade) || null;
 
@@ -549,6 +705,7 @@ export default function OrcamentosGalpaoPage() {
           vendedor_input: nomeUsuario || null,
           observacao_interna_input: observacaoInterna.trim() || null,
           numero_galpoes_germinados_input: Math.max(0, Number(numeroGalpoesGerminados) || 0),
+          area_laje_input: areaLaje ? Number(areaLaje) : null,
         })
       : await supabase.rpc("criar_orcamento_galpao", {
           cliente_id_input: Number(clienteId),
@@ -565,6 +722,7 @@ export default function OrcamentosGalpaoPage() {
           vendedor_input: nomeUsuario || null,
           observacao_interna_input: observacaoInterna.trim() || null,
           numero_galpoes_germinados_input: Math.max(0, Number(numeroGalpoesGerminados) || 0),
+          area_laje_input: areaLaje ? Number(areaLaje) : null,
         });
 
     if (error) {
@@ -762,11 +920,29 @@ export default function OrcamentosGalpaoPage() {
                 </p>
               </div>
               <div>
-                <p className="text-xs text-emerald-700">Valor por m² (atual)</p>
+                <p className="text-xs text-emerald-700">
+                  {itensLaje.length > 0 ? "Valor/m² estrutura (sem laje)" : "Valor por m² (atual)"}
+                </p>
                 <p className="text-lg font-semibold text-emerald-900">
                   {valorPorM2 !== null ? formatarMoeda(valorPorM2) : "-"}
                 </p>
               </div>
+              {itensLaje.length > 0 && (
+                <>
+                  <div>
+                    <p className="text-xs text-emerald-700">Área da laje/mezanino</p>
+                    <p className="text-lg font-semibold text-emerald-900">
+                      {areaLajeNumerica > 0 ? `${areaLajeNumerica.toLocaleString("pt-BR")} m²` : "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-emerald-700">Valor/m² da laje</p>
+                    <p className="text-lg font-semibold text-emerald-900">
+                      {valorPorM2Laje !== null ? formatarMoeda(valorPorM2Laje) : "-"}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -891,6 +1067,96 @@ export default function OrcamentosGalpaoPage() {
             )}
 
             {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50/40 p-3 mb-3">
+                <p className="text-xs font-semibold text-emerald-800 mb-2">
+                  Estrutura da laje/mezanino — seção separada, com subtotal e valor/m² próprios
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <select
+                    value={tipoLajeId}
+                    onChange={(e) => setTipoLajeId(e.target.value)}
+                    className={campoClasse}
+                  >
+                    <option value="">Selecione o tipo de laje</option>
+                    {lajesDisponiveis.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.nome} — {formatarMoeda(l.preco)}/m²
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Área da laje (m²)"
+                    value={areaLaje}
+                    onChange={(e) => setAreaLaje(e.target.value)}
+                    className={campoClasse}
+                  />
+                </div>
+                <p className="text-xs text-slate-400 mt-1 mb-3">
+                  Escolha o tipo (capacidade em Kg/m² no nome) e a área — a linha entra sozinha na seção
+                  da laje. A viga (calculadora abaixo) e o pilar/montagem aqui também entram nessa seção.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2">
+                  <select
+                    value={pilarLajeId}
+                    onChange={(e) => setPilarLajeId(e.target.value)}
+                    className={campoClasse + " sm:col-span-2"}
+                  >
+                    <option value="">Pilar da laje (quando necessário)</option>
+                    {composicoes
+                      .filter((c) => c.papel === "PILAR")
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.nome} — {formatarMoeda(p.preco)}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qtd."
+                    value={pilarLajeQtd}
+                    onChange={(e) => setPilarLajeQtd(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarPilarLaje}
+                    disabled={!pilarLajeId}
+                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
+                  >
+                    Adicionar pilar
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                  <div className="sm:col-span-2 flex items-center text-xs text-slate-500">
+                    Montagem da laje/mezanino (separada da montagem do galpão)
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qtd. (VB)"
+                    value={montagemLajeQtd}
+                    onChange={(e) => setMontagemLajeQtd(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarMontagemLaje}
+                    disabled={!montagemLajeQtd}
+                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
+                  >
+                    Adicionar montagem
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
                 <p className="text-xs font-medium text-slate-600 mb-2">
                   Calculadora: Viga para laje (volume × valor do m³)
@@ -959,7 +1225,14 @@ export default function OrcamentosGalpaoPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {itens.map((i) => (
+                  {itensLaje.length > 0 && (
+                    <tr>
+                      <td colSpan={6} className="pt-2 pb-1 text-xs font-semibold text-slate-500 uppercase">
+                        Estrutura do galpão
+                      </td>
+                    </tr>
+                  )}
+                  {itensEstrutura.map((i) => (
                     <tr key={i.chave} className="border-t border-slate-200">
                       <td className="py-1.5 pr-2">
                         {i.nome}
@@ -1008,6 +1281,81 @@ export default function OrcamentosGalpaoPage() {
                       </td>
                     </tr>
                   ))}
+                  {itensLaje.length > 0 && (
+                    <>
+                      <tr className="border-t border-slate-300">
+                        <td colSpan={4} className="py-1 text-right text-xs font-medium text-slate-500">
+                          Subtotal estrutura
+                          {areaCalculada && valorPorM2 !== null
+                            ? ` — ${formatarMoeda(valorPorM2)}/m² (÷ ${areaCalculada.toLocaleString("pt-BR")}m²)`
+                            : ""}
+                        </td>
+                        <td className="py-1 text-right font-semibold whitespace-nowrap">
+                          {formatarMoeda(subtotalEstrutura)}
+                        </td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={6} className="pt-3 pb-1 text-xs font-semibold text-emerald-700 uppercase">
+                          Estrutura da laje/mezanino
+                        </td>
+                      </tr>
+                      {itensLaje.map((i) => (
+                        <tr key={i.chave} className="border-t border-slate-200 bg-emerald-50/30">
+                          <td className="py-1.5 pr-2">{i.nome}</td>
+                          <td className="py-1.5 pr-2 text-slate-500">{i.unidade || "-"}</td>
+                          <td className="py-1.5 pr-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={i.quantidade}
+                              onChange={(e) =>
+                                atualizarItem(i.chave, "quantidade", e.target.value)
+                              }
+                              className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          </td>
+                          <td className="py-1.5 pr-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={i.preco_unitario}
+                              onChange={(e) =>
+                                atualizarItem(i.chave, "preco_unitario", e.target.value)
+                              }
+                              className="w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          </td>
+                          <td className="py-1.5 text-right whitespace-nowrap">
+                            {formatarMoeda(i.quantidade * i.preco_unitario)}
+                          </td>
+                          <td className="py-1.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => removerItem(i.chave)}
+                              className="text-red-600 hover:text-red-800 text-xs font-medium"
+                            >
+                              Remover
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="border-t border-slate-300">
+                        <td colSpan={4} className="py-1 text-right text-xs font-medium text-emerald-700">
+                          Subtotal laje/mezanino
+                          {valorPorM2Laje !== null
+                            ? ` — ${formatarMoeda(valorPorM2Laje)}/m² (÷ ${areaLajeNumerica.toLocaleString("pt-BR")}m²)`
+                            : ""}
+                        </td>
+                        <td className="py-1 text-right font-semibold whitespace-nowrap">
+                          {formatarMoeda(subtotalLaje)}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </>
+                  )}
                 </tbody>
               </table>
             )}
@@ -1262,16 +1610,43 @@ export default function OrcamentosGalpaoPage() {
                           Nota interna: {o.observacao_interna}
                         </p>
                       )}
-                      <ul className="text-xs text-slate-600 space-y-1">
-                        {(o.itens_orcamento_galpao || []).map((item) => (
+                      {(() => {
+                        const todosItens = o.itens_orcamento_galpao || [];
+                        const daEstrutura = todosItens.filter((item) => item.secao !== "laje");
+                        const daLaje = todosItens.filter((item) => item.secao === "laje");
+                        const linhaItem = (item) => (
                           <li key={item.id}>
                             {item.quantidade}x{" "}
                             {item.composicoes_galpao?.nome ?? item.descricao_livre ?? "peça removida"} —{" "}
                             {formatarMoeda(item.preco_unitario)} cada ={" "}
                             {formatarMoeda(item.quantidade * item.preco_unitario)}
                           </li>
-                        ))}
-                      </ul>
+                        );
+                        if (daLaje.length === 0) {
+                          return (
+                            <ul className="text-xs text-slate-600 space-y-1">
+                              {todosItens.map(linhaItem)}
+                            </ul>
+                          );
+                        }
+                        return (
+                          <>
+                            <p className="text-xs font-semibold text-slate-500 uppercase mb-1">
+                              Estrutura do galpão
+                            </p>
+                            <ul className="text-xs text-slate-600 space-y-1 mb-2">
+                              {daEstrutura.map(linhaItem)}
+                            </ul>
+                            <p className="text-xs font-semibold text-emerald-700 uppercase mb-1">
+                              Estrutura da laje/mezanino
+                              {o.area_laje ? ` — ${o.area_laje} m²` : ""}
+                            </p>
+                            <ul className="text-xs text-slate-600 space-y-1">
+                              {daLaje.map(linhaItem)}
+                            </ul>
+                          </>
+                        );
+                      })()}
                     </td>
                   </tr>
                 )}
