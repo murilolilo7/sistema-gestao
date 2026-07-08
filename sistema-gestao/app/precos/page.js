@@ -76,7 +76,7 @@ export default function PrecosPage() {
   function buscarComposicoes() {
     return supabase
       .from("composicoes_galpao")
-      .select("id, codigo, nome, papel, unidade, custo, preco, bdi_pct, area_referencia")
+      .select("id, codigo, nome, papel, unidade, custo, preco, bdi_pct, area_referencia, composicao_itens(count)")
       .order("codigo");
   }
 
@@ -790,8 +790,9 @@ export default function PrecosPage() {
           {recalculando ? "Recalculando..." : "Recalcular todas as peças a partir dos insumos/mão de obra acima"}
         </button>
         <p className="text-xs text-slate-400 mt-1">
-          Use depois de salvar mudanças de insumo/mão de obra. Peças sem receita (Telha, Calha, Capote, Montagem,
-          Fundação, e peças incluídas manualmente) não são afetadas.
+          Atualiza SOMENTE o custo de cada peça (soma da composição) — o preço de venda que você
+          definiu nunca é alterado. Peças sem composição (Telha, Calha, Capote, Montagem, Fundação e
+          peças incluídas manualmente) não são afetadas.
         </p>
       </div>
       )}
@@ -943,7 +944,12 @@ export default function PrecosPage() {
                     onChange={(e) =>
                       atualizarCampo(composicoes, setComposicoes, c.id, "custo", e.target.value)
                     }
-                    disabled={!souAdmin}
+                    disabled={!souAdmin || (c.composicao_itens?.[0]?.count || 0) > 0}
+                    title={
+                      (c.composicao_itens?.[0]?.count || 0) > 0
+                        ? "Custo calculado automaticamente pela composição da peça (abra a setinha pra ver) — ajuste as quantidades da composição e ele acompanha"
+                        : undefined
+                    }
                     className={campoNumero}
                   />
                 </td>
