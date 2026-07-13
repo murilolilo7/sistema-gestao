@@ -82,6 +82,93 @@ function primeiraComPapel(itens, papel) {
   return (itens || []).find((item) => item.composicoes_galpao?.papel === papel);
 }
 
+// Ponto num plano oblíquo simplificado: comprimento corre na horizontal,
+// largura recua na diagonal (ângulo fixo), altura sobe na vertical.
+// Cada medida é escalada dentro de uma faixa fixa de pixels — assim um
+// galpão muito comprido ou muito largo nunca distorce o desenho, só
+// varia moderadamente dentro de um intervalo sempre legível.
+const DESENHO_ANGULO = (35 * Math.PI) / 180;
+const DESENHO_FATOR_PROFUNDIDADE = 0.55;
+
+function escalarMedida(valorMetros, pxMin, pxMax, metroMin, metroMax) {
+  const v = Math.max(metroMin, Math.min(metroMax, Number(valorMetros) || metroMin));
+  const t = (v - metroMin) / (metroMax - metroMin);
+  return pxMin + t * (pxMax - pxMin);
+}
+
+function calcularDesenhoGalpao(vao, comprimento, peDireito) {
+  const larguraPx = escalarMedida(vao, 85, 175, 6, 20);
+  const comprimentoPx = escalarMedida(comprimento, 150, 300, 8, 40);
+  const alturaPx = escalarMedida(peDireito, 85, 145, 4, 10);
+  const alturaTelhado = alturaPx * 0.22;
+
+  const ox = 60;
+  const oyBase = 235;
+  const dx = Math.cos(DESENHO_ANGULO) * larguraPx * DESENHO_FATOR_PROFUNDIDADE;
+  const dy = -Math.sin(DESENHO_ANGULO) * larguraPx * DESENHO_FATOR_PROFUNDIDADE;
+
+  const fBL = [ox, oyBase];
+  const fBR = [ox + comprimentoPx, oyBase];
+  const fTL = [ox, oyBase - alturaPx];
+  const fTR = [ox + comprimentoPx, oyBase - alturaPx];
+  const bBL = [fBL[0] + dx, fBL[1] + dy];
+  const bTL = [fTL[0] + dx, fTL[1] + dy];
+  const ridgeLeft = [ox + dx / 2, oyBase - alturaPx + dy / 2 - alturaTelhado];
+  const ridgeRight = [ox + comprimentoPx + dx / 2, oyBase - alturaPx + dy / 2 - alturaTelhado];
+
+  const pStr = (p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
+
+  // Colunas (indicação estrutural) — distribuídas ao longo da parede
+  // frontal, só pra sugerir os módulos, não precisa bater exatamente
+  // com a quantidade real de peças.
+  const numColunas = 5;
+  const colunas = Array.from({ length: numColunas }, (_, i) => {
+    const x = ox + (comprimentoPx * i) / (numColunas - 1);
+    return { x1: x, y1: oyBase, x2: x, y2: oyBase - alturaPx };
+  });
+
+  // Linhas de telhado (indicam o sentido da telha, correndo da cumeeira
+  // até o beiral, acompanhando a direção da largura).
+  const numLinhasTelha = 4;
+  const linhasTelha = Array.from({ length: numLinhasTelha }, (_, i) => {
+    const t = (i + 1) / (numLinhasTelha + 1);
+    const x1 = fTL[0] + (fTR[0] - fTL[0]) * t;
+    const y1 = fTL[1];
+    return {
+      x1,
+      y1,
+      x2: x1 + dx / 2,
+      y2: y1 + dy / 2 - alturaTelhado,
+    };
+  });
+
+  return {
+    viewBoxLargura: 460,
+    viewBoxAltura: 320,
+    paredeLateral: `M${pStr(fBL)} L${pStr(bBL)} L${pStr(bTL)} L${pStr(fTL)} Z`,
+    paredeFrontal: `M${pStr(fBL)} L${pStr(fBR)} L${pStr(fTR)} L${pStr(fTL)} Z`,
+    frontao: `M${pStr(fTL)} L${pStr(bTL)} L${pStr(ridgeLeft)} Z`,
+    telhado: `M${pStr(fTL)} L${pStr(fTR)} L${pStr(ridgeRight)} L${pStr(ridgeLeft)} Z`,
+    cumeeira: `M${pStr(ridgeLeft)} L${pStr(ridgeRight)}`,
+    chaoX1: ox - 15,
+    chaoX2: ox + comprimentoPx + 15,
+    chaoY: oyBase,
+    colunas,
+    linhasTelha,
+    fBL,
+    fBR,
+    fTL,
+    bBL,
+    bTL,
+    oyBase,
+    comprimentoPx,
+    larguraPx,
+    alturaPx,
+    dx,
+    dy,
+  };
+}
+
 function ConteudoImpressao() {
   const searchParams = useSearchParams();
   const codigo = searchParams.get("codigo");
@@ -155,6 +242,8 @@ function ConteudoImpressao() {
   const itensOrcamento = orcamento.itens_orcamento_galpao || [];
   const itemTelha = primeiraComPapel(itensOrcamento, "TELHA");
   const itemCalha = primeiraComPapel(itensOrcamento, "CALHA");
+  const desenho = calcularDesenhoGalpao(orcamento.vao, orcamento.comprimento, orcamento.pe_direito);
+
   const especificacoes = [
     { rotulo: "Largura", valor: orcamento.vao ? `${formatarMedida(orcamento.vao)}M` : "-" },
     {
@@ -245,12 +334,105 @@ function ConteudoImpressao() {
         </div>
       </div>
 
-      <div className="border border-slate-300 rounded-md p-4 mb-6 text-xs leading-relaxed">
-        {especificacoes.map((e) => (
-          <p key={e.rotulo}>
-            <span className="font-semibold">{e.rotulo.toUpperCase()}:</span> {e.valor}
-          </p>
-        ))}
+      <div className="border border-slate-300 rounded-md p-4 mb-6 grid grid-cols-[1fr_auto] gap-4 items-center">
+        <div className="text-xs leading-relaxed">
+          {especificacoes.map((e) => (
+            <p key={e.rotulo}>
+              <span className="font-semibold">{e.rotulo.toUpperCase()}:</span> {e.valor}
+            </p>
+          ))}
+        </div>
+        <svg
+          width="230"
+          viewBox={`0 0 ${desenho.viewBoxLargura} ${desenho.viewBoxAltura}`}
+          role="img"
+          aria-label="Desenho esquemático do galpão com as medidas do orçamento"
+        >
+          <line
+            x1={desenho.chaoX1}
+            y1={desenho.chaoY}
+            x2={desenho.chaoX2}
+            y2={desenho.chaoY}
+            stroke="#0f172a"
+            strokeWidth="1"
+          />
+          <path d={desenho.paredeLateral} fill="#f1f5f9" stroke="#0f172a" strokeWidth="1.3" />
+          <path d={desenho.paredeFrontal} fill="#f8fafc" stroke="#0f172a" strokeWidth="1.3" />
+          <path d={desenho.frontao} fill="#f1f5f9" stroke="#0f172a" strokeWidth="1.3" />
+          <path d={desenho.telhado} fill="#e2e8f0" stroke="#0f172a" strokeWidth="1.3" />
+          <path d={desenho.cumeeira} stroke="#0f172a" strokeWidth="1.3" fill="none" />
+          {desenho.colunas.map((c, i) => (
+            <line
+              key={i}
+              x1={c.x1}
+              y1={c.y1}
+              x2={c.x2}
+              y2={c.y2}
+              stroke="#64748b"
+              strokeWidth="1"
+            />
+          ))}
+          {desenho.linhasTelha.map((l, i) => (
+            <line
+              key={i}
+              x1={l.x1}
+              y1={l.y1}
+              x2={l.x2}
+              y2={l.y2}
+              stroke="#94a3b8"
+              strokeWidth="0.8"
+            />
+          ))}
+          {/* Cota: comprimento */}
+          <line
+            x1={desenho.fBL[0]}
+            y1={desenho.oyBase + 22}
+            x2={desenho.fBR[0]}
+            y2={desenho.oyBase + 22}
+            stroke="#059669"
+            strokeWidth="1"
+          />
+          <text
+            x={(desenho.fBL[0] + desenho.fBR[0]) / 2}
+            y={desenho.oyBase + 38}
+            textAnchor="middle"
+            fontSize="11"
+            fill="#059669"
+            fontWeight="600"
+          >
+            {formatarMedida(orcamento.comprimento)}M
+          </text>
+          {/* Cota: altura */}
+          <line
+            x1={desenho.fBL[0] - 22}
+            y1={desenho.fBL[1]}
+            x2={desenho.fTL[0] - 22}
+            y2={desenho.fTL[1]}
+            stroke="#059669"
+            strokeWidth="1"
+          />
+          <text
+            x={desenho.fBL[0] - 28}
+            y={(desenho.fBL[1] + desenho.fTL[1]) / 2}
+            textAnchor="end"
+            fontSize="11"
+            fill="#059669"
+            fontWeight="600"
+          >
+            {formatarMedida(orcamento.pe_direito)}M
+          </text>
+          {/* Cota: largura */}
+          <text
+            x={(desenho.fBL[0] + desenho.bBL[0]) / 2 - 6}
+            y={(desenho.fBL[1] + desenho.bBL[1]) / 2 + 16}
+            textAnchor="middle"
+            fontSize="11"
+            fill="#059669"
+            fontWeight="600"
+          >
+            {formatarMedida(orcamento.vao)}M
+          </text>
+        </svg>
       </div>
 
       <table className="w-full border-collapse text-xs mb-2">
