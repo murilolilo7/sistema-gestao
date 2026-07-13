@@ -34,6 +34,54 @@ function nomeArquivoSeguro(texto) {
   return texto.replace(/[\\/:*?"<>|]/g, "").trim();
 }
 
+function formatarMedida(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  return Number(valor).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+// Extrai a medida (ex: "5,00" de "TERÇA INTERMEDIÁRIA 5,00M")
+function extrairMedidaDoNome(nome) {
+  const match = (nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i);
+  return match ? match[1] : null;
+}
+
+// Modulação = os tamanhos de terça que realmente estão no orçamento
+// (ex: intermediária 5,00M + início/final 6,00M). Não é uma fórmula —
+// é lida direto da lista de peças, então nunca destoa do que foi
+// montado de verdade.
+function calcularModulacao(itensOrcamento) {
+  const tercas = (itensOrcamento || []).filter(
+    (item) => item.composicoes_galpao?.papel === "TERCA" && Number(item.quantidade) > 0
+  );
+  if (tercas.length === 0) return "-";
+  const medidas = [
+    ...new Set(
+      tercas.map((t) => extrairMedidaDoNome(t.composicoes_galpao?.nome)).filter(Boolean)
+    ),
+  ].sort((a, b) => parseFloat(a.replace(",", ".")) - parseFloat(b.replace(",", ".")));
+  if (medidas.length === 0) return "-";
+  return medidas.map((m) => `${m}M`).join(" E ");
+}
+
+// "TELHAS METÁLICAS" -> "METÁLICAS" | "CALHA FIBRA" -> "FIBRA"
+function simplificarNome(nome, prefixo) {
+  if (!nome) return "-";
+  return nome.replace(new RegExp(`^${prefixo}S?\\s+`, "i"), "").trim();
+}
+
+function possuiPapel(itens, papel) {
+  return (itens || []).some(
+    (item) => item.composicoes_galpao?.papel === papel && Number(item.quantidade) > 0
+  );
+}
+
+function primeiraComPapel(itens, papel) {
+  return (itens || []).find((item) => item.composicoes_galpao?.papel === papel);
+}
+
 function ConteudoImpressao() {
   const searchParams = useSearchParams();
   const codigo = searchParams.get("codigo");
@@ -54,7 +102,7 @@ function ConteudoImpressao() {
         supabase
           .from("orcamentos_galpao")
           .select(
-            "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), modelos_galpao(nome), itens_orcamento_galpao(id, quantidade, preco_unitario, descricao_livre, unidade_livre, composicoes_galpao(nome, codigo, unidade))"
+            "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), modelos_galpao(nome), itens_orcamento_galpao(id, quantidade, preco_unitario, descricao_livre, unidade_livre, composicoes_galpao(nome, codigo, unidade, papel))"
           )
           .eq("codigo", codigo)
           .single(),
@@ -103,6 +151,37 @@ function ConteudoImpressao() {
     new Date(orcamento.validade + "T00:00:00") < new Date(new Date().setHours(0, 0, 0, 0));
   const rotuloStatus =
     orcamento.status === "aprovado" ? "Aprovado" : vencido ? "Vencido" : "Pendente";
+
+  const itensOrcamento = orcamento.itens_orcamento_galpao || [];
+  const itemTelha = primeiraComPapel(itensOrcamento, "TELHA");
+  const itemCalha = primeiraComPapel(itensOrcamento, "CALHA");
+  const especificacoes = [
+    { rotulo: "Largura", valor: orcamento.vao ? `${formatarMedida(orcamento.vao)}M` : "-" },
+    {
+      rotulo: "Comprimento",
+      valor: orcamento.comprimento ? `${formatarMedida(orcamento.comprimento)}M` : "-",
+    },
+    {
+      rotulo: "Altura",
+      valor: orcamento.pe_direito ? `${formatarMedida(orcamento.pe_direito)}M` : "-",
+    },
+    { rotulo: "Modulação", valor: calcularModulacao(itensOrcamento) },
+    { rotulo: "Telhas", valor: simplificarNome(itemTelha?.composicoes_galpao?.nome, "TELHA") },
+    { rotulo: "Terças", valor: "EM CONCRETO ARMADO" },
+    { rotulo: "Laje pré-moldada", valor: possuiPapel(itensOrcamento, "LAJE") ? "SIM" : "NÃO" },
+    {
+      rotulo: "Área",
+      valor:
+        orcamento.vao && orcamento.comprimento
+          ? `${formatarMedida(Number(orcamento.vao) * Number(orcamento.comprimento))}M²`
+          : "-",
+    },
+    { rotulo: "Calha", valor: simplificarNome(itemCalha?.composicoes_galpao?.nome, "CALHA") },
+    {
+      rotulo: "Viga de travamento",
+      valor: possuiPapel(itensOrcamento, "VIGA_TRAVAMENTO") ? "SIM" : "NÃO",
+    },
+  ];
 
   return (
     <div className="max-w-3xl mx-auto p-8 print:p-4 text-slate-900 bg-white">
@@ -164,6 +243,14 @@ function ConteudoImpressao() {
             <span className="font-semibold">Status:</span> {rotuloStatus}
           </p>
         </div>
+      </div>
+
+      <div className="border border-slate-300 rounded-md p-4 mb-6 text-xs leading-relaxed">
+        {especificacoes.map((e) => (
+          <p key={e.rotulo}>
+            <span className="font-semibold">{e.rotulo.toUpperCase()}:</span> {e.valor}
+          </p>
+        ))}
       </div>
 
       <table className="w-full border-collapse text-xs mb-2">
