@@ -6,16 +6,30 @@
 
 // Desenho isométrico do galpão pré-moldado, gerado só com os dados do
 // orçamento: estrutura aberta com pilares, vigas de travamento, laje
-// (quando houver) e coberta de duas águas por vão — galpões germinados
-// ganham uma cumeeira para cada vão. As proporções são reais (metros
-// projetados) e o enquadramento é automático, então nunca distorce.
+// (quando houver) e coberta de duas águas por galpão — geminados ganham
+// uma cumeeira para cada galpão, inclusive com LARGURAS DIFERENTES
+// (lista em dados.larguras). As proporções são reais (metros projetados)
+// e o enquadramento é automático, então nunca distorce.
 function calcularDesenhoGalpao(dados) {
-  const vaos = Math.max(1, (Number(dados.galpoesGerminados) || 0) + 1);
-  const Wv = Math.max(4, Number(dados.vao) || 10); // largura de cada vão
-  const W = Wv * vaos; // largura total
+  const qtdGalpoes = Math.max(1, (Number(dados.galpoesGerminados) || 0) + 1);
+  // Larguras: aceita uma lista (galpões geminados de tamanhos diferentes)
+  // ou repete a largura única informada para todos os galpões.
+  let larguras = Array.isArray(dados.larguras)
+    ? dados.larguras.map((n) => Number(n) || 0).filter((n) => n > 0)
+    : [];
+  if (larguras.length === 0) {
+    larguras = Array(qtdGalpoes).fill(Math.max(4, Number(dados.vao) || 10));
+  } else {
+    larguras = larguras.map((n) => Math.max(4, n));
+    while (larguras.length < qtdGalpoes) larguras.push(larguras[larguras.length - 1]);
+  }
+  // Posições acumuladas das divisas entre galpões (0, l1, l1+l2, ...)
+  const divisas = [0];
+  for (const l of larguras) divisas.push(divisas[divisas.length - 1] + l);
+  const W = divisas[divisas.length - 1]; // largura total
   const C = Math.max(6, Number(dados.comprimento) || 20);
   const H = Math.max(3, Number(dados.peDireito) || 6);
-  const hc = (Wv / 2) * 0.15; // cumeeira: 15% de caimento
+  const hcMax = (Math.max(...larguras) / 2) * 0.15; // maior cumeeira
   const nMod = Math.max(1, Math.round(C / (Number(dados.modulacao) || 5)));
   const passo = C / nMod;
 
@@ -44,7 +58,7 @@ function calcularDesenhoGalpao(dados) {
   // Enquadramento automático dentro do viewBox
   const cantos = [];
   for (const x of [0, W])
-    for (const y of [0, H + hc]) for (const z of [0, C]) cantos.push(proj(x, y, z));
+    for (const y of [0, H + hcMax]) for (const z of [0, C]) cantos.push(proj(x, y, z));
   let minX = Infinity,
     maxX = -Infinity,
     minY = Infinity,
@@ -102,9 +116,8 @@ function calcularDesenhoGalpao(dados) {
   const texto = (x, y, txt, anchor) =>
     formas.push({ tipo: "texto", x: +x.toFixed(1), y: +y.toFixed(1), txt, anchor });
 
-  // Linhas longitudinais de pilares: bordas externas + divisas dos vãos
-  const linhasX = [];
-  for (let v = 0; v <= vaos; v++) linhasX.push(v * Wv);
+  // Linhas longitudinais de pilares: bordas externas + divisas dos galpões
+  const linhasX = divisas;
 
   // 1) Fundo: empena traseira e lateral distante, em traço mais claro
   for (const x of linhasX) linha(T(x, 0, C), T(x, H, C), CONCRETO_CLARO, wPilar * 0.8);
@@ -129,17 +142,18 @@ function calcularDesenhoGalpao(dados) {
     linha(T(0, yLaje, 0), T(W, yLaje, 0), CONCRETO, wViga * 1.1);
   }
 
-  // 3) Pilares internos (divisas entre galpões germinados)
-  for (let v = 1; v < vaos; v++)
+  // 3) Pilares internos (divisas entre galpões geminados)
+  for (let v = 1; v < larguras.length; v++)
     for (let i = 0; i <= nMod; i++)
-      linha(T(v * Wv, 0, i * passo), T(v * Wv, H, i * passo), CONCRETO, wPilar * 0.9);
+      linha(T(divisas[v], 0, i * passo), T(divisas[v], H, i * passo), CONCRETO, wPilar * 0.9);
 
-  // 4) Coberta: duas águas por vão, dos vãos mais distantes para os
-  // mais próximos, com as linhas das telhas no sentido do caimento
-  for (let v = vaos - 1; v >= 0; v--) {
-    const x0 = v * Wv;
-    const x1 = (v + 1) * Wv;
+  // 4) Coberta: duas águas por galpão, dos mais distantes para os mais
+  // próximos, cada um com a própria largura e a própria cumeeira
+  for (let v = larguras.length - 1; v >= 0; v--) {
+    const x0 = divisas[v];
+    const x1 = divisas[v + 1];
     const xm = (x0 + x1) / 2;
+    const hc = (larguras[v] / 2) * 0.15;
     poligono(
       [T(x1, H, 0), T(xm, H + hc, 0), T(xm, H + hc, C), T(x1, H, C)],
       "#eef1f4",
@@ -159,7 +173,7 @@ function calcularDesenhoGalpao(dados) {
     }
     linha(T(xm, H + hc, 0), T(xm, H + hc, C), CONCRETO, wViga); // cumeeira
     // Empena frontal FECHADA (a tesoura não fica oca): painel de
-    // fechamento no triângulo da frente de cada vão
+    // fechamento no triângulo da frente de cada galpão
     poligono([T(x0, H, 0), T(xm, H + hc, 0), T(x1, H, 0)], "#eef1f4", CONCRETO, wViga);
     linha(T(xm, H, 0), T(xm, H + hc, 0), CONCRETO_CLARO, wViga * 0.8); // emenda do painel
   }
@@ -215,6 +229,7 @@ export default function DesenhoGalpao({
   comprimento,
   peDireito,
   galpoesGerminados = 0,
+  larguras = null,
   modulacao = 5,
   temLaje = false,
   temTravamento = false,
@@ -223,17 +238,24 @@ export default function DesenhoGalpao({
   const fmt = (n) =>
     Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const totalGalpoes = Math.max(0, Number(galpoesGerminados) || 0) + 1;
-  const larguraTotal = (Number(vao) || 0) * totalGalpoes;
+  const listaLarguras =
+    Array.isArray(larguras) && larguras.some((n) => Number(n) > 0)
+      ? larguras.map((n) => Number(n) || Number(vao) || 0)
+      : null;
+  const larguraTotal = listaLarguras
+    ? listaLarguras.reduce((s, n) => s + n, 0)
+    : (Number(vao) || 0) * totalGalpoes;
 
   const desenho = calcularDesenhoGalpao({
     vao,
     comprimento,
     peDireito,
     galpoesGerminados,
+    larguras: listaLarguras,
     modulacao,
     temLaje,
     temTravamento,
-    textoLargura: vao ? `${fmt(larguraTotal)}M` : null,
+    textoLargura: larguraTotal > 0 ? `${fmt(larguraTotal)}M` : null,
     textoComprimento: comprimento ? `${fmt(comprimento)}M` : null,
     textoAltura: peDireito ? `${fmt(peDireito)}M` : null,
   });
