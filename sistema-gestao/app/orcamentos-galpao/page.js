@@ -129,6 +129,9 @@ export default function OrcamentosGalpaoPage() {
   const [peDireito, setPeDireito] = useState("");
   const [numeroVaos, setNumeroVaos] = useState("");
   const [numeroGalpoesGerminados, setNumeroGalpoesGerminados] = useState("0");
+  // Larguras dos galpões 2, 3, ... quando o geminado tem tamanhos
+  // diferentes (o galpão 1 usa o campo principal "vao"/largura).
+  const [largurasExtras, setLargurasExtras] = useState([]);
   const [telhaId, setTelhaId] = useState("");
   const [areaLaje, setAreaLaje] = useState("");
   const [tipoLajeId, setTipoLajeId] = useState("");
@@ -227,11 +230,20 @@ export default function OrcamentosGalpaoPage() {
 
   const modeloSelecionado = modelos.find((m) => String(m.id) === String(modeloId));
   const tipoSelecionado = modeloSelecionado?.tipo || "";
-  // GEMINADO: o vão lançado é o de CADA galpão — a área coberta total
-  // multiplica pelo nº de galpões (germinados a mais + 1).
+  // GEMINADO: a largura lançada é a de CADA galpão. Galpões podem ter
+  // larguras diferentes — o galpão 1 usa o campo principal e os demais
+  // usam os campos extras (vazio = repete a largura do galpão 1).
   const totalGalpoes = Math.max(0, Number(numeroGalpoesGerminados) || 0) + 1;
-  const areaCalculada =
-    vao && comprimento ? Number(vao) * Number(comprimento) * totalGalpoes : null;
+  const listaLarguras =
+    totalGalpoes > 1 && vao
+      ? Array.from({ length: totalGalpoes }, (_, i) =>
+          i === 0 ? Number(vao) : Number(largurasExtras[i - 1]) || Number(vao)
+        )
+      : null;
+  const somaLarguras = listaLarguras
+    ? listaLarguras.reduce((s, n) => s + n, 0)
+    : Number(vao) || 0;
+  const areaCalculada = vao && comprimento ? somaLarguras * Number(comprimento) : null;
 
   // Recalcula telha/calha/capote automaticamente, ao vivo, sempre que as
   // medidas, o nº de galpões germinados ou o tipo de telha mudam.
@@ -240,9 +252,15 @@ export default function OrcamentosGalpaoPage() {
     // O campo é "quantos galpões germinados A MAIS" (0 = avulso, sem
     // germinação). +1 converte pro total de unidades físicas coladas.
     const germinados = Math.max(0, Number(numeroGalpoesGerminados) || 0) + 1;
-    // GEMINADO: o vão é o de CADA galpão, então a área de telha soma
-    // todos os galpões (vão x comprimento x nº de galpões).
-    const area = Number(vao) * Number(comprimento) * germinados;
+    // GEMINADO: soma a largura de CADA galpão (podem ser diferentes;
+    // campo extra vazio repete a largura do galpão 1).
+    const somaL =
+      germinados > 1
+        ? Array.from({ length: germinados }, (_, i) =>
+            i === 0 ? Number(vao) : Number(largurasExtras[i - 1]) || Number(vao)
+          ).reduce((s, n) => s + n, 0)
+        : Number(vao);
+    const area = somaL * Number(comprimento);
 
     setItens((atual) => {
       if (atual.length === 0) return atual;
@@ -335,6 +353,7 @@ export default function OrcamentosGalpaoPage() {
     comprimento,
     numeroVaos,
     numeroGalpoesGerminados,
+    largurasExtras,
     telhaId,
     areaLaje,
     tipoLajeId,
@@ -595,6 +614,7 @@ export default function OrcamentosGalpaoPage() {
     setPeDireito("");
     setNumeroVaos("");
     setNumeroGalpoesGerminados("0");
+    setLargurasExtras([]);
     setTelhaId("");
     setAreaLaje("");
     setTipoLajeId("");
@@ -642,6 +662,11 @@ export default function OrcamentosGalpaoPage() {
       orcamento.numero_galpoes_germinados === null || orcamento.numero_galpoes_germinados === undefined
         ? "0"
         : String(orcamento.numero_galpoes_germinados)
+    );
+    setLargurasExtras(
+      Array.isArray(orcamento.larguras_galpoes) && orcamento.larguras_galpoes.length > 1
+        ? orcamento.larguras_galpoes.slice(1).map((n) => String(n))
+        : []
     );
     setDiasValidade(diasAPartirDeHoje(orcamento.validade));
     setDesconto(orcamento.desconto ? String(orcamento.desconto) : "");
@@ -748,6 +773,7 @@ export default function OrcamentosGalpaoPage() {
           vendedor_input: nomeUsuario || null,
           observacao_interna_input: observacaoInterna.trim() || null,
           numero_galpoes_germinados_input: Math.max(0, Number(numeroGalpoesGerminados) || 0),
+          larguras_galpoes_input: listaLarguras,
           area_laje_input: areaLaje ? Number(areaLaje) : null,
         })
       : await supabase.rpc("criar_orcamento_galpao", {
@@ -765,6 +791,7 @@ export default function OrcamentosGalpaoPage() {
           vendedor_input: nomeUsuario || null,
           observacao_interna_input: observacaoInterna.trim() || null,
           numero_galpoes_germinados_input: Math.max(0, Number(numeroGalpoesGerminados) || 0),
+          larguras_galpoes_input: listaLarguras,
           area_laje_input: areaLaje ? Number(areaLaje) : null,
         });
 
@@ -894,7 +921,9 @@ export default function OrcamentosGalpaoPage() {
           {modeloId && (
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 mb-3">
               <div>
-                <label className={labelClasse}>Largura / vão (m)</label>
+                <label className={labelClasse}>
+                  {totalGalpoes > 1 ? "Largura galpão 1 (m)" : "Largura do galpão (m)"}
+                </label>
                 <input
                   type="number"
                   step="0.01"
@@ -954,12 +983,46 @@ export default function OrcamentosGalpaoPage() {
             </div>
           )}
 
+          {modeloId && totalGalpoes > 1 && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+              <p className="text-xs font-medium text-slate-600 mb-2">
+                Largura dos demais galpões geminados (deixe em branco para repetir a largura do
+                galpão 1) — a área e a telha somam todos os galpões.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {Array.from({ length: totalGalpoes - 1 }, (_, i) => (
+                  <div key={i}>
+                    <label className={labelClasse}>Largura galpão {i + 2} (m)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={largurasExtras[i] ?? ""}
+                      onChange={(e) => {
+                        const valor = e.target.value;
+                        setLargurasExtras((atual) => {
+                          const novo = [...atual];
+                          novo[i] = valor;
+                          return novo;
+                        });
+                      }}
+                      placeholder={vao ? `${vao} (igual ao 1)` : "Ex: 7"}
+                      className={campoClasse}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {areaCalculada && (
             <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 mb-4 flex flex-wrap items-center gap-6">
               <div>
                 <p className="text-xs text-emerald-700">
                   Área coberta
-                  {totalGalpoes > 1 ? ` (${totalGalpoes} galpões de ${vao}m x ${comprimento}m)` : ""}
+                  {listaLarguras
+                    ? ` (${listaLarguras.map((n) => n.toLocaleString("pt-BR")).join("m + ")}m x ${comprimento}m)`
+                    : ""}
                 </p>
                 <p className="text-lg font-semibold text-emerald-900">
                   {areaCalculada.toLocaleString("pt-BR")} m²
@@ -996,6 +1059,7 @@ export default function OrcamentosGalpaoPage() {
                     comprimento={comprimento}
                     peDireito={peDireito}
                     galpoesGerminados={numeroGalpoesGerminados}
+                    larguras={listaLarguras}
                     modulacao={
                       Number(numeroVaos) > 0 ? Number(comprimento) / Number(numeroVaos) : 5
                     }
