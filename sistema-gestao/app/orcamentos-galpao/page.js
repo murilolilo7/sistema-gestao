@@ -141,6 +141,7 @@ export default function OrcamentosGalpaoPage() {
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
+  const [buscaPeca, setBuscaPeca] = useState("");
   const [quantidadeParaAdicionar, setQuantidadeParaAdicionar] = useState("1");
   const [desconto, setDesconto] = useState("");
   const [margemComercial, setMargemComercial] = useState("25");
@@ -372,6 +373,29 @@ export default function OrcamentosGalpaoPage() {
     acc[grupo].push(c);
     return acc;
   }, {});
+  // Busca de peças: filtra o seletor pelo texto digitado, ignorando
+  // maiúsculas e acentos ("terca" acha "TERÇA"). Vazio = lista completa.
+  const normalizarTexto = (t) =>
+    (t || "")
+      .toString()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  const composicoesPorPapelFiltrado = buscaPeca.trim()
+    ? Object.fromEntries(
+        Object.entries(composicoesPorPapel)
+          .map(([papel, lista]) => [
+            papel,
+            lista.filter((c) => normalizarTexto(c.nome).includes(normalizarTexto(buscaPeca))),
+          ])
+          .filter(([, lista]) => lista.length > 0)
+      )
+    : composicoesPorPapel;
+  const totalPecasSelecionaveis = composicoesSelecionaveis.length;
+  const totalPecasEncontradas = Object.values(composicoesPorPapelFiltrado).reduce(
+    (s, l) => s + l.length,
+    0
+  );
   // Papel = TELHA é a forma de marcar um tipo de telha/cobertura no
   // catálogo (em Preços). Adicionar um tipo novo lá já aparece aqui.
   const telhasDisponiveis = composicoes.filter((c) => c.papel === "TELHA");
@@ -449,10 +473,87 @@ export default function OrcamentosGalpaoPage() {
     };
   }
 
+  // Terças por linha de vão: largura do galpão ÷ 1,6, arredondando para
+  // cima e SEMPRE para número PAR (não existe terça aos pedaços nem
+  // quantidade ímpar). Ex.: 10m ÷ 1,6 = 6,25 → 7 → 8.
+  function qtdTercasPorLinhaDeVao(larguraGalpao) {
+    const bruto = Math.ceil((Number(larguraGalpao) || 0) / 1.6);
+    if (bruto <= 0) return 0;
+    return bruto % 2 === 0 ? bruto : bruto + 1;
+  }
+
+  // Decompõe o comprimento em módulos de 5m e 6m (o galpão pode misturar
+  // os dois). Usa o mínimo de vãos de 6m para fechar a metragem — ex.:
+  // 31m = 5 vãos de 5m + 1 vão de 6m; 30m = 6 vãos de 5m; 32m = 4x5 + 2x6.
+  function decomporComprimentoEmModulos(comprimentoTotal) {
+    const c = Number(comprimentoTotal);
+    if (!c || c <= 0) return null;
+    const inteiro = Math.round(c);
+    if (Math.abs(c - inteiro) > 0.001) return null; // comprimento quebrado: sem decomposição
+    for (let vaos6 = 0; vaos6 * 6 <= inteiro; vaos6++) {
+      const resto = inteiro - vaos6 * 6;
+      if (resto % 5 === 0) return { vaos5: resto / 5, vaos6 };
+    }
+    return null;
+  }
+
+  // Sugestão de terças para a peça selecionada: identifica a medida da
+  // terça pelo nome (5,00M / 6,00M), calcula quantas terças por vão
+  // (somando os galpões geminados) e multiplica pelos vãos daquela
+  // medida. Sem decomposição possível, usa o nº de vãos informado.
+  function sugestaoTerca(comp) {
+    if (!vao || !comprimento) return null;
+    const larguras = listaLarguras || [Number(vao)];
+    const porVao = larguras.map((l) => qtdTercasPorLinhaDeVao(l));
+    const totalPorVao = porVao.reduce((s, n) => s + n, 0);
+    if (totalPorVao <= 0) return null;
+
+    const detalheLarguras =
+      larguras.length === 1
+        ? `${larguras[0]}m ÷ 1,6 → ${porVao[0]} por vão (sempre par)`
+        : larguras.map((l, i) => `${l}m → ${porVao[i]}`).join(" + ") +
+          ` = ${totalPorVao} por vão (sempre par)`;
+
+    const medidaTxt = (comp?.nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i)?.[1] || null;
+    const medida = medidaTxt ? parseFloat(medidaTxt.replace(",", ".")) : null;
+    const decomp = decomporComprimentoEmModulos(comprimento);
+
+    if (decomp && (medida === 5 || medida === 6)) {
+      const nVaosDaMedida = medida === 6 ? decomp.vaos6 : decomp.vaos5;
+      const composicaoTexto =
+        `${comprimento}m = ` +
+        [
+          decomp.vaos5 > 0 ? `${decomp.vaos5} × 5m` : null,
+          decomp.vaos6 > 0 ? `${decomp.vaos6} × 6m` : null,
+        ]
+          .filter(Boolean)
+          .join(" + ");
+      if (nVaosDaMedida <= 0) {
+        return {
+          qtd: 0,
+          texto: `${composicaoTexto} — esse comprimento fecha sem vãos de ${medida}m, então essa terça não seria necessária`,
+        };
+      }
+      return {
+        qtd: totalPorVao * nVaosDaMedida,
+        texto: `${detalheLarguras} × ${nVaosDaMedida} vão(s) de ${medida}m (${composicaoTexto}) = ${totalPorVao * nVaosDaMedida}`,
+      };
+    }
+
+    const nVaosInformado = Number(numeroVaos) || 0;
+    if (nVaosInformado <= 0) return null;
+    return {
+      qtd: totalPorVao * nVaosInformado,
+      texto: `${detalheLarguras} × ${nVaosInformado} vãos informados = ${totalPorVao * nVaosInformado}`,
+    };
+  }
+
   const pecaSelecionada = composicoes.find(
     (c) => String(c.id) === String(composicaoParaAdicionar)
   );
   const sugestaoPilarAtiva = pecaSelecionada?.papel === "PILAR" ? sugestaoPilares() : null;
+  const sugestaoTercaAtiva =
+    pecaSelecionada?.papel === "TERCA" ? sugestaoTerca(pecaSelecionada) : null;
 
   function adicionarItem() {
     if (!composicaoParaAdicionar) return;
@@ -667,6 +768,7 @@ export default function OrcamentosGalpaoPage() {
     setNumeroVaos("");
     setNumeroGalpoesGerminados("0");
     setLargurasExtras([]);
+    setBuscaPeca("");
     setTelhaId("");
     setAreaLaje("");
     setTipoLajeId("");
@@ -935,6 +1037,24 @@ export default function OrcamentosGalpaoPage() {
 
         <form
           onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            // ENTER nunca finaliza o orçamento por acidente: dentro de um
+            // bloco de adicionar (peça, tesoura, laje...), Enter ADICIONA o
+            // item daquele bloco; nos demais campos, não faz nada. Para
+            // finalizar, só clicando no botão "Salvar orçamento" (ou Enter
+            // com o próprio botão focado).
+            if (e.key !== "Enter") return;
+            const alvo = e.target;
+            if (alvo.tagName === "TEXTAREA") return; // quebra de linha nas observações
+            if (alvo.tagName === "BUTTON") return; // Enter em botão focado = clique nele
+            e.preventDefault();
+            const bloco = alvo.closest("[data-bloco]")?.getAttribute("data-bloco");
+            if (bloco === "peca") adicionarItem();
+            else if (bloco === "tesoura") adicionarTesouraProporcional();
+            else if (bloco === "pilar-laje") adicionarPilarLaje();
+            else if (bloco === "montagem-laje") adicionarMontagemLaje();
+            else if (bloco === "viga-laje") adicionarVigaLaje();
+          }}
           className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
@@ -1151,7 +1271,30 @@ export default function OrcamentosGalpaoPage() {
 
           <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
             <p className="text-xs font-medium text-slate-600 mb-2">Adicionar peça</p>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                type="text"
+                value={buscaPeca}
+                onChange={(e) => setBuscaPeca(e.target.value)}
+                placeholder="🔍 Buscar peça... (ex: pilar, terça, 10x)"
+                className={campoClasse + " sm:max-w-xs"}
+              />
+              {buscaPeca.trim() && (
+                <>
+                  <span className="text-xs text-slate-500 whitespace-nowrap">
+                    {totalPecasEncontradas} de {totalPecasSelecionaveis} peças
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBuscaPeca("")}
+                    className="text-xs text-slate-500 hover:text-slate-700 border border-slate-300 rounded px-2 py-1"
+                  >
+                    Limpar
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3" data-bloco="peca">
               <div className="sm:col-span-2">
                 <select
                   value={composicaoParaAdicionar}
@@ -1165,12 +1308,19 @@ export default function OrcamentosGalpaoPage() {
                     if (comp?.papel === "PILAR") {
                       const s = sugestaoPilares();
                       if (s) setQuantidadeParaAdicionar(String(s.qtd));
+                    } else if (comp?.papel === "TERCA") {
+                      const s = sugestaoTerca(comp);
+                      if (s && s.qtd > 0) setQuantidadeParaAdicionar(String(s.qtd));
                     }
                   }}
                   className={campoClasse}
                 >
-                  <option value="">Selecione uma peça</option>
-                  {Object.entries(composicoesPorPapel).map(([papel, lista]) => (
+                  <option value="">
+                    {buscaPeca.trim() && totalPecasEncontradas === 0
+                      ? "Nenhuma peça encontrada"
+                      : "Selecione uma peça"}
+                  </option>
+                  {Object.entries(composicoesPorPapelFiltrado).map(([papel, lista]) => (
                     <optgroup key={papel} label={papel}>
                       {lista.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -1186,12 +1336,6 @@ export default function OrcamentosGalpaoPage() {
                 min="1"
                 value={quantidadeParaAdicionar}
                 onChange={(e) => setQuantidadeParaAdicionar(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    adicionarItem();
-                  }
-                }}
                 placeholder="Qtd."
                 className={campoClasse}
               />
@@ -1212,6 +1356,11 @@ export default function OrcamentosGalpaoPage() {
                 ajuste se precisar.
               </p>
             )}
+            {sugestaoTercaAtiva && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mb-2 inline-block">
+                Sugestão automática (terças): {sugestaoTercaAtiva.texto} — ajuste se precisar.
+              </p>
+            )}
             <p className="text-xs text-slate-400 mb-3">
               Pilares adicionados aqui atualizam a quantidade de dias de FUNDAÇÃO automaticamente
               (1 dia por pilar) — pode ajustar manualmente depois se precisar.
@@ -1222,7 +1371,7 @@ export default function OrcamentosGalpaoPage() {
                 <p className="text-xs font-medium text-slate-600 mb-2">
                   Calculadora: Tesoura de tamanho variado (proporcional a uma peça de referência)
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="tesoura">
                   <select
                     value={tesouraRefId}
                     onChange={(e) => {
@@ -1316,7 +1465,7 @@ export default function OrcamentosGalpaoPage() {
                   da laje. A viga (calculadora abaixo) e o pilar/montagem aqui também entram nessa seção.
                 </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2" data-bloco="pilar-laje">
                   <select
                     value={pilarLajeId}
                     onChange={(e) => setPilarLajeId(e.target.value)}
@@ -1349,7 +1498,7 @@ export default function OrcamentosGalpaoPage() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="montagem-laje">
                   <div className="sm:col-span-2 flex items-center text-xs text-slate-500">
                     Montagem da laje/mezanino (separada da montagem do galpão)
                   </div>
@@ -1379,7 +1528,7 @@ export default function OrcamentosGalpaoPage() {
                   Calculadora: Viga para laje — o volume (m³) × valor do m³ dá o preço de CADA viga;
                   ela entra no orçamento como peça (quantidade × preço por viga)
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-6 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-6 gap-2" data-bloco="viga-laje">
                   <input
                     type="number"
                     step="0.01"
