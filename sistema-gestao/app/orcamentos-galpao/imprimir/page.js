@@ -111,6 +111,22 @@ function calcularDesenhoGalpao(dados) {
   const nMod = Math.max(1, Math.round(C / (Number(dados.modulacao) || 5)));
   const passo = C / nMod;
 
+  // Níveis verticais das vigas horizontais — são peças DIFERENTES:
+  // a laje sempre vem com a sua viga de laje (nível da laje) e a viga
+  // de travamento é outra peça, que fica um pouco ACIMA da laje.
+  // Quando não há laje, o travamento fica a meia altura do pilar.
+  // REGRA: pé-direito acima de 12m => viga de travamento DUPLICADA
+  // (dois níveis de travamento nas laterais).
+  const yLaje = H * 0.45;
+  let niveisTravamento = [];
+  if (dados.temTravamento) {
+    if (H > 12) {
+      niveisTravamento = dados.temLaje ? [H * 0.62, H * 0.84] : [H * 0.38, H * 0.7];
+    } else {
+      niveisTravamento = [dados.temLaje ? H * 0.72 : H * 0.5];
+    }
+  }
+
   // Projeção: largura recua para a esquerda/cima, comprimento para a
   // direita/cima, altura sobe na vertical (mesmo ângulo da referência).
   const ux = [-0.78, -0.3];
@@ -133,11 +149,19 @@ function calcularDesenhoGalpao(dados) {
   }
   const VB_L = 460;
   const VB_A = 330;
-  const MARGEM = 46;
-  const esc = Math.min((VB_L - 2 * MARGEM) / (maxX - minX), (VB_A - 2 * MARGEM) / (maxY - minY));
+  // Margens assimétricas: sobra maior à esquerda e embaixo para as
+  // cotas (altura, largura e comprimento) nunca saírem cortadas.
+  const M_ESQ = 74;
+  const M_DIR = 22;
+  const M_TOPO = 22;
+  const M_BASE = 56;
+  const esc = Math.min(
+    (VB_L - M_ESQ - M_DIR) / (maxX - minX),
+    (VB_A - M_TOPO - M_BASE) / (maxY - minY)
+  );
   const T = (x, y, z) => {
     const p = proj(x, y, z);
-    return [(p[0] - minX) * esc + MARGEM, (p[1] - minY) * esc + MARGEM];
+    return [(p[0] - minX) * esc + M_ESQ, (p[1] - minY) * esc + M_TOPO];
   };
 
   const CONCRETO = "#8f9aa6";
@@ -179,18 +203,22 @@ function calcularDesenhoGalpao(dados) {
   for (let i = 1; i < nMod; i++)
     linha(T(W, 0, i * passo), T(W, H, i * passo), CONCRETO_CLARO, wPilar * 0.8);
   linha(T(W, H, 0), T(W, H, C), CONCRETO_CLARO, wViga);
-  if (dados.temTravamento) linha(T(W, H * 0.5, 0), T(W, H * 0.5, C), CONCRETO_CLARO, wViga * 0.9);
+  for (const yT of niveisTravamento)
+    linha(T(W, yT, 0), T(W, yT, C), CONCRETO_CLARO, wViga * 0.9);
+  if (dados.temLaje) linha(T(W, yLaje, 0), T(W, yLaje, C), CONCRETO_CLARO, wViga);
   linha(T(0, H, C), T(W, H, C), CONCRETO_CLARO, wViga);
 
-  // 2) Laje pré-moldada (plano leve a meia altura, quando houver)
+  // 2) Laje pré-moldada: o plano da laje apoiado nas VIGAS DE LAJE
+  // (uma viga por linha de pilares, no nível da laje)
   if (dados.temLaje) {
-    const yl = H * 0.5;
     poligono(
-      [T(0, yl, 0), T(W, yl, 0), T(W, yl, C), T(0, yl, C)],
+      [T(0, yLaje, 0), T(W, yLaje, 0), T(W, yLaje, C), T(0, yLaje, C)],
       "rgba(214, 221, 228, 0.5)",
       CONCRETO_CLARO,
       0.8
     );
+    for (const x of linhasX) linha(T(x, yLaje, 0), T(x, yLaje, C), CONCRETO, wViga * 1.1);
+    linha(T(0, yLaje, 0), T(W, yLaje, 0), CONCRETO, wViga * 1.1);
   }
 
   // 3) Pilares internos (divisas entre galpões germinados)
@@ -222,18 +250,18 @@ function calcularDesenhoGalpao(dados) {
       linha(T(x0, H, z), T(xm, H + hc, z), TRACO_TELHA, 0.7);
     }
     linha(T(xm, H + hc, 0), T(xm, H + hc, C), CONCRETO, wViga); // cumeeira
-    linha(T(x0, H, 0), T(xm, H + hc, 0), CONCRETO, wViga); // empena frontal
-    linha(T(x1, H, 0), T(xm, H + hc, 0), CONCRETO, wViga);
-    linha(T(xm, H, 0), T(xm, H + hc, 0), CONCRETO, wViga * 0.9); // pilarete
+    // Empena frontal FECHADA (a tesoura não fica oca): painel de
+    // fechamento no triângulo da frente de cada vão
+    poligono([T(x0, H, 0), T(xm, H + hc, 0), T(x1, H, 0)], "#eef1f4", CONCRETO, wViga);
+    linha(T(xm, H, 0), T(xm, H + hc, 0), CONCRETO_CLARO, wViga * 0.8); // emenda do painel
   }
 
-  // 5) Frente: vigas de topo/travamento e pilares próximos por último
+  // 5) Frente: viga de topo e pilares próximos por último. A viga de
+  // travamento existe SÓ nas laterais (nunca na frente/empena) e é
+  // desenhada em todos os seus níveis (duplicada acima de 12m).
   linha(T(0, H, 0), T(W, H, 0), CONCRETO, wViga);
   linha(T(0, H, 0), T(0, H, C), CONCRETO, wViga);
-  if (dados.temTravamento) {
-    linha(T(0, H * 0.5, 0), T(W, H * 0.5, 0), CONCRETO, wViga * 0.9);
-    linha(T(0, H * 0.5, 0), T(0, H * 0.5, C), CONCRETO, wViga * 0.9);
-  }
+  for (const yT of niveisTravamento) linha(T(0, yT, 0), T(0, yT, C), CONCRETO, wViga * 0.9);
   for (let i = nMod; i >= 1; i--) linha(T(0, 0, i * passo), T(0, H, i * passo), CONCRETO, wPilar);
   for (const x of linhasX) linha(T(x, 0, 0), T(x, H, 0), CONCRETO, wPilar);
 
@@ -484,7 +512,7 @@ function ConteudoImpressao() {
                   x={f.x}
                   y={f.y}
                   textAnchor={f.anchor || "middle"}
-                  fontSize="11"
+                  fontSize="12.5"
                   fill="#059669"
                   fontWeight="600"
                 >
