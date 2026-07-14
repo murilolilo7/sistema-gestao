@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { Eye, EyeOff, Pencil, Printer, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import DesenhoGalpao from "./desenho-galpao";
 
 const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
 
@@ -226,17 +227,22 @@ export default function OrcamentosGalpaoPage() {
 
   const modeloSelecionado = modelos.find((m) => String(m.id) === String(modeloId));
   const tipoSelecionado = modeloSelecionado?.tipo || "";
-  const areaCalculada = vao && comprimento ? Number(vao) * Number(comprimento) : null;
+  // GEMINADO: o vão lançado é o de CADA galpão — a área coberta total
+  // multiplica pelo nº de galpões (germinados a mais + 1).
+  const totalGalpoes = Math.max(0, Number(numeroGalpoesGerminados) || 0) + 1;
+  const areaCalculada =
+    vao && comprimento ? Number(vao) * Number(comprimento) * totalGalpoes : null;
 
   // Recalcula telha/calha/capote automaticamente, ao vivo, sempre que as
   // medidas, o nº de galpões germinados ou o tipo de telha mudam.
   useEffect(() => {
     if (!vao || !comprimento) return;
-    const area = Number(vao) * Number(comprimento);
     // O campo é "quantos galpões germinados A MAIS" (0 = avulso, sem
-    // germinação). +1 converte pro total de unidades físicas coladas,
-    // que é o que as fórmulas de calha/capote realmente precisam.
+    // germinação). +1 converte pro total de unidades físicas coladas.
     const germinados = Math.max(0, Number(numeroGalpoesGerminados) || 0) + 1;
+    // GEMINADO: o vão é o de CADA galpão, então a área de telha soma
+    // todos os galpões (vão x comprimento x nº de galpões).
+    const area = Number(vao) * Number(comprimento) * germinados;
 
     setItens((atual) => {
       if (atual.length === 0) return atual;
@@ -949,9 +955,12 @@ export default function OrcamentosGalpaoPage() {
           )}
 
           {areaCalculada && (
-            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 mb-4 flex flex-wrap gap-6">
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 mb-4 flex flex-wrap items-center gap-6">
               <div>
-                <p className="text-xs text-emerald-700">Área coberta</p>
+                <p className="text-xs text-emerald-700">
+                  Área coberta
+                  {totalGalpoes > 1 ? ` (${totalGalpoes} galpões de ${vao}m x ${comprimento}m)` : ""}
+                </p>
                 <p className="text-lg font-semibold text-emerald-900">
                   {areaCalculada.toLocaleString("pt-BR")} m²
                 </p>
@@ -979,6 +988,25 @@ export default function OrcamentosGalpaoPage() {
                     </p>
                   </div>
                 </>
+              )}
+              {peDireito && (
+                <div className="ml-auto bg-white/70 rounded-lg border border-emerald-100 px-2 py-1">
+                  <DesenhoGalpao
+                    vao={vao}
+                    comprimento={comprimento}
+                    peDireito={peDireito}
+                    galpoesGerminados={numeroGalpoesGerminados}
+                    modulacao={
+                      Number(numeroVaos) > 0 ? Number(comprimento) / Number(numeroVaos) : 5
+                    }
+                    temLaje={itens.some((i) => i.papel === "LAJE")}
+                    temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
+                    largura={280}
+                  />
+                  <p className="text-center text-[10px] text-emerald-600">
+                    Prévia — igual sairá no orçamento impresso
+                  </p>
+                </div>
               )}
             </div>
           )}
