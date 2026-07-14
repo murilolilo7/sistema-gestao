@@ -402,6 +402,58 @@ export default function OrcamentosGalpaoPage() {
       }));
   }
 
+  // ---------- Sugestões automáticas pelas medidas ----------
+  // Tesouras: (nº de vãos + 1) por galpão — uma em cada linha de
+  // pilares, incluindo as duas empenas. Geminados com larguras
+  // diferentes sugerem por grupo de largura (primeiro as tesouras do
+  // galpão 1; depois de adicionar, sugere as do próximo galpão).
+  function sugestaoTesoura() {
+    const numVaos = Number(numeroVaos) || 0;
+    if (numVaos <= 0 || !vao) return null;
+    const larguras = listaLarguras || [Number(vao)];
+    // Mantém a ordem dos galpões (1º, 2º, ...) — objeto puro reordenaria
+    // as chaves numéricas e sugeriria o galpão errado primeiro.
+    const ordem = [];
+    const grupos = {};
+    for (const l of larguras) {
+      if (!(l in grupos)) ordem.push(l);
+      grupos[l] = (grupos[l] || 0) + 1;
+    }
+    const lancadas = new Set(
+      itens
+        .filter((i) => i.papel === "TESOURA")
+        .map((i) => {
+          const m = (i.nome || "").match(/([\d.,]+)\s*M/i);
+          return m ? parseFloat(m[1].replace(",", ".")) : null;
+        })
+        .filter((n) => n !== null)
+    );
+    for (const largura of ordem) {
+      if (!lancadas.has(largura)) {
+        return { tamanho: largura, qtd: (numVaos + 1) * grupos[largura] };
+      }
+    }
+    return null;
+  }
+
+  // Pilares: (nº de vãos + 1) linhas x (nº de galpões + 1) fileiras —
+  // 2 fileiras laterais no galpão solo; nos geminados, a divisa usa
+  // UM pilar compartilhado entre os dois galpões.
+  function sugestaoPilares() {
+    const numVaos = Number(numeroVaos) || 0;
+    if (numVaos <= 0) return null;
+    return {
+      linhas: numVaos + 1,
+      fileiras: totalGalpoes + 1,
+      qtd: (numVaos + 1) * (totalGalpoes + 1),
+    };
+  }
+
+  const pecaSelecionada = composicoes.find(
+    (c) => String(c.id) === String(composicaoParaAdicionar)
+  );
+  const sugestaoPilarAtiva = pecaSelecionada?.papel === "PILAR" ? sugestaoPilares() : null;
+
   function adicionarItem() {
     if (!composicaoParaAdicionar) return;
     const composicao = composicoes.find(
@@ -1103,7 +1155,18 @@ export default function OrcamentosGalpaoPage() {
               <div className="sm:col-span-2">
                 <select
                   value={composicaoParaAdicionar}
-                  onChange={(e) => setComposicaoParaAdicionar(e.target.value)}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setComposicaoParaAdicionar(id);
+                    // Sugestão automática: ao escolher um PILAR, a
+                    // quantidade preenche sozinha pelas medidas
+                    // (editável — é só um ponto de partida).
+                    const comp = composicoes.find((c) => String(c.id) === String(id));
+                    if (comp?.papel === "PILAR") {
+                      const s = sugestaoPilares();
+                      if (s) setQuantidadeParaAdicionar(String(s.qtd));
+                    }
+                  }}
                   className={campoClasse}
                 >
                   <option value="">Selecione uma peça</option>
@@ -1141,6 +1204,14 @@ export default function OrcamentosGalpaoPage() {
                 Adicionar peça
               </button>
             </div>
+            {sugestaoPilarAtiva && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mb-2 inline-block">
+                Sugestão automática: {sugestaoPilarAtiva.linhas} linhas ×{" "}
+                {sugestaoPilarAtiva.fileiras} fileiras = {sugestaoPilarAtiva.qtd} pilares
+                {totalGalpoes > 1 ? " (divisa dos geminados com pilar compartilhado)" : ""} —
+                ajuste se precisar.
+              </p>
+            )}
             <p className="text-xs text-slate-400 mb-3">
               Pilares adicionados aqui atualizam a quantidade de dias de FUNDAÇÃO automaticamente
               (1 dia por pilar) — pode ajustar manualmente depois se precisar.
@@ -1154,7 +1225,21 @@ export default function OrcamentosGalpaoPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                   <select
                     value={tesouraRefId}
-                    onChange={(e) => setTesouraRefId(e.target.value)}
+                    onChange={(e) => {
+                      setTesouraRefId(e.target.value);
+                      // Sugestão automática: tamanho = largura do galpão
+                      // e quantidade = (nº de vãos + 1) x galpões dessa
+                      // largura. Geminados de larguras diferentes vão
+                      // por etapa: depois de adicionar as tesouras do
+                      // galpão 1, sugere as do galpão 2, e assim vai.
+                      if (e.target.value) {
+                        const s = sugestaoTesoura();
+                        if (s) {
+                          setTesouraTamanho(String(s.tamanho));
+                          setTesouraQtd(String(s.qtd));
+                        }
+                      }
+                    }}
                     className={campoClasse}
                   >
                     <option value="">Tesoura de referência</option>
@@ -1189,8 +1274,11 @@ export default function OrcamentosGalpaoPage() {
                   </button>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  Estimativa proporcional (preço da referência ÷ tamanho dela × tamanho desejado). Vale para
-                  tamanhos próximos da referência — vãos muito maiores podem exigir seção estrutural diferente.
+                  Ao escolher a referência, o tamanho (largura do galpão) e a quantidade
+                  ((nº de vãos + 1) por galpão) preenchem sozinhos — é só uma sugestão, ajuste à
+                  vontade. Estimativa proporcional (preço da referência ÷ tamanho dela × tamanho
+                  desejado); vale para tamanhos próximos da referência — vãos muito maiores podem
+                  exigir seção estrutural diferente.
                 </p>
               </div>
             )}
