@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { Notificacoes, Confirmador } from "@/components/Ui";
 
 // Estrutura do menu lateral: seções com ícones. Para adicionar uma nova
 // tela no futuro, basta incluir uma linha aqui.
@@ -268,6 +269,9 @@ export default function AppShell({ children }) {
           Sistema de Gestão MR7 · Feito com Next.js + Supabase
         </footer>
       </div>
+      {/* Avisos (toasts) e modal de confirmação — disponíveis em todas as telas */}
+      <Notificacoes />
+      <Confirmador />
     </div>
   );
 }
