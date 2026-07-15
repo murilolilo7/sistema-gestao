@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { LinhasEsqueleto } from "@/components/Ui";
 
 const NOMES_MESES = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -159,7 +160,7 @@ export default function VendasPage() {
       </p>
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
         {loading ? (
-          <p className="p-6 text-sm text-slate-500">Carregando vendas...</p>
+          <LinhasEsqueleto linhas={5} />
         ) : vendas.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">
             Nenhuma venda registrada ainda. Vendas são criadas
