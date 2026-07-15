@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, Pencil, Printer, ShoppingCart, Loader2 } from "lucide-react";
+import { Copy, Eye, EyeOff, FileText, Pencil, Printer, ShoppingCart, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { notificar, confirmar, LinhasEsqueleto, EstadoVazio } from "@/components/Ui";
 
 function formatarMoeda(valor) {
   if (valor === null || valor === undefined) return "-";
@@ -104,6 +105,9 @@ export default function OrcamentosPage() {
   const [quantidadeParaAdicionar, setQuantidadeParaAdicionar] = useState("1");
   const [desconto, setDesconto] = useState("");
   const [observacao, setObservacao] = useState("");
+  const [buscaProduto, setBuscaProduto] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState("todos");
+  const [rascunhoDisponivel, setRascunhoDisponivel] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -173,6 +177,71 @@ export default function OrcamentosPage() {
     };
   }, []);
 
+  // ---------- RASCUNHO AUTOMÁTICO (não perde orçamento com F5/queda) ----------
+  const RASCUNHO_CHAVE = "rascunho-orcamento-produtos";
+  useEffect(() => {
+    if (modo === "lista") return;
+    const temConteudo = clienteId || itens.length > 0;
+    if (!temConteudo) return;
+    const t = setTimeout(() => {
+      try {
+        window.localStorage.setItem(
+          RASCUNHO_CHAVE,
+          JSON.stringify({
+            quando: Date.now(),
+            editingId,
+            editingCodigo,
+            clienteId,
+            diasValidade,
+            desconto,
+            observacao,
+            itens,
+          })
+        );
+      } catch (e) { /* armazenamento indisponível: segue sem rascunho */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [modo, clienteId, diasValidade, desconto, observacao, itens, editingId, editingCodigo]);
+
+  useEffect(() => {
+    try {
+      const bruto = window.localStorage.getItem(RASCUNHO_CHAVE);
+      if (bruto) setRascunhoDisponivel(JSON.parse(bruto));
+    } catch (e) { /* ignora rascunho corrompido */ }
+  }, []);
+
+  function limparRascunho() {
+    try { window.localStorage.removeItem(RASCUNHO_CHAVE); } catch (e) { /* ok */ }
+    setRascunhoDisponivel(null);
+  }
+
+  function restaurarRascunho() {
+    const r = rascunhoDisponivel;
+    if (!r) return;
+    setEditingId(r.editingId || null);
+    setEditingCodigo(r.editingCodigo || null);
+    setClienteId(r.clienteId || "");
+    setDiasValidade(r.diasValidade || "");
+    setDesconto(r.desconto || "");
+    setObservacao(r.observacao || "");
+    setItens(Array.isArray(r.itens) ? r.itens : []);
+    setErro("");
+    setMensagem("");
+    setModo(r.editingId ? "editar" : "novo");
+    setRascunhoDisponivel(null);
+  }
+
+  // Aviso do navegador ao tentar sair com orçamento aberto e não salvo
+  useEffect(() => {
+    if (modo === "lista") return;
+    const aviso = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", aviso);
+    return () => window.removeEventListener("beforeunload", aviso);
+  }, [modo]);
+
   function adicionarItem() {
     if (!produtoParaAdicionar) return;
     const produto = produtos.find(
@@ -203,6 +272,7 @@ export default function OrcamentosPage() {
     });
     setProdutoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
+    setBuscaProduto("");
   }
 
   function removerItem(produtoId) {
@@ -275,11 +345,23 @@ export default function OrcamentosPage() {
   }
 
   function voltar() {
+    limparRascunho();
     setModo("lista");
     setEditingId(null);
     setEditingCodigo(null);
     limparFormulario();
     setErro("");
+  }
+
+  // Duplicar: carrega tudo do orçamento escolhido e salva como um NOVO
+  // (vale até para aprovados e vencidos). Validade volta para 30 dias.
+  function duplicarOrcamento(orcamento) {
+    abrirEdicao(orcamento);
+    setEditingId(null);
+    setEditingCodigo(null);
+    setDiasValidade("30");
+    setModo("novo");
+    notificar(`Duplicando o orçamento Nº ${orcamento.codigo} — ajuste e salve como novo.`);
   }
 
   async function handleSubmit(e) {
@@ -333,9 +415,8 @@ export default function OrcamentosPage() {
       return;
     }
 
-    setMensagem(
-      editingId ? "Orçamento atualizado com sucesso." : "Orçamento criado com sucesso."
-    );
+    notificar(editingId ? "Orçamento atualizado com sucesso." : "Orçamento criado com sucesso.");
+    limparRascunho();
     setModo("lista");
     setEditingId(null);
     setEditingCodigo(null);
@@ -345,10 +426,13 @@ export default function OrcamentosPage() {
   }
 
   async function handleConverter(orcamentoId) {
-    const confirmar = window.confirm(
-      "Converter este orçamento em venda? O estoque dos produtos será baixado e essa ação não pode ser desfeita."
-    );
-    if (!confirmar) return;
+    const ok = await confirmar({
+      titulo: "Converter em venda?",
+      texto:
+        "O estoque dos produtos será baixado e essa ação não pode ser desfeita.",
+      confirmarTexto: "Converter em venda",
+    });
+    if (!ok) return;
 
     setConvertendoId(orcamentoId);
     setErro("");
@@ -359,17 +443,24 @@ export default function OrcamentosPage() {
     });
 
     if (error) {
-      setErro("Não foi possível converter em venda: " + error.message);
+      notificar("Não foi possível converter em venda: " + error.message, "erro");
     } else {
-      setMensagem(
-        "Orçamento convertido em venda com sucesso! Confira em Vendas."
-      );
+      notificar("Orçamento convertido em venda! Confira em Vendas.");
       await carregarTudo();
     }
     setConvertendoId(null);
   }
 
+  const statusEfetivo = (o) => (estaVencido(o) ? "vencido" : o.status);
+  const contadores = {
+    todos: orcamentos.length,
+    pendente: orcamentos.filter((o) => statusEfetivo(o) === "pendente").length,
+    aprovado: orcamentos.filter((o) => statusEfetivo(o) === "aprovado").length,
+    vencido: orcamentos.filter((o) => statusEfetivo(o) === "vencido").length,
+  };
+
   const orcamentosFiltrados = orcamentos.filter((o) => {
+    if (filtroStatus !== "todos" && statusEfetivo(o) !== filtroStatus) return false;
     const termo = termoBusca.trim().toLowerCase();
     if (!termo) return true;
     return (
@@ -379,9 +470,33 @@ export default function OrcamentosPage() {
     );
   });
 
+  // Dias até vencer (para destacar propostas vencendo em até 3 dias)
+  function diasParaVencer(o) {
+    if (o.status !== "pendente" || !o.validade) return null;
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const v = new Date(o.validade + "T00:00:00");
+    const dias = Math.round((v - hoje) / 86400000);
+    return dias >= 0 ? dias : null;
+  }
+
+  // Busca no seletor de produtos (ignora maiúsculas e acentos)
+  const normalizarTexto = (t) =>
+    (t || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const produtosFiltrados = buscaProduto.trim()
+    ? produtos.filter((p) => normalizarTexto(p.nome).includes(normalizarTexto(buscaProduto)))
+    : produtos;
+
   const campoClasse =
     "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
   const labelClasse = "block text-xs font-medium text-slate-600 mb-1";
+
+  // Motivo que impede o salvar (botão inteligente)
+  const motivoBloqueio = !clienteId
+    ? "Escolha o cliente"
+    : itens.filter((i) => i.quantidade > 0).length === 0
+      ? "Adicione produtos ao orçamento"
+      : null;
 
   // ---------- TELA DE INCLUSÃO / EDIÇÃO ----------
   if (modo === "novo" || modo === "editar") {
@@ -429,6 +544,20 @@ export default function OrcamentosPage() {
 
         <form
           onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            // Enter nunca finaliza por acidente: no bloco de produtos ele
+            // ADICIONA o item; nos demais campos não faz nada. Para salvar,
+            // só o botão "Salvar orçamento".
+            if (e.key !== "Enter") return;
+            const alvo = e.target;
+            if (alvo.tagName === "TEXTAREA" || alvo.tagName === "BUTTON") return;
+            e.preventDefault();
+            if (alvo.closest('[data-bloco="produto"]')) adicionarItem();
+          }}
+          onFocusCapture={(e) => {
+            const t = e.target;
+            if (t.tagName === "INPUT" && t.type === "number") t.select();
+          }}
           className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
@@ -469,15 +598,45 @@ export default function OrcamentosPage() {
             <p className="text-xs font-medium text-slate-600 mb-2">
               Adicionar produtos
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                type="text"
+                value={buscaProduto}
+                onChange={(e) => setBuscaProduto(e.target.value)}
+                placeholder="🔍 Buscar produto..."
+                className={campoClasse + " sm:max-w-xs"}
+              />
+              {buscaProduto.trim() && (
+                <>
+                  <span className="text-xs text-slate-500 whitespace-nowrap">
+                    {produtosFiltrados.length} de {produtos.length} produtos
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBuscaProduto("")}
+                    className="text-xs text-slate-500 hover:text-slate-700 border border-slate-300 rounded px-2 py-1"
+                  >
+                    Limpar
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3" data-bloco="produto">
               <div className="sm:col-span-2">
                 <select
                   value={produtoParaAdicionar}
-                  onChange={(e) => setProdutoParaAdicionar(e.target.value)}
+                  onChange={(e) => {
+                    setProdutoParaAdicionar(e.target.value);
+                    if (e.target.value) setBuscaProduto("");
+                  }}
                   className={campoClasse}
                 >
-                  <option value="">Selecione um produto</option>
-                  {produtos.map((p) => (
+                  <option value="">
+                    {buscaProduto.trim() && produtosFiltrados.length === 0
+                      ? "Nenhum produto encontrado"
+                      : "Selecione um produto"}
+                  </option>
+                  {produtosFiltrados.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.nome} {p.unidade ? `(${p.unidade})` : ""} — estoque:{" "}
                       {p.quantidade_estoque ?? 0}
@@ -490,12 +649,6 @@ export default function OrcamentosPage() {
                 min="1"
                 value={quantidadeParaAdicionar}
                 onChange={(e) => setQuantidadeParaAdicionar(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    adicionarItem();
-                  }
-                }}
                 placeholder="Qtd."
                 className={campoClasse}
               />
@@ -639,14 +792,17 @@ export default function OrcamentosPage() {
               </button>
               <button
                 type="submit"
-                disabled={salvando}
-                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 transition"
+                disabled={salvando || !!motivoBloqueio}
+                title={motivoBloqueio || ""}
+                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2.5 transition"
               >
                 {salvando
                   ? "Salvando..."
-                  : modo === "editar"
-                    ? "Salvar alterações"
-                    : "Salvar orçamento"}
+                  : motivoBloqueio
+                    ? motivoBloqueio
+                    : modo === "editar"
+                      ? "Salvar alterações"
+                      : "Salvar orçamento"}
               </button>
             </div>
           </div>
@@ -679,8 +835,38 @@ export default function OrcamentosPage() {
           {mensagem}
         </div>
       )}
+      {rascunhoDisponivel && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-amber-900">
+          <span>
+            Há um orçamento <b>não salvo</b> de{" "}
+            {new Date(rascunhoDisponivel.quando).toLocaleString("pt-BR", {
+              day: "2-digit",
+              month: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+            . Deseja continuar de onde parou?
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={restaurarRascunho}
+              className="rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-3 py-1.5"
+            >
+              Continuar rascunho
+            </button>
+            <button
+              type="button"
+              onClick={limparRascunho}
+              className="rounded-lg border border-amber-400 text-amber-800 hover:bg-amber-100 text-xs font-semibold px-3 py-1.5"
+            >
+              Descartar
+            </button>
+          </div>
+        </div>
+      )}
 
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-3">
         <input
           type="text"
           value={termoBusca}
@@ -697,18 +883,46 @@ export default function OrcamentosPage() {
         </button>
       </div>
 
+      {/* Filtro por status com contadores */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {[
+          { chave: "todos", rotulo: "Todos" },
+          { chave: "pendente", rotulo: "Pendentes" },
+          { chave: "aprovado", rotulo: "Aprovados" },
+          { chave: "vencido", rotulo: "Vencidos" },
+        ].map((f) => (
+          <button
+            key={f.chave}
+            type="button"
+            onClick={() => setFiltroStatus(f.chave)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+              filtroStatus === f.chave
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            {f.rotulo}{" "}
+            <span className={filtroStatus === f.chave ? "text-slate-300" : "text-slate-400"}>
+              {contadores[f.chave]}
+            </span>
+          </button>
+        ))}
+      </div>
+
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
         {loading ? (
-          <p className="p-6 text-sm text-slate-500">Carregando orçamentos...</p>
+          <LinhasEsqueleto linhas={5} />
         ) : orcamentos.length === 0 ? (
-          <p className="p-6 text-sm text-slate-500">
-            Nenhum orçamento criado ainda. Clique em &quot;Incluir
-            orçamento&quot; para montar o primeiro.
-          </p>
+          <EstadoVazio
+            icone={FileText}
+            titulo="Nenhum orçamento criado ainda"
+            texto='Clique em "Incluir orçamento" para montar o primeiro.'
+          />
         ) : orcamentosFiltrados.length === 0 ? (
-          <p className="p-6 text-sm text-slate-500">
-            Nenhum orçamento encontrado para essa busca.
-          </p>
+          <EstadoVazio
+            titulo="Nenhum orçamento encontrado"
+            texto="Ajuste a busca ou o filtro de status acima."
+          />
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-slate-100 text-slate-600 text-left">
@@ -736,6 +950,19 @@ export default function OrcamentosPage() {
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
                     {formatarDataSimples(o.validade)}
+                    {(() => {
+                      const dias = diasParaVencer(o);
+                      if (dias === null || dias > 3) return null;
+                      return (
+                        <span
+                          className={`ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                            dias <= 1 ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700"
+                          }`}
+                        >
+                          {dias === 0 ? "vence hoje" : `${dias} dia(s)`}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap font-medium">
                     {formatarMoeda(o.total)}
@@ -768,6 +995,13 @@ export default function OrcamentosPage() {
                       >
                         <Printer size={16} />
                       </Link>
+                      <button
+                        onClick={() => duplicarOrcamento(o)}
+                        className="text-slate-600 hover:text-slate-900"
+                        title="Duplicar (cria um novo a partir deste)"
+                      >
+                        <Copy size={16} />
+                      </button>
                       {o.status !== "aprovado" && !estaVencido(o) && (
                         <>
                           <button
