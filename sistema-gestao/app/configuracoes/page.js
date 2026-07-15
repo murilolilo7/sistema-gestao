@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import { notificar } from "@/components/Ui";
 
 const TAMANHO_MAXIMO_MB = 2;
 
@@ -77,7 +78,7 @@ export default function ConfiguracoesPage() {
     if (error) {
       setErro("Erro ao salvar: " + error.message);
     } else {
-      setMensagem("Configurações salvas com sucesso.");
+      notificar("Configurações salvas com sucesso.");
     }
     setSalvando(false);
   }
