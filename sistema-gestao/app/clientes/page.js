@@ -2,10 +2,54 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, MessageCircle, FileText, Loader2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar, LinhasEsqueleto, EstadoVazio } from "@/components/Ui";
+
+// ---------- Validação de CPF e CNPJ (dígitos verificadores) ----------
+function cpfValido(cpf) {
+  const d = (cpf || "").replace(/\D/g, "");
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  let soma = 0;
+  for (let i = 0; i < 9; i++) soma += Number(d[i]) * (10 - i);
+  let dig = 11 - (soma % 11);
+  if (dig >= 10) dig = 0;
+  if (dig !== Number(d[9])) return false;
+  soma = 0;
+  for (let i = 0; i < 10; i++) soma += Number(d[i]) * (11 - i);
+  dig = 11 - (soma % 11);
+  if (dig >= 10) dig = 0;
+  return dig === Number(d[10]);
+}
+
+function cnpjValido(cnpj) {
+  const d = (cnpj || "").replace(/\D/g, "");
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+  const calc = (tam) => {
+    let soma = 0;
+    let pos = tam - 7;
+    for (let i = tam; i >= 1; i--) {
+      soma += Number(d[tam - i]) * pos--;
+      if (pos < 2) pos = 9;
+    }
+    const r = soma % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  return calc(12) === Number(d[12]) && calc(13) === Number(d[13]);
+}
+
+function documentoValido(valor, tipo) {
+  const d = (valor || "").replace(/\D/g, "");
+  if (!d) return true; // vazio é permitido (campo opcional)
+  return tipo === "juridica" ? cnpjValido(d) : cpfValido(d);
+}
+
+function linkWhatsApp(telefone) {
+  const d = (telefone || "").replace(/\D/g, "");
+  if (d.length < 10) return null;
+  return `https://wa.me/55${d}`;
+}
 
 const UFS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
@@ -68,6 +112,9 @@ export default function ClientesPage() {
   const [editingCodigo, setEditingCodigo] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
   const [form, setForm] = useState(FORM_VAZIO);
+  const [fichaCliente, setFichaCliente] = useState(null); // cliente aberto na ficha
+  const [fichaDados, setFichaDados] = useState(null); // histórico carregado
+  const [fichaCarregando, setFichaCarregando] = useState(false);
 
   function buscarClientesDB() {
     return supabase.from("clientes").select("*").order("codigo", { ascending: false });
@@ -197,6 +244,26 @@ export default function ClientesPage() {
       setErro("O nome do cliente é obrigatório.");
       return;
     }
+    // Valida CPF/CNPJ (se preenchido) pelo dígito verificador
+    if (form.cpf_cnpj.trim() && !documentoValido(form.cpf_cnpj, form.tipo_pessoa)) {
+      setErro(
+        `O ${form.tipo_pessoa === "juridica" ? "CNPJ" : "CPF"} informado é inválido. Confira os números.`
+      );
+      return;
+    }
+    // Alerta de documento duplicado (outro cliente com o mesmo)
+    const docLimpo = form.cpf_cnpj.replace(/\D/g, "");
+    if (docLimpo) {
+      const duplicado = clientes.find(
+        (c) => c.id !== editingId && (c.cpf_cnpj || "").replace(/\D/g, "") === docLimpo
+      );
+      if (duplicado) {
+        setErro(
+          `Já existe um cliente com esse ${form.tipo_pessoa === "juridica" ? "CNPJ" : "CPF"}: ${duplicado.nome} (código ${duplicado.codigo}).`
+        );
+        return;
+      }
+    }
     setSalvando(true);
     setErro("");
 
@@ -237,6 +304,41 @@ export default function ClientesPage() {
     setEditingCodigo(null);
     setSalvando(false);
     await carregarClientes();
+  }
+
+  // Abre a ficha do cliente e busca o histórico (orçamentos, galpão, vendas)
+  async function abrirFicha(cliente) {
+    setFichaCliente(cliente);
+    setFichaDados(null);
+    setFichaCarregando(true);
+    const [rOrc, rOrcG, rVendas] = await Promise.all([
+      supabase
+        .from("orcamentos")
+        .select("codigo, status, validade, total, created_at")
+        .eq("cliente_id", cliente.id)
+        .order("codigo", { ascending: false }),
+      supabase
+        .from("orcamentos_galpao")
+        .select("codigo, status, validade, total, created_at, titulo")
+        .eq("cliente_id", cliente.id)
+        .order("codigo", { ascending: false }),
+      supabase
+        .from("vendas")
+        .select("id, total, created_at")
+        .eq("cliente_id", cliente.id)
+        .order("id", { ascending: false }),
+    ]);
+    setFichaDados({
+      orcamentos: rOrc.data || [],
+      orcamentosGalpao: rOrcG.data || [],
+      vendas: rVendas.data || [],
+    });
+    setFichaCarregando(false);
+  }
+
+  function fecharFicha() {
+    setFichaCliente(null);
+    setFichaDados(null);
   }
 
   async function handleDelete(id) {
@@ -358,6 +460,13 @@ export default function ClientesPage() {
                   }
                   className={campoClasse}
                 />
+                {form.cpf_cnpj.trim() &&
+                  !documentoValido(form.cpf_cnpj, form.tipo_pessoa) && (
+                    <p className="text-[11px] text-red-600 mt-1">
+                      {form.tipo_pessoa === "juridica" ? "CNPJ" : "CPF"} inválido — confira os
+                      números.
+                    </p>
+                  )}
               </div>
               <div>
                 <label className={labelClasse}>Nome do responsável</label>
@@ -592,10 +701,34 @@ export default function ClientesPage() {
                     {[c.cidade, c.uf].filter(Boolean).join("/") || "-"}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
-                    {c.telefone || "-"}
+                    {c.telefone ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        {c.telefone}
+                        {linkWhatsApp(c.telefone) && (
+                          <a
+                            href={linkWhatsApp(c.telefone)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-600 hover:text-emerald-700"
+                            title="Abrir no WhatsApp"
+                          >
+                            <MessageCircle size={15} />
+                          </a>
+                        )}
+                      </span>
+                    ) : (
+                      "-"
+                    )}
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => abrirFicha(c)}
+                        className="text-slate-600 hover:text-slate-900"
+                        title="Ver ficha e histórico"
+                      >
+                        <FileText size={16} />
+                      </button>
                       <button
                         onClick={() => abrirEdicao(c)}
                         className="text-emerald-700 hover:text-emerald-900"
@@ -618,6 +751,205 @@ export default function ClientesPage() {
           </table>
         )}
       </div>
+
+      {/* ---------- Ficha do cliente (histórico) ---------- */}
+      {fichaCliente && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={fecharFicha} />
+          <div className="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl bg-white shadow-2xl p-5">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">{fichaCliente.nome}</h3>
+                <p className="text-xs text-slate-500">
+                  Código {fichaCliente.codigo}
+                  {fichaCliente.cpf_cnpj ? ` · ${fichaCliente.cpf_cnpj}` : ""}
+                  {[fichaCliente.cidade, fichaCliente.uf].filter(Boolean).length
+                    ? ` · ${[fichaCliente.cidade, fichaCliente.uf].filter(Boolean).join("/")}`
+                    : ""}
+                </p>
+                {fichaCliente.telefone && (
+                  <p className="text-xs text-slate-500 mt-0.5 inline-flex items-center gap-1.5">
+                    {fichaCliente.telefone}
+                    {linkWhatsApp(fichaCliente.telefone) && (
+                      <a
+                        href={linkWhatsApp(fichaCliente.telefone)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-600 hover:text-emerald-700"
+                        title="Abrir no WhatsApp"
+                      >
+                        <MessageCircle size={14} />
+                      </a>
+                    )}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={fecharFicha}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+                title="Fechar"
+              >
+                ×
+              </button>
+            </div>
+
+            {fichaCarregando || !fichaDados ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
+                <Loader2 size={16} className="animate-spin" />
+                Carregando histórico...
+              </div>
+            ) : (
+              (() => {
+                const totalComprado = fichaDados.vendas.reduce(
+                  (s, v) => s + Number(v.total || 0),
+                  0
+                );
+                const fmt = (n) =>
+                  Number(n || 0).toLocaleString("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  });
+                const dataBR = (d) => new Date(d).toLocaleDateString("pt-BR");
+                const badge = (status, validade) => {
+                  const venc =
+                    status !== "aprovado" &&
+                    validade &&
+                    new Date(validade + "T00:00:00") < new Date(new Date().setHours(0, 0, 0, 0));
+                  const rotulo = status === "aprovado" ? "Aprovado" : venc ? "Vencido" : "Pendente";
+                  const cor =
+                    status === "aprovado"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : venc
+                        ? "bg-red-50 text-red-600"
+                        : "bg-amber-50 text-amber-700";
+                  return (
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${cor}`}>
+                      {rotulo}
+                    </span>
+                  );
+                };
+                const totalOrcamentos =
+                  fichaDados.orcamentos.length + fichaDados.orcamentosGalpao.length;
+                return (
+                  <div>
+                    {/* Resumo */}
+                    <div className="grid grid-cols-3 gap-2 mb-4">
+                      <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-center">
+                        <p className="text-[11px] text-slate-500">Orçamentos</p>
+                        <p className="text-base font-bold text-slate-800">{totalOrcamentos}</p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-center">
+                        <p className="text-[11px] text-slate-500">Vendas</p>
+                        <p className="text-base font-bold text-slate-800">
+                          {fichaDados.vendas.length}
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-center">
+                        <p className="text-[11px] text-emerald-700">Total comprado</p>
+                        <p className="text-sm font-bold text-emerald-800">{fmt(totalComprado)}</p>
+                      </div>
+                    </div>
+
+                    {totalOrcamentos === 0 && fichaDados.vendas.length === 0 ? (
+                      <p className="text-sm text-slate-400 text-center py-6">
+                        Este cliente ainda não tem orçamentos nem vendas.
+                      </p>
+                    ) : (
+                      <div className="space-y-4">
+                        {fichaDados.orcamentosGalpao.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-slate-600 mb-1.5">
+                              Orçamentos de galpão
+                            </p>
+                            <div className="space-y-1">
+                              {fichaDados.orcamentosGalpao.map((o) => (
+                                <Link
+                                  key={o.codigo}
+                                  href="/orcamentos-galpao"
+                                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 hover:bg-slate-50 px-3 py-1.5 text-xs"
+                                >
+                                  <span className="truncate text-slate-600">
+                                    Nº {o.codigo} · {o.titulo || "Galpão"}
+                                  </span>
+                                  <span className="flex items-center gap-2 whitespace-nowrap">
+                                    {badge(o.status, o.validade)}
+                                    <b className="text-slate-700">{fmt(o.total)}</b>
+                                  </span>
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {fichaDados.orcamentos.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-slate-600 mb-1.5">
+                              Orçamentos de produtos
+                            </p>
+                            <div className="space-y-1">
+                              {fichaDados.orcamentos.map((o) => (
+                                <Link
+                                  key={o.codigo}
+                                  href="/orcamentos"
+                                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 hover:bg-slate-50 px-3 py-1.5 text-xs"
+                                >
+                                  <span className="truncate text-slate-600">
+                                    Nº {o.codigo} · {dataBR(o.created_at)}
+                                  </span>
+                                  <span className="flex items-center gap-2 whitespace-nowrap">
+                                    {badge(o.status, o.validade)}
+                                    <b className="text-slate-700">{fmt(o.total)}</b>
+                                  </span>
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {fichaDados.vendas.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-slate-600 mb-1.5">Vendas</p>
+                            <div className="space-y-1">
+                              {fichaDados.vendas.map((v) => (
+                                <Link
+                                  key={v.id}
+                                  href={`/vendas/imprimir?id=${v.id}`}
+                                  target="_blank"
+                                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 hover:bg-slate-50 px-3 py-1.5 text-xs"
+                                >
+                                  <span className="truncate text-slate-600">
+                                    Pedido Nº {v.id} · {dataBR(v.created_at)}
+                                  </span>
+                                  <b className="text-emerald-700 whitespace-nowrap">
+                                    {fmt(v.total)}
+                                  </b>
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end mt-5">
+                      <button
+                        onClick={() => {
+                          const cliente = fichaCliente;
+                          fecharFicha();
+                          abrirEdicao(cliente);
+                        }}
+                        className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-4 py-2"
+                      >
+                        Editar cliente
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
