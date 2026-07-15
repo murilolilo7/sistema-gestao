@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Pencil, Trash2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
+import { notificar, confirmar, LinhasEsqueleto } from "@/components/Ui";
 
 const UNIDADES = ["UN", "M", "M²", "M³", "KG", "PC", "CX", "L"];
 
@@ -140,9 +141,7 @@ export default function ProdutosPage() {
       return;
     }
 
-    setMensagem(
-      editingId ? "Produto atualizado com sucesso." : "Produto cadastrado com sucesso."
-    );
+    notificar(editingId ? "Produto atualizado com sucesso." : "Produto cadastrado com sucesso.");
     setModo("lista");
     setForm(FORM_VAZIO);
     setEditingId(null);
@@ -152,10 +151,13 @@ export default function ProdutosPage() {
   }
 
   async function handleDelete(id) {
-    const confirmar = window.confirm(
-      "Tem certeza que deseja excluir este produto?"
-    );
-    if (!confirmar) return;
+    const ok = await confirmar({
+      titulo: "Excluir produto?",
+      texto: "Essa ação não pode ser desfeita.",
+      confirmarTexto: "Excluir",
+      perigoso: true,
+    });
+    if (!ok) return;
 
     const { error } = await supabase.from("produtos").delete().eq("id", id);
     if (error) {
@@ -373,7 +375,7 @@ export default function ProdutosPage() {
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
         {loading ? (
-          <p className="p-6 text-sm text-slate-500">Carregando produtos...</p>
+          <LinhasEsqueleto linhas={5} />
         ) : produtos.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">
             Nenhum produto cadastrado ainda. Clique em &quot;Incluir
