@@ -555,6 +555,88 @@ export default function OrcamentosGalpaoPage() {
   const sugestaoTercaAtiva =
     pecaSelecionada?.papel === "TERCA" ? sugestaoTerca(pecaSelecionada) : null;
 
+  // ---------- Conferência de terças: o sistema não deixa esquecer ----------
+  // Compara o que o galpão PRECISA (por medida: 5m e 6m, conforme a
+  // decomposição do comprimento) com o que já foi LANÇADO no orçamento.
+  const conferenciaTercas = (() => {
+    if (!vao || !comprimento) return null;
+    const decomp = decomporComprimentoEmModulos(comprimento);
+    if (!decomp) return null;
+    const larguras = listaLarguras || [Number(vao)];
+    const totalPorVao = larguras.reduce((s, l) => s + qtdTercasPorLinhaDeVao(l), 0);
+    if (totalPorVao <= 0) return null;
+    const lancadas = { 5: 0, 6: 0 };
+    itens.forEach((i) => {
+      if (i.papel !== "TERCA") return;
+      const m = (i.nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i)?.[1];
+      const medida = m ? Math.round(parseFloat(m.replace(",", "."))) : null;
+      if (medida === 5 || medida === 6) lancadas[medida] += Number(i.quantidade) || 0;
+    });
+    const linhas = [];
+    for (const medida of [5, 6]) {
+      const vaosDaMedida = medida === 5 ? decomp.vaos5 : decomp.vaos6;
+      if (vaosDaMedida <= 0) continue;
+      linhas.push({
+        medida,
+        vaos: vaosDaMedida,
+        necessarias: totalPorVao * vaosDaMedida,
+        lancadas: lancadas[medida],
+      });
+    }
+    if (linhas.length === 0) return null;
+    const composicaoTexto =
+      `${comprimento}m = ` +
+      [
+        decomp.vaos5 > 0 ? `${decomp.vaos5} × 5m` : null,
+        decomp.vaos6 > 0 ? `${decomp.vaos6} × 6m` : null,
+      ]
+        .filter(Boolean)
+        .join(" + ");
+    return { composicaoTexto, totalPorVao, linhas };
+  })();
+
+  // ---------- Vigas da laje: sequência de módulos e sugestões ----------
+  // Módulos na ordem física (os de 5m primeiro, os de 6m no final).
+  function sequenciaModulos() {
+    const d = decomporComprimentoEmModulos(comprimento);
+    if (!d) return null;
+    return [...Array(d.vaos5).fill(5), ...Array(d.vaos6).fill(6)];
+  }
+
+  // Quantas vigas de laje: uma em cada linha de pilares que a laje toca.
+  // Laje parcial: profundidade = área da laje ÷ largura total do galpão.
+  function sugestaoQtdVigasLaje() {
+    if (!somaLarguras || !comprimento) return null;
+    const prof =
+      Number(areaLaje) > 0
+        ? Math.min(Number(comprimento), Number(areaLaje) / somaLarguras)
+        : Number(comprimento);
+    const seq = sequenciaModulos();
+    if (seq) {
+      let acumulado = 0;
+      let vaosCobertos = 0;
+      for (const modulo of seq) {
+        if (acumulado >= prof - 0.01) break;
+        acumulado += modulo;
+        vaosCobertos++;
+      }
+      return { qtd: vaosCobertos + 1, vaosCobertos, prof };
+    }
+    const nV = Number(numeroVaos) || 0;
+    return nV > 0 ? { qtd: nV + 1, vaosCobertos: nV, prof } : null;
+  }
+
+  const temPilarNoMeioDaLaje = itens.some((i) => i.secao === "laje" && i.papel === "PILAR");
+  const conferenciaVigasLaje = (() => {
+    if (!tipoSelecionado || tipoSelecionado === "simples") return null;
+    const s = sugestaoQtdVigasLaje();
+    if (!s) return null;
+    const lancadas = itens
+      .filter((i) => i.papel === "VIGA_LAJE")
+      .reduce((soma, i) => soma + (Number(i.quantidade) || 0), 0);
+    return { ...s, lancadas };
+  })();
+
   function adicionarItem() {
     if (!composicaoParaAdicionar) return;
     const composicao = composicoes.find(
@@ -581,6 +663,40 @@ export default function OrcamentosGalpaoPage() {
     setComposicaoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
   }
+
+  // Sugestão automática da viga da laje: largura sempre 0,25m; o vão
+  // (comprimento da viga) = largura do galpão — ou METADE, se já houver
+  // pilar de laje no meio; quantidade = linhas de pilar que a laje toca.
+  // ALTURA: pré-dimensionamento consagrado usado junto à NBR 6118 para
+  // viga biapoiada = vão ÷ 10, arredondado PARA CIMA no múltiplo de 5cm
+  // (a própria NBR 6118 não fixa pré-dimensionamento; o projeto
+  // estrutural final confirma). Tudo é só ponto de partida, editável.
+  useEffect(() => {
+    if (!tipoSelecionado || tipoSelecionado === "simples") return;
+    if (!vao || !comprimento) return;
+    if (vigaLargura || vigaAltura || vigaVao) return; // não mexe no que foi digitado
+    const larguraGalpao1 = Number(vao) || 0;
+    if (larguraGalpao1 <= 0) return;
+    const pilarNoMeio = itens.some((i) => i.secao === "laje" && i.papel === "PILAR");
+    const vaoDaViga = pilarNoMeio
+      ? Math.round((larguraGalpao1 / 2) * 100) / 100
+      : larguraGalpao1;
+    // altura = vão/10, múltiplo de 5cm para cima (10m -> 1,00m; 5m -> 0,50m)
+    const alturaViga = Math.round(Math.ceil(vaoDaViga / 10 / 0.05) * 0.05 * 100) / 100;
+    setVigaLargura("0.25");
+    setVigaAltura(String(alturaViga));
+    setVigaVao(String(vaoDaViga));
+    const s = sugestaoQtdVigasLaje();
+    if (s?.qtd) setVigaQtd(String(s.qtd));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tipoSelecionado, vao, comprimento, areaLaje, numeroVaos, itens]);
+
+  // Campos decimais que aceitam vírgula: ",25" vira "0.25" na hora.
+  const aoDigitarDecimal = (setter) => (e) => {
+    let v = e.target.value.replace(",", ".");
+    if (v.startsWith(".")) v = "0" + v;
+    setter(v);
+  };
 
   function adicionarVigaLaje() {
     const l = Number(vigaLargura) || 0;
@@ -1055,6 +1171,14 @@ export default function OrcamentosGalpaoPage() {
             else if (bloco === "montagem-laje") adicionarMontagemLaje();
             else if (bloco === "viga-laje") adicionarVigaLaje();
           }}
+          onFocusCapture={(e) => {
+            // Ao clicar num campo numérico, o valor fica todo selecionado:
+            // digitou, substituiu — sem número preso atrás do zero.
+            const t = e.target;
+            if (t.tagName === "INPUT" && (t.type === "number" || t.inputMode === "decimal")) {
+              t.select();
+            }
+          }}
           className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
@@ -1237,6 +1361,7 @@ export default function OrcamentosGalpaoPage() {
                     }
                     temLaje={itens.some((i) => i.papel === "LAJE")}
                     temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
+                    areaLaje={areaLaje}
                     largura={280}
                   />
                   <p className="text-center text-[10px] text-emerald-600">
@@ -1301,6 +1426,8 @@ export default function OrcamentosGalpaoPage() {
                   onChange={(e) => {
                     const id = e.target.value;
                     setComposicaoParaAdicionar(id);
+                    // Peça escolhida: limpa a busca para a próxima digitação
+                    if (id) setBuscaPeca("");
                     // Sugestão automática: ao escolher um PILAR, a
                     // quantidade preenche sozinha pelas medidas
                     // (editável — é só um ponto de partida).
@@ -1360,6 +1487,29 @@ export default function OrcamentosGalpaoPage() {
               <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mb-2 inline-block">
                 Sugestão automática (terças): {sugestaoTercaAtiva.texto} — ajuste se precisar.
               </p>
+            )}
+            {conferenciaTercas && (
+              <div
+                className={`text-xs rounded px-2 py-1.5 mb-2 border ${
+                  conferenciaTercas.linhas.every((l) => l.lancadas >= l.necessarias)
+                    ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                    : "text-amber-800 bg-amber-50 border-amber-300"
+                }`}
+              >
+                <span className="font-semibold">
+                  Conferência de terças ({conferenciaTercas.composicaoTexto} ·{" "}
+                  {conferenciaTercas.totalPorVao} por vão):
+                </span>{" "}
+                {conferenciaTercas.linhas.map((l, i) => (
+                  <span key={l.medida}>
+                    {i > 0 ? " | " : ""}
+                    terças de {l.medida}m: {l.lancadas} de {l.necessarias} lançadas
+                    {l.lancadas >= l.necessarias
+                      ? " ✓"
+                      : ` — faltam ${l.necessarias - l.lancadas} ⚠`}
+                  </span>
+                ))}
+              </div>
             )}
             <p className="text-xs text-slate-400 mb-3">
               Pilares adicionados aqui atualizam a quantidade de dias de FUNDAÇÃO automaticamente
@@ -1528,37 +1678,61 @@ export default function OrcamentosGalpaoPage() {
                   Calculadora: Viga para laje — o volume (m³) × valor do m³ dá o preço de CADA viga;
                   ela entra no orçamento como peça (quantidade × preço por viga)
                 </p>
+                {conferenciaVigasLaje && (
+                  <div
+                    className={`text-xs rounded px-2 py-1.5 mb-2 border ${
+                      conferenciaVigasLaje.lancadas >= conferenciaVigasLaje.qtd
+                        ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                        : "text-amber-800 bg-amber-50 border-amber-300"
+                    }`}
+                  >
+                    <span className="font-semibold">Conferência de vigas da laje:</span>{" "}
+                    {conferenciaVigasLaje.lancadas} de {conferenciaVigasLaje.qtd} lançadas
+                    {conferenciaVigasLaje.lancadas >= conferenciaVigasLaje.qtd
+                      ? " ✓"
+                      : ` — faltam ${conferenciaVigasLaje.qtd - conferenciaVigasLaje.lancadas} ⚠`}{" "}
+                    (uma viga por linha de pilar que a laje alcança)
+                  </div>
+                )}
+                <p className="text-xs text-slate-400 mb-2">
+                  Sugestão automática: largura fixa de 0,25m; vão (comprimento da viga) = largura
+                  do galpão{temPilarNoMeioDaLaje ? " ÷ 2 (há pilar de laje no meio)" : ""} — com
+                  pilar no meio, a viga vira metade e a altura recalcula. Altura = vão ÷ 10
+                  arredondada ao múltiplo de 5cm (pré-dimensionamento de viga biapoiada usado com
+                  a NBR 6118 — a norma em si não fixa pré-dimensionamento; o projeto estrutural
+                  final confirma). Tudo editável.
+                </p>
                 <div className="grid grid-cols-1 sm:grid-cols-6 gap-2" data-bloco="viga-laje">
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Largura (m)"
                     value={vigaLargura}
-                    onChange={(e) => setVigaLargura(e.target.value)}
+                    onChange={aoDigitarDecimal(setVigaLargura)}
                     className={campoClasse}
                   />
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Altura (m)"
                     value={vigaAltura}
-                    onChange={(e) => setVigaAltura(e.target.value)}
+                    onChange={aoDigitarDecimal(setVigaAltura)}
                     className={campoClasse}
                   />
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Vão (m)"
                     value={vigaVao}
-                    onChange={(e) => setVigaVao(e.target.value)}
+                    onChange={aoDigitarDecimal(setVigaVao)}
                     className={campoClasse}
                   />
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Valor do m³"
                     value={vigaValorM3}
-                    onChange={(e) => setVigaValorM3(e.target.value)}
+                    onChange={aoDigitarDecimal(setVigaValorM3)}
                     className={campoClasse}
                   />
                   <input
