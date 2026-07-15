@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, Pencil, Printer, ShoppingCart } from "lucide-react";
+import { Copy, Eye, EyeOff, Pencil, Printer, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import DesenhoGalpao from "./desenho-galpao";
 
@@ -142,6 +142,9 @@ export default function OrcamentosGalpaoPage() {
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
   const [buscaPeca, setBuscaPeca] = useState("");
+  const [perdaTelha, setPerdaTelha] = useState("10"); // % de perda da telha (editável)
+  const [chaveRecente, setChaveRecente] = useState(null); // realce da linha recém-adicionada
+  const [rascunhoDisponivel, setRascunhoDisponivel] = useState(null);
   const [quantidadeParaAdicionar, setQuantidadeParaAdicionar] = useState("1");
   const [desconto, setDesconto] = useState("");
   const [margemComercial, setMargemComercial] = useState("25");
@@ -275,7 +278,9 @@ export default function OrcamentosGalpaoPage() {
 
       const telha = telhaId ? composicoes.find((c) => String(c.id) === String(telhaId)) : null;
       if (telha) {
-        const qtdTelha = Math.round(area * 1.1 * 100) / 100;
+        // % de perda editável (padrão 10%) — campo ao lado do tipo de telha
+        const fatorPerda = 1 + Math.max(0, Number(perdaTelha) || 0) / 100;
+        const qtdTelha = Math.round(area * fatorPerda * 100) / 100;
         const jaExiste = novos.some((i) => i.composicao_id === telha.id);
         if (jaExiste) {
           novos = novos.map((i) =>
@@ -356,10 +361,108 @@ export default function OrcamentosGalpaoPage() {
     numeroGalpoesGerminados,
     largurasExtras,
     telhaId,
+    perdaTelha,
     areaLaje,
     tipoLajeId,
     composicoes,
   ]);
+
+  // Realce visual da última peça adicionada (some sozinho em 2,5s)
+  const qtdItensAnterior = useRef(0);
+  useEffect(() => {
+    if (itens.length > qtdItensAnterior.current && itens.length > 0) {
+      const maisRecente = itens.reduce((max, i) => (i.chave > max ? i.chave : max), -1);
+      setChaveRecente(maisRecente);
+      const t = setTimeout(() => setChaveRecente(null), 2500);
+      qtdItensAnterior.current = itens.length;
+      return () => clearTimeout(t);
+    }
+    qtdItensAnterior.current = itens.length;
+  }, [itens]);
+
+  // ---------- RASCUNHO AUTOMÁTICO (não perde orçamento com F5/queda) ----------
+  const RASCUNHO_CHAVE = "rascunho-orcamento-galpao";
+  useEffect(() => {
+    if (modo === "lista") return;
+    const temConteudo = clienteId || modeloId || vao || itens.length > 0;
+    if (!temConteudo) return;
+    const t = setTimeout(() => {
+      try {
+        window.localStorage.setItem(
+          RASCUNHO_CHAVE,
+          JSON.stringify({
+            quando: Date.now(),
+            editingId,
+            editingCodigo,
+            clienteId, modeloId, vao, comprimento, peDireito, numeroVaos,
+            numeroGalpoesGerminados, largurasExtras, telhaId, perdaTelha,
+            areaLaje, tipoLajeId, diasValidade, desconto, margemComercial,
+            observacao, observacaoInterna, itens,
+          })
+        );
+      } catch (e) { /* armazenamento indisponível: segue sem rascunho */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [modo, clienteId, modeloId, vao, comprimento, peDireito, numeroVaos,
+      numeroGalpoesGerminados, largurasExtras, telhaId, perdaTelha, areaLaje,
+      tipoLajeId, diasValidade, desconto, margemComercial, observacao,
+      observacaoInterna, itens, editingId, editingCodigo]);
+
+  // Ao abrir a tela, verifica se ficou um rascunho não salvo
+  useEffect(() => {
+    try {
+      const bruto = window.localStorage.getItem(RASCUNHO_CHAVE);
+      if (bruto) setRascunhoDisponivel(JSON.parse(bruto));
+    } catch (e) { /* ignora rascunho corrompido */ }
+  }, []);
+
+  function limparRascunho() {
+    try { window.localStorage.removeItem(RASCUNHO_CHAVE); } catch (e) { /* ok */ }
+    setRascunhoDisponivel(null);
+  }
+
+  function restaurarRascunho() {
+    const r = rascunhoDisponivel;
+    if (!r) return;
+    setEditingId(r.editingId || null);
+    setEditingCodigo(r.editingCodigo || null);
+    setClienteId(r.clienteId || "");
+    setModeloId(r.modeloId || "");
+    setVao(r.vao || "");
+    setComprimento(r.comprimento || "");
+    setPeDireito(r.peDireito || "");
+    setNumeroVaos(r.numeroVaos || "");
+    setNumeroGalpoesGerminados(r.numeroGalpoesGerminados || "0");
+    setLargurasExtras(Array.isArray(r.largurasExtras) ? r.largurasExtras : []);
+    setTelhaId(r.telhaId || "");
+    setPerdaTelha(r.perdaTelha || "10");
+    setAreaLaje(r.areaLaje || "");
+    setTipoLajeId(r.tipoLajeId || "");
+    setDiasValidade(r.diasValidade || "");
+    setDesconto(r.desconto || "");
+    setMargemComercial(r.margemComercial || "25");
+    setObservacao(r.observacao || "");
+    setObservacaoInterna(r.observacaoInterna || "");
+    const itensRestaurados = Array.isArray(r.itens) ? r.itens : [];
+    const maiorChave = itensRestaurados.reduce((m, i) => Math.max(m, i.chave || 0), 0);
+    proximaChave.current = maiorChave + 1;
+    setItens(itensRestaurados);
+    setErro("");
+    setMensagem("");
+    setModo(r.editingId ? "editar" : "novo");
+    setRascunhoDisponivel(null);
+  }
+
+  // Aviso do navegador ao tentar sair com o orçamento aberto e não salvo
+  useEffect(() => {
+    if (modo === "lista") return;
+    const aviso = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", aviso);
+    return () => window.removeEventListener("beforeunload", aviso);
+  }, [modo]);
 
   const composicoesSelecionaveis = composicoes.filter((c) => {
     if (PAPEIS_EXCLUIDOS.includes(c.papel)) return false;
@@ -627,6 +730,7 @@ export default function OrcamentosGalpaoPage() {
   }
 
   const temPilarNoMeioDaLaje = itens.some((i) => i.secao === "laje" && i.papel === "PILAR");
+
   const conferenciaVigasLaje = (() => {
     if (!tipoSelecionado || tipoSelecionado === "simples") return null;
     const s = sugestaoQtdVigasLaje();
@@ -875,6 +979,193 @@ export default function OrcamentosGalpaoPage() {
       ? (subtotalLaje * fatorMargem) / areaLajeNumerica
       : null;
 
+  // ---------- Validação de coerência: nº de vãos x comprimento ----------
+  const avisoVaos = (() => {
+    const nV = Number(numeroVaos) || 0;
+    if (!comprimento || nV <= 0) return null;
+    const d = decomporComprimentoEmModulos(comprimento);
+    if (!d) return null;
+    const vaosPeloComprimento = d.vaos5 + d.vaos6;
+    if (vaosPeloComprimento === nV) return null;
+    const comp =
+      [d.vaos5 > 0 ? `${d.vaos5} × 5m` : null, d.vaos6 > 0 ? `${d.vaos6} × 6m` : null]
+        .filter(Boolean)
+        .join(" + ");
+    return `Pelo comprimento de ${comprimento}m, o galpão fecha com ${vaosPeloComprimento} vãos (${comp}) — você informou ${nV}. Confira antes de lançar as peças.`;
+  })();
+
+  // ---------- CHECKLIST UNIFICADO DA ESTRUTURA ----------
+  // Cada linha compara o que o galpão PRECISA (pelas medidas) com o que
+  // já foi LANÇADO. Tolerância de 0,5 para itens por metragem.
+  const checklistEstrutura = (() => {
+    if (!vao || !comprimento) return [];
+    const nV = Number(numeroVaos) || 0;
+    const G = totalGalpoes;
+    const somaQtd = (filtro) =>
+      itens.filter(filtro).reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
+    const linhas = [];
+    const fmtNum = (n) =>
+      Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+
+    // Pilares da estrutura: (vãos+1) linhas x (galpões+1) fileiras
+    if (nV > 0) {
+      const nec = (nV + 1) * (G + 1);
+      const lan = somaQtd((i) => i.papel === "PILAR" && i.secao !== "laje");
+      linhas.push({
+        rotulo: "Pilares",
+        detalhe: `${nV + 1} linhas × ${G + 1} fileiras`,
+        necessario: nec,
+        lancado: lan,
+        ok: lan >= nec,
+        texto: `${fmtNum(lan)} de ${fmtNum(nec)}`,
+      });
+    }
+
+    // Tesouras: (vãos+1) por galpão, separadas por largura quando diferentes
+    if (nV > 0) {
+      const larguras = listaLarguras || [Number(vao)];
+      const ordem = [];
+      const grupos = {};
+      for (const l of larguras) {
+        if (!(l in grupos)) ordem.push(l);
+        grupos[l] = (grupos[l] || 0) + 1;
+      }
+      const lancPorTam = {};
+      itens
+        .filter((i) => i.papel === "TESOURA")
+        .forEach((i) => {
+          const m = (i.nome || "").match(/(\d+(?:[.,]\d+)?)\s*M\b/i)?.[1];
+          const tam = m ? parseFloat(m.replace(",", ".")) : null;
+          if (tam !== null) lancPorTam[tam] = (lancPorTam[tam] || 0) + (Number(i.quantidade) || 0);
+        });
+      for (const l of ordem) {
+        const nec = (nV + 1) * grupos[l];
+        const lan = lancPorTam[l] || 0;
+        linhas.push({
+          rotulo: ordem.length > 1 ? `Tesouras de ${fmtNum(l)}m` : "Tesouras",
+          detalhe: `${nV + 1} por galpão × ${grupos[l]}`,
+          necessario: nec,
+          lancado: lan,
+          ok: lan >= nec,
+          texto: `${fmtNum(lan)} de ${fmtNum(nec)}`,
+        });
+      }
+    }
+
+    // Terças 5m/6m (reaproveita a conferência)
+    if (conferenciaTercas) {
+      for (const l of conferenciaTercas.linhas) {
+        linhas.push({
+          rotulo: `Terças de ${l.medida}m`,
+          detalhe: `${conferenciaTercas.totalPorVao}/vão × ${l.vaos} vão(s)`,
+          necessario: l.necessarias,
+          lancado: l.lancadas,
+          ok: l.lancadas >= l.necessarias,
+          texto: `${fmtNum(l.lancadas)} de ${fmtNum(l.necessarias)}`,
+        });
+      }
+    }
+
+    // Telha: área total x (1 + perda%)
+    if (areaCalculada) {
+      const fatorPerda = 1 + Math.max(0, Number(perdaTelha) || 0) / 100;
+      const nec = Math.round(areaCalculada * fatorPerda * 100) / 100;
+      const lan = somaQtd((i) => i.papel === "TELHA");
+      linhas.push({
+        rotulo: "Telha (m²)",
+        detalhe: `${fmtNum(areaCalculada)}m² × ${fatorPerda.toFixed(2).replace(".", ",")}`,
+        necessario: nec,
+        lancado: lan,
+        ok: lan >= nec - 0.5,
+        texto: `${fmtNum(lan)} de ${fmtNum(nec)}`,
+      });
+    }
+
+    // Calha: (G+1) x comprimento + 0,5 x (G+1) x vãos — conta visível
+    if (nV > 0) {
+      const mult = G + 1;
+      const nec =
+        Math.round((mult * Number(comprimento) + 0.5 * mult * nV) * 100) / 100;
+      const lan = somaQtd((i) => i.nome === "CALHA FIBRA");
+      linhas.push({
+        rotulo: "Calha (m)",
+        detalhe: `${mult} × ${comprimento}m + 0,5 × ${mult} × ${nV}`,
+        necessario: nec,
+        lancado: lan,
+        ok: Math.abs(lan - nec) <= 0.5 || lan >= nec,
+        texto: `${fmtNum(lan)} de ${fmtNum(nec)}`,
+      });
+    }
+
+    // Capote: (comprimento + 2) x galpões — conta visível
+    {
+      const nec = Math.round((Number(comprimento) + 2) * G * 100) / 100;
+      const lan = somaQtd((i) => i.nome === "CAPOTE");
+      linhas.push({
+        rotulo: "Capote (m)",
+        detalhe: `(${comprimento}m + 2) × ${G}`,
+        necessario: nec,
+        lancado: lan,
+        ok: Math.abs(lan - nec) <= 0.5 || lan >= nec,
+        texto: `${fmtNum(lan)} de ${fmtNum(nec)}`,
+      });
+    }
+
+    // Fundação: 1 dia por pilar (estrutura + laje) — conta visível
+    {
+      const pilaresTotais = somaQtd((i) => i.papel === "PILAR");
+      if (pilaresTotais > 0) {
+        const lan = somaQtd((i) => i.nome === "FUNDAÇÃO");
+        linhas.push({
+          rotulo: "Fundação (dias)",
+          detalhe: `1 dia × ${fmtNum(pilaresTotais)} pilares`,
+          necessario: pilaresTotais,
+          lancado: lan,
+          ok: lan >= pilaresTotais,
+          texto: `${fmtNum(lan)} de ${fmtNum(pilaresTotais)}`,
+        });
+      }
+    }
+
+    // Laje e vigas da laje (só quando o tipo tem laje/mezanino)
+    if (tipoSelecionado && tipoSelecionado !== "simples") {
+      if (areaLajeNumerica > 0) {
+        const lan = somaQtd((i) => i.papel === "LAJE");
+        linhas.push({
+          rotulo: "Laje (m²)",
+          detalhe: `área informada`,
+          necessario: areaLajeNumerica,
+          lancado: lan,
+          ok: lan >= areaLajeNumerica - 0.5,
+          texto: `${fmtNum(lan)} de ${fmtNum(areaLajeNumerica)}`,
+        });
+      }
+      if (conferenciaVigasLaje) {
+        linhas.push({
+          rotulo: "Vigas da laje",
+          detalhe: `linhas de pilar na laje`,
+          necessario: conferenciaVigasLaje.qtd,
+          lancado: conferenciaVigasLaje.lancadas,
+          ok: conferenciaVigasLaje.lancadas >= conferenciaVigasLaje.qtd,
+          texto: `${fmtNum(conferenciaVigasLaje.lancadas)} de ${fmtNum(conferenciaVigasLaje.qtd)}`,
+        });
+      }
+    }
+
+    return linhas;
+  })();
+  const checklistCompleto =
+    checklistEstrutura.length > 0 && checklistEstrutura.every((l) => l.ok);
+
+  // Motivo que impede o salvar (botão inteligente)
+  const motivoBloqueio = !clienteId
+    ? "Escolha o cliente"
+    : !modeloId
+      ? "Escolha o tipo de galpão"
+      : itens.filter((i) => i.quantidade > 0).length === 0
+        ? "Adicione peças ao orçamento"
+        : null;
+
   function limparFormulario() {
     setClienteId("");
     setModeloId("");
@@ -907,6 +1198,8 @@ export default function OrcamentosGalpaoPage() {
     setTesouraRefId("");
     setTesouraTamanho("");
     setTesouraQtd("1");
+    setPerdaTelha("10");
+    setChaveRecente(null);
   }
 
   function abrirNovo() {
@@ -982,7 +1275,22 @@ export default function OrcamentosGalpaoPage() {
     setModo("editar");
   }
 
+  // Duplicar: carrega tudo do orçamento escolhido e salva como um NOVO
+  // (serve até para orçamentos aprovados ou vencidos — cria variações
+  // sem redigitar nada). Validade volta para 30 dias.
+  function duplicarOrcamento(orcamento) {
+    abrirEdicao(orcamento);
+    setEditingId(null);
+    setEditingCodigo(null);
+    setDiasValidade("30");
+    setMensagem(
+      `Duplicando o orçamento Nº ${orcamento.codigo} — ajuste o que precisar e salve como um novo orçamento.`
+    );
+    setModo("novo");
+  }
+
   function voltar() {
+    limparRascunho();
     setModo("lista");
     setEditingId(null);
     setEditingCodigo(null);
@@ -1077,6 +1385,7 @@ export default function OrcamentosGalpaoPage() {
     setMensagem(
       editingId ? "Orçamento atualizado com sucesso." : "Orçamento criado com sucesso."
     );
+    limparRascunho();
     setModo("lista");
     setEditingId(null);
     setEditingCodigo(null);
@@ -1121,6 +1430,52 @@ export default function OrcamentosGalpaoPage() {
   const campoClasse =
     "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
   const labelClasse = "block text-xs font-medium text-slate-600 mb-1";
+
+  // Cabeçalho numerado de cada etapa do orçamento
+  const TituloEtapa = ({ numero, children }) => (
+    <div className="flex items-center gap-2 mt-5 mb-3 pb-1.5 border-b border-slate-200">
+      <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-600 text-white text-[11px] font-bold shrink-0">
+        {numero}
+      </span>
+      <h3 className="text-sm font-semibold text-slate-700">{children}</h3>
+    </div>
+  );
+
+  // Painel do checklist (usado no painel lateral e na versão mobile)
+  const PainelChecklist = ({ compacto = false }) =>
+    checklistEstrutura.length === 0 ? null : (
+      <div
+        className={`rounded-lg border ${
+          checklistCompleto
+            ? "border-emerald-200 bg-emerald-50"
+            : "border-amber-300 bg-amber-50"
+        } px-3 py-2 ${compacto ? "" : "mb-4"}`}
+      >
+        <p
+          className={`text-xs font-semibold mb-1 ${
+            checklistCompleto ? "text-emerald-800" : "text-amber-800"
+          }`}
+        >
+          Checklist da estrutura {checklistCompleto ? "— completo ✓" : "— confira o que falta"}
+        </p>
+        <div className="space-y-0.5">
+          {checklistEstrutura.map((l) => (
+            <div
+              key={l.rotulo}
+              className={`flex items-baseline justify-between gap-2 text-xs ${
+                l.ok ? "text-emerald-700" : "text-amber-800"
+              }`}
+            >
+              <span className="truncate">
+                {l.ok ? "✓" : "⚠"} {l.rotulo}
+                <span className="text-[10px] opacity-70"> ({l.detalhe})</span>
+              </span>
+              <span className="whitespace-nowrap font-medium">{l.texto}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
 
   // ---------- TELA DE INCLUSÃO / EDIÇÃO ----------
   if (modo === "novo" || modo === "editar") {
@@ -1181,6 +1536,9 @@ export default function OrcamentosGalpaoPage() {
           }}
           className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
         >
+          <div className="lg:flex lg:gap-6 lg:items-start">
+          <div className="lg:flex-1 min-w-0">
+          <TituloEtapa numero="1">Cliente e tipo de galpão</TituloEtapa>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
               <label className={labelClasse}>Cliente</label>
@@ -1214,8 +1572,9 @@ export default function OrcamentosGalpaoPage() {
             </div>
           </div>
 
+          {modeloId && <TituloEtapa numero="2">Medidas do galpão</TituloEtapa>}
           {modeloId && (
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 mb-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
               <div>
                 <label className={labelClasse}>
                   {totalGalpoes > 1 ? "Largura galpão 1 (m)" : "Largura do galpão (m)"}
@@ -1279,6 +1638,11 @@ export default function OrcamentosGalpaoPage() {
             </div>
           )}
 
+          {modeloId && avisoVaos && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 mb-3">
+              ⚠ {avisoVaos}
+            </p>
+          )}
           {modeloId && totalGalpoes > 1 && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
               <p className="text-xs font-medium text-slate-600 mb-2">
@@ -1312,7 +1676,7 @@ export default function OrcamentosGalpaoPage() {
           )}
 
           {areaCalculada && (
-            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 mb-4 flex flex-wrap items-center gap-6">
+            <div className="lg:hidden rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 mb-4 flex flex-wrap items-center gap-6">
               <div>
                 <p className="text-xs text-emerald-700">
                   Área coberta
@@ -1374,10 +1738,11 @@ export default function OrcamentosGalpaoPage() {
 
           {modeloId && (
             <div className="rounded-lg border border-slate-200 p-4 bg-slate-50 mb-4">
+              <TituloEtapa numero="3">Coberta</TituloEtapa>
               <p className="text-xs font-medium text-slate-600 mb-2">
-                Tipo de telha — ao escolher, a telha entra na lista sozinha (área x 1,10). Calha e
-                capote (fixos, abaixo) também recalculam sozinhos a partir das medidas e do nº de
-                galpões germinados.
+                Tipo de telha — ao escolher, a telha entra na lista sozinha (área × perda ao
+                lado). Calha e capote (fixos, abaixo) também recalculam sozinhos a partir das
+                medidas e do nº de galpões germinados.
               </p>
               <select
                 value={telhaId}
@@ -1391,9 +1756,37 @@ export default function OrcamentosGalpaoPage() {
                   </option>
                 ))}
               </select>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-600">Perda da telha (%):</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={perdaTelha}
+                  onChange={(e) => setPerdaTelha(e.target.value)}
+                  className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                {areaCalculada && telhaId && (
+                  <span className="text-xs text-slate-500">
+                    → {areaCalculada.toLocaleString("pt-BR")}m² ×{" "}
+                    {(1 + Math.max(0, Number(perdaTelha) || 0) / 100).toFixed(2).replace(".", ",")}{" "}
+                    ={" "}
+                    {(
+                      Math.round(
+                        areaCalculada * (1 + Math.max(0, Number(perdaTelha) || 0) / 100) * 100
+                      ) / 100
+                    ).toLocaleString("pt-BR")}
+                    m² de telha
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
+          <TituloEtapa numero="4">Estrutura — peças do galpão</TituloEtapa>
+          <div className="lg:hidden">
+            <PainelChecklist />
+          </div>
           <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
             <p className="text-xs font-medium text-slate-600 mb-2">Adicionar peça</p>
             <div className="flex items-center gap-2 mb-2">
@@ -1584,6 +1977,7 @@ export default function OrcamentosGalpaoPage() {
 
             {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
               <div className="rounded-lg border border-emerald-300 bg-emerald-50/40 p-3 mb-3">
+                <TituloEtapa numero="5">Laje / Mezanino</TituloEtapa>
                 <p className="text-xs font-semibold text-emerald-800 mb-2">
                   Estrutura da laje/mezanino — seção separada, com subtotal e valor/m² próprios
                 </p>
@@ -1801,7 +2195,12 @@ export default function OrcamentosGalpaoPage() {
                     </tr>
                   )}
                   {itensEstruturaOrdenados.map((i) => (
-                    <tr key={i.chave} className="border-t border-slate-200">
+                    <tr
+                      key={i.chave}
+                      className={`border-t border-slate-200 transition-colors duration-700 ${
+                        i.chave === chaveRecente ? "bg-emerald-100" : ""
+                      }`}
+                    >
                       <td className="py-1.5 pr-2">
                         {i.nome}
                         {i.obrigatorio && (
@@ -1878,7 +2277,12 @@ export default function OrcamentosGalpaoPage() {
                         </td>
                       </tr>
                       {itensLajeOrdenados.map((i) => (
-                        <tr key={i.chave} className="border-t border-slate-200 bg-emerald-50/30">
+                        <tr
+                          key={i.chave}
+                          className={`border-t border-slate-200 transition-colors duration-700 ${
+                            i.chave === chaveRecente ? "bg-emerald-100" : "bg-emerald-50/30"
+                          }`}
+                        >
                           <td className="py-1.5 pr-2">{i.nome}</td>
                           <td className="py-1.5 pr-2 text-slate-500">{i.unidade || "-"}</td>
                           <td className="py-1.5 pr-2">
@@ -1947,6 +2351,31 @@ export default function OrcamentosGalpaoPage() {
             )}
           </div>
 
+          {/* Barra fixa: total sempre à vista enquanto rola */}
+          {itens.length > 0 && (
+            <div className="sticky bottom-0 z-10 -mx-5 px-5 py-2 bg-white/95 backdrop-blur border-t border-slate-200 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+              <span className="text-slate-500">
+                Total: <b className="text-slate-800 text-base">{formatarMoeda(totalFinal)}</b>
+              </span>
+              {areaCalculada && (
+                <span className="text-slate-500">
+                  Área: <b className="text-slate-700">{areaCalculada.toLocaleString("pt-BR")} m²</b>
+                </span>
+              )}
+              {valorPorM2 !== null && (
+                <span className="text-slate-500">
+                  <b className="text-slate-700">{formatarMoeda(valorPorM2)}</b>/m²
+                </span>
+              )}
+              {checklistEstrutura.length > 0 && (
+                <span className={checklistCompleto ? "text-emerald-700" : "text-amber-700"}>
+                  {checklistCompleto ? "Checklist ✓" : "Checklist ⚠ pendências"}
+                </span>
+              )}
+            </div>
+          )}
+
+          <TituloEtapa numero="6">Condições e finalização</TituloEtapa>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
             <div>
               <label className={labelClasse}>Validade da proposta (dias)</label>
@@ -2040,16 +2469,76 @@ export default function OrcamentosGalpaoPage() {
               </button>
               <button
                 type="submit"
-                disabled={salvando}
-                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 transition"
+                disabled={salvando || !!motivoBloqueio}
+                title={motivoBloqueio || ""}
+                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2.5 transition"
               >
                 {salvando
                   ? "Salvando..."
-                  : modo === "editar"
-                    ? "Salvar alterações"
-                    : "Salvar orçamento"}
+                  : motivoBloqueio
+                    ? motivoBloqueio
+                    : modo === "editar"
+                      ? "Salvar alterações"
+                      : "Salvar orçamento"}
               </button>
             </div>
+          </div>
+          </div>
+          {/* ---------- PAINEL LATERAL FIXO (telas grandes) ---------- */}
+          <aside className="hidden lg:block lg:w-[330px] shrink-0">
+            <div className="sticky top-4 space-y-3">
+              {vao && comprimento && peDireito ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-center">
+                  <DesenhoGalpao
+                    vao={vao}
+                    comprimento={comprimento}
+                    peDireito={peDireito}
+                    galpoesGerminados={numeroGalpoesGerminados}
+                    larguras={listaLarguras}
+                    modulacao={
+                      Number(numeroVaos) > 0 ? Number(comprimento) / Number(numeroVaos) : 5
+                    }
+                    temLaje={itens.some((i) => i.papel === "LAJE")}
+                    temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
+                    areaLaje={areaLaje}
+                    largura={300}
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Prévia — igual sairá no orçamento impresso
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-400">
+                  Preencha as medidas para ver a prévia do galpão aqui.
+                </div>
+              )}
+              {areaCalculada && (
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800 space-y-0.5">
+                  <div className="flex justify-between">
+                    <span>Área coberta</span>
+                    <b>{areaCalculada.toLocaleString("pt-BR")} m²</b>
+                  </div>
+                  {valorPorM2 !== null && (
+                    <div className="flex justify-between">
+                      <span>Valor/m² estrutura</span>
+                      <b>{formatarMoeda(valorPorM2)}</b>
+                    </div>
+                  )}
+                  {valorPorM2Laje !== null && (
+                    <div className="flex justify-between">
+                      <span>Valor/m² laje</span>
+                      <b>{formatarMoeda(valorPorM2Laje)}</b>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t border-emerald-200 pt-0.5 mt-0.5">
+                    <span>Total do orçamento</span>
+                    <b>{formatarMoeda(totalFinal)}</b>
+                  </div>
+                </div>
+              )}
+              <PainelChecklist compacto />
+            </div>
+          </aside>
           </div>
         </form>
       </div>
@@ -2069,6 +2558,36 @@ export default function OrcamentosGalpaoPage() {
       <p className="text-slate-500 mb-6">
         Levantamentos de peças pré-moldadas para propostas de galpão.
       </p>
+      {rascunhoDisponivel && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-amber-900">
+          <span>
+            Há um orçamento <b>não salvo</b> de{" "}
+            {new Date(rascunhoDisponivel.quando).toLocaleString("pt-BR", {
+              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+            })}
+            {rascunhoDisponivel.editingCodigo
+              ? ` (edição do orçamento Nº ${rascunhoDisponivel.editingCodigo})`
+              : ""}
+            . Deseja continuar de onde parou?
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={restaurarRascunho}
+              className="rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-3 py-1.5"
+            >
+              Continuar rascunho
+            </button>
+            <button
+              type="button"
+              onClick={limparRascunho}
+              className="rounded-lg border border-amber-400 text-amber-800 hover:bg-amber-100 text-xs font-semibold px-3 py-1.5"
+            >
+              Descartar
+            </button>
+          </div>
+        </div>
+      )}
 
       {erro && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">
@@ -2157,6 +2676,13 @@ export default function OrcamentosGalpaoPage() {
                       >
                         <Printer size={16} />
                       </Link>
+                      <button
+                        onClick={() => duplicarOrcamento(o)}
+                        className="text-slate-600 hover:text-slate-900"
+                        title="Duplicar (cria um novo a partir deste)"
+                      >
+                        <Copy size={16} />
+                      </button>
                       {o.status !== "aprovado" && !estaVencido(o) && (
                         <>
                           <button
