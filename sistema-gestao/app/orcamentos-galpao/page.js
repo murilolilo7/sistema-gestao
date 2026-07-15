@@ -1150,6 +1150,18 @@ export default function OrcamentosGalpaoPage() {
           texto: `${fmtNum(conferenciaVigasLaje.lancadas)} de ${fmtNum(conferenciaVigasLaje.qtd)}`,
         });
       }
+      // Montagem da laje/mezanino (em VB): precisa estar lançada
+      {
+        const lanMontagem = somaQtd((i) => i.secao === "laje" && i.nome === "MONTAGEM");
+        linhas.push({
+          rotulo: "Montagem da laje",
+          detalhe: "quantidade em VB",
+          necessario: 1,
+          lancado: lanMontagem,
+          ok: lanMontagem > 0,
+          texto: lanMontagem > 0 ? `${fmtNum(lanMontagem)} VB ✓` : "não lançada",
+        });
+      }
     }
 
     return linhas;
@@ -1536,7 +1548,7 @@ export default function OrcamentosGalpaoPage() {
           }}
           className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
         >
-          <div className="lg:flex lg:gap-6 lg:items-start">
+          <div className="lg:flex lg:gap-6">
           <div className="lg:flex-1 min-w-0">
           <TituloEtapa numero="1">Cliente e tipo de galpão</TituloEtapa>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
