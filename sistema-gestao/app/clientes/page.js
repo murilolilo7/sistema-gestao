@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Pencil, Trash2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
+import { notificar, confirmar, LinhasEsqueleto, EstadoVazio } from "@/components/Ui";
 
 const UFS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
@@ -229,9 +230,7 @@ export default function ClientesPage() {
       return;
     }
 
-    setMensagem(
-      editingId ? "Cliente atualizado com sucesso." : "Cliente cadastrado com sucesso."
-    );
+    notificar(editingId ? "Cliente atualizado com sucesso." : "Cliente cadastrado com sucesso.");
     setModo("lista");
     setForm(FORM_VAZIO);
     setEditingId(null);
@@ -241,10 +240,13 @@ export default function ClientesPage() {
   }
 
   async function handleDelete(id) {
-    const confirmar = window.confirm(
-      "Tem certeza que deseja excluir este cliente?"
-    );
-    if (!confirmar) return;
+    const ok = await confirmar({
+      titulo: "Excluir cliente?",
+      texto: "Essa ação não pode ser desfeita.",
+      confirmarTexto: "Excluir",
+      perigoso: true,
+    });
+    if (!ok) return;
 
     const { error } = await supabase.from("clientes").delete().eq("id", id);
     if (error) {
@@ -552,7 +554,7 @@ export default function ClientesPage() {
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
         {loading ? (
-          <p className="p-6 text-sm text-slate-500">Carregando clientes...</p>
+          <LinhasEsqueleto linhas={5} />
         ) : clientes.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">
             Nenhum cliente cadastrado ainda. Clique em &quot;Incluir
