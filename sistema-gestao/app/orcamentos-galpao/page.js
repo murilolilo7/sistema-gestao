@@ -1255,7 +1255,13 @@ export default function OrcamentosGalpaoPage() {
       composicao_id: item.composicao_id,
       nome: item.composicoes_galpao?.nome || item.descricao_livre || "Item removido",
       unidade: item.composicoes_galpao?.unidade || item.unidade_livre,
-      papel: item.composicoes_galpao?.papel || null,
+      // Itens livres (tesoura calculada, viga de laje) não têm peça do
+      // catálogo — o papel volta deduzido pelo NOME, senão o checklist
+      // acharia que eles não foram lançados ao editar o orçamento.
+      papel:
+        item.composicoes_galpao?.papel ||
+        papelDoItem({ nome: item.composicoes_galpao?.nome || item.descricao_livre }) ||
+        null,
       quantidade: Number(item.quantidade),
       preco_unitario: Number(item.preco_unitario),
       secao: item.secao === "laje" ? "laje" : "estrutura",
