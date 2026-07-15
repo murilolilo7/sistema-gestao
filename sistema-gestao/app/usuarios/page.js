@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import { notificar, confirmar } from "@/components/Ui";
 
 export default function UsuariosPage() {
   const [usuarios, setUsuarios] = useState([]);
@@ -46,12 +47,15 @@ export default function UsuariosPage() {
       return;
     }
     const novoValor = !usuario.is_admin;
-    const confirmar = window.confirm(
-      novoValor
-        ? `Tornar "${usuario.nome_completo || usuario.email}" administrador? Vai poder alterar preços.`
-        : `Remover a permissão de administrador de "${usuario.nome_completo || usuario.email}"?`
-    );
-    if (!confirmar) return;
+    const ok = await confirmar({
+      titulo: novoValor ? "Tornar administrador?" : "Remover administrador?",
+      texto: novoValor
+        ? `"${usuario.nome_completo || usuario.email}" vai poder alterar preços e aprovar usuários.`
+        : `"${usuario.nome_completo || usuario.email}" perderá as permissões de administrador.`,
+      confirmarTexto: novoValor ? "Tornar admin" : "Remover",
+      perigoso: !novoValor,
+    });
+    if (!ok) return;
 
     setAlterandoId(usuario.user_id);
     setErro("");
@@ -63,7 +67,7 @@ export default function UsuariosPage() {
     if (error) {
       setErro("Erro ao alterar permissão: " + error.message);
     } else {
-      setMensagem("Permissão atualizada.");
+      notificar("Permissão atualizada.");
       setUsuarios((atual) =>
         atual.map((u) => (u.user_id === usuario.user_id ? { ...u, is_admin: novoValor } : u))
       );
