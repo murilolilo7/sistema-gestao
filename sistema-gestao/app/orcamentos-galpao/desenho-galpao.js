@@ -40,6 +40,12 @@ function calcularDesenhoGalpao(dados) {
   // REGRA: pé-direito acima de 12m => viga de travamento DUPLICADA
   // (dois níveis de travamento nas laterais).
   const yLaje = H * 0.45;
+  // Laje/mezanino pode ser PARCIAL: a profundidade desenhada é a área
+  // da laje ÷ largura total (ex.: 100m² num galpão de 10m de largura
+  // = laje até 10m de profundidade, cobrindo só os primeiros vãos).
+  // Sem área informada, desenha a laje no galpão inteiro.
+  const areaLajeNum = Number(dados.areaLaje) || 0;
+  const zLaje = areaLajeNum > 0 ? Math.max(1, Math.min(C, areaLajeNum / W)) : C;
   let niveisTravamento = [];
   if (dados.temTravamento) {
     if (H > 12) {
@@ -126,20 +132,22 @@ function calcularDesenhoGalpao(dados) {
   linha(T(W, H, 0), T(W, H, C), CONCRETO_CLARO, wViga);
   for (const yT of niveisTravamento)
     linha(T(W, yT, 0), T(W, yT, C), CONCRETO_CLARO, wViga * 0.9);
-  if (dados.temLaje) linha(T(W, yLaje, 0), T(W, yLaje, C), CONCRETO_CLARO, wViga);
+  if (dados.temLaje) linha(T(W, yLaje, 0), T(W, yLaje, zLaje), CONCRETO_CLARO, wViga);
   linha(T(0, H, C), T(W, H, C), CONCRETO_CLARO, wViga);
 
   // 2) Laje pré-moldada: o plano da laje apoiado nas VIGAS DE LAJE
   // (uma viga por linha de pilares, no nível da laje)
   if (dados.temLaje) {
     poligono(
-      [T(0, yLaje, 0), T(W, yLaje, 0), T(W, yLaje, C), T(0, yLaje, C)],
+      [T(0, yLaje, 0), T(W, yLaje, 0), T(W, yLaje, zLaje), T(0, yLaje, zLaje)],
       "rgba(214, 221, 228, 0.5)",
       CONCRETO_CLARO,
       0.8
     );
-    for (const x of linhasX) linha(T(x, yLaje, 0), T(x, yLaje, C), CONCRETO, wViga * 1.1);
+    for (const x of linhasX) linha(T(x, yLaje, 0), T(x, yLaje, zLaje), CONCRETO, wViga * 1.1);
     linha(T(0, yLaje, 0), T(W, yLaje, 0), CONCRETO, wViga * 1.1);
+    // viga de fechamento no fim da laje (quando parcial)
+    if (zLaje < C - 0.01) linha(T(0, yLaje, zLaje), T(W, yLaje, zLaje), CONCRETO, wViga * 1.1);
   }
 
   // 3) Pilares internos (divisas entre galpões geminados)
@@ -233,6 +241,7 @@ export default function DesenhoGalpao({
   modulacao = 5,
   temLaje = false,
   temTravamento = false,
+  areaLaje = null,
   largura = 300,
 }) {
   const fmt = (n) =>
@@ -255,6 +264,7 @@ export default function DesenhoGalpao({
     modulacao,
     temLaje,
     temTravamento,
+    areaLaje,
     textoLargura: larguraTotal > 0 ? `${fmt(larguraTotal)}M` : null,
     textoComprimento: comprimento ? `${fmt(comprimento)}M` : null,
     textoAltura: peDireito ? `${fmt(peDireito)}M` : null,
