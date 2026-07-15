@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Trash2, Plus, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { notificar, confirmar } from "@/components/Ui";
 
 function formatarMoeda(valor) {
   if (valor === null || valor === undefined) return "-";
@@ -140,12 +141,18 @@ export default function PrecosPage() {
       .update({ nome: insumo.nome, unidade: insumo.unidade, valor_unitario: Number(insumo.valor_unitario) || 0 })
       .eq("id", insumo.id);
     if (error) setErro("Erro ao salvar: " + error.message);
-    else setMensagem(`${insumo.nome} atualizado.`);
+    else notificar(`${insumo.nome} atualizado.`);
     setSalvandoId(null);
   }
 
   async function excluirInsumo(insumo) {
-    if (!window.confirm(`Excluir o insumo "${insumo.nome}"?`)) return;
+    const ok = await confirmar({
+      titulo: "Excluir insumo?",
+      texto: `"${insumo.nome}" será removido da tabela de preços.`,
+      confirmarTexto: "Excluir",
+      perigoso: true,
+    });
+    if (!ok) return;
     setSalvandoId(insumo.id);
     setErro("");
     setMensagem("");
@@ -157,7 +164,7 @@ export default function PrecosPage() {
           : "Erro ao excluir: " + error.message
       );
     } else {
-      setMensagem(`${insumo.nome} excluído.`);
+      notificar(`${insumo.nome} excluído.`);
       setInsumos((atual) => atual.filter((i) => i.id !== insumo.id));
     }
     setSalvandoId(null);
@@ -180,7 +187,7 @@ export default function PrecosPage() {
     if (error) {
       setErro("Erro ao adicionar insumo: " + error.message);
     } else {
-      setMensagem("Insumo adicionado.");
+      notificar("Insumo adicionado.");
       setNovoInsumo({ nome: "", unidade: "", valor_unitario: "" });
       setMostrarFormInsumo(false);
       const { data } = await buscarInsumos();
@@ -205,7 +212,7 @@ export default function PrecosPage() {
     if (error) {
       setErro("Erro ao salvar: " + error.message);
     } else {
-      setMensagem(`${item.funcao} atualizado.`);
+      notificar(`${item.funcao} atualizado.`);
       const { data } = await buscarMaoDeObra();
       if (data) setMaoDeObra(data);
     }
@@ -213,7 +220,13 @@ export default function PrecosPage() {
   }
 
   async function excluirMaoDeObra(item) {
-    if (!window.confirm(`Excluir a função "${item.funcao}"?`)) return;
+    const ok = await confirmar({
+      titulo: "Excluir função?",
+      texto: `"${item.funcao}" será removida da mão de obra.`,
+      confirmarTexto: "Excluir",
+      perigoso: true,
+    });
+    if (!ok) return;
     setSalvandoId(item.id);
     setErro("");
     setMensagem("");
@@ -225,7 +238,7 @@ export default function PrecosPage() {
           : "Erro ao excluir: " + error.message
       );
     } else {
-      setMensagem(`${item.funcao} excluído.`);
+      notificar(`${item.funcao} excluído.`);
       setMaoDeObra((atual) => atual.filter((i) => i.id !== item.id));
     }
     setSalvandoId(null);
@@ -249,7 +262,7 @@ export default function PrecosPage() {
     if (error) {
       setErro("Erro ao adicionar função: " + error.message);
     } else {
-      setMensagem("Função adicionada.");
+      notificar("Função adicionada.");
       setNovaMaoDeObra({ funcao: "", salario_bruto: "", encargos_pct: "68", base_horas_mes: "220" });
       setMostrarFormMaoDeObra(false);
       const { data } = await buscarMaoDeObra();
@@ -274,17 +287,18 @@ export default function PrecosPage() {
       })
       .eq("id", comp.id);
     if (error) setErro("Erro ao salvar: " + error.message);
-    else setMensagem(`${comp.nome} atualizado.`);
+    else notificar(`${comp.nome} atualizado.`);
     setSalvandoId(null);
   }
 
   async function excluirComposicao(comp) {
-    if (
-      !window.confirm(
-        `Excluir a peça "${comp.nome}"?\n\nOrçamentos que já usaram essa peça não são afetados — eles guardam o nome/valor de quando foram feitos.`
-      )
-    )
-      return;
+    const ok = await confirmar({
+      titulo: "Excluir peça?",
+      texto: `"${comp.nome}" será removida. Orçamentos que já usaram essa peça não são afetados — eles guardam o nome/valor de quando foram feitos.`,
+      confirmarTexto: "Excluir",
+      perigoso: true,
+    });
+    if (!ok) return;
     setSalvandoId(comp.id);
     setErro("");
     setMensagem("");
@@ -292,7 +306,7 @@ export default function PrecosPage() {
     if (error) {
       setErro("Erro ao excluir: " + error.message);
     } else {
-      setMensagem(`${comp.nome} excluída.`);
+      notificar(`${comp.nome} excluída.`);
       setComposicoes((atual) => atual.filter((c) => c.id !== comp.id));
       if (receitaExpandidaId === comp.id) setReceitaExpandidaId(null);
     }
@@ -346,10 +360,13 @@ export default function PrecosPage() {
   }
 
   async function recalcularTudo() {
-    const confirmar = window.confirm(
-      "Recalcular vai atualizar o custo/preço de todas as peças que têm receita de insumos, com base nos valores atuais. Peças sem receita (Telha, Montagem, Fundação etc.) não são afetadas. Continuar?"
-    );
-    if (!confirmar) return;
+    const ok = await confirmar({
+      titulo: "Recalcular todas as peças?",
+      texto:
+        "O custo/preço de todas as peças com receita de insumos será atualizado com os valores atuais. Peças sem receita (Telha, Montagem, Fundação etc.) não são afetadas.",
+      confirmarTexto: "Recalcular",
+    });
+    if (!ok) return;
     setRecalculando(true);
     setErro("");
     setMensagem("");
@@ -357,7 +374,7 @@ export default function PrecosPage() {
     if (error) {
       setErro("Erro ao recalcular: " + error.message);
     } else {
-      setMensagem(`${data} composições recalculadas a partir dos insumos/mão de obra atuais.`);
+      notificar(`${data} composições recalculadas a partir dos insumos/mão de obra atuais.`);
       const { data: novasComposicoes } = await buscarComposicoes();
       if (novasComposicoes) setComposicoes(novasComposicoes);
     }
@@ -492,7 +509,7 @@ export default function PrecosPage() {
     if (erroRecalc) {
       setErro("Receita salva, mas houve erro ao recalcular o preço: " + erroRecalc.message);
     } else {
-      setMensagem("Receita salva e o preço da peça foi recalculado.");
+      notificar("Receita salva e o preço da peça foi recalculado.");
       const { data } = await buscarComposicoes();
       if (data) setComposicoes(data);
     }
