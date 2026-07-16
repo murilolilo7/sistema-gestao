@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Copy, Eye, EyeOff, Pencil, Printer, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import DesenhoGalpao from "./desenho-galpao";
@@ -105,7 +106,7 @@ function recalcularFundacao(listaItens) {
   return listaItens.map((i) => (i.nome === "FUNDAÇÃO" ? { ...i, quantidade: totalPilares } : i));
 }
 
-export default function OrcamentosGalpaoPage() {
+function OrcamentosGalpaoPageInterno() {
   const [modo, setModo] = useState("lista"); // 'lista' | 'novo' | 'editar'
   const [clientes, setClientes] = useState([]);
   const [composicoes, setComposicoes] = useState([]);
@@ -231,6 +232,21 @@ export default function OrcamentosGalpaoPage() {
       ativo = false;
     };
   }, []);
+
+  // Abre direto um orçamento quando a URL trouxer ?editar=CODIGO
+  // (ex: clique no aviso "vencendo" do painel inicial).
+  const searchParams = useSearchParams();
+  const [abriuPelaUrl, setAbriuPelaUrl] = useState(false);
+  useEffect(() => {
+    if (abriuPelaUrl || loading) return;
+    const codigo = searchParams.get("editar");
+    if (!codigo) return;
+    const alvo = orcamentos.find((o) => String(o.codigo) === String(codigo));
+    if (alvo) {
+      abrirEdicao(alvo);
+      setAbriuPelaUrl(true);
+    }
+  }, [loading, orcamentos, searchParams, abriuPelaUrl]);
 
   const modeloSelecionado = modelos.find((m) => String(m.id) === String(modeloId));
   const tipoSelecionado = modeloSelecionado?.tipo || "";
@@ -2797,5 +2813,13 @@ export default function OrcamentosGalpaoPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function OrcamentosGalpaoPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">Carregando...</p>}>
+      <OrcamentosGalpaoPageInterno />
+    </Suspense>
   );
 }
