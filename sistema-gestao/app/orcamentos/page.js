@@ -197,7 +197,9 @@ function OrcamentosPageInterno() {
   // ---------- RASCUNHO AUTOMÁTICO (não perde orçamento com F5/queda) ----------
   const RASCUNHO_CHAVE = "rascunho-orcamento-produtos";
   useEffect(() => {
-    if (modo === "lista") return;
+    // Rascunho automático só ao CRIAR um novo orçamento (não ao editar
+    // um existente, que já está salvo no banco).
+    if (modo !== "novo") return;
     const temConteudo = clienteId || itens.length > 0;
     if (!temConteudo) return;
     const t = setTimeout(() => {
@@ -248,9 +250,9 @@ function OrcamentosPageInterno() {
     setRascunhoDisponivel(null);
   }
 
-  // Aviso do navegador ao tentar sair com orçamento aberto e não salvo
+  // Aviso do navegador ao tentar sair criando um novo orçamento
   useEffect(() => {
-    if (modo === "lista") return;
+    if (modo !== "novo") return;
     const aviso = (e) => {
       e.preventDefault();
       e.returnValue = "";
