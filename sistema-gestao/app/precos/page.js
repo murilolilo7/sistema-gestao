@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Trash2, Plus, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { Trash2, Plus, ChevronDown, ChevronRight, Copy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
 
@@ -29,6 +29,10 @@ export default function PrecosPage() {
   const [secaoAberta, setSecaoAberta] = useState(null); // null | 'insumos' | 'maoDeObra' | 'composicoes'
   const [categoriaAberta, setCategoriaAberta] = useState(null); // qual papel está aberto dentro de Peças
   const [souAdmin, setSouAdmin] = useState(false);
+  const [reajusteAberto, setReajusteAberto] = useState(false);
+  const [reajusteGrupo, setReajusteGrupo] = useState("insumos");
+  const [reajustePct, setReajustePct] = useState("");
+  const [reajusteSalvando, setReajusteSalvando] = useState(false);
 
   useEffect(() => {
     supabase.rpc("eh_admin").then(({ data }) => setSouAdmin(!!data));
@@ -539,6 +543,47 @@ export default function PrecosPage() {
   const botaoIncluir =
     "text-emerald-700 hover:text-emerald-900 text-xs font-medium flex items-center gap-1";
 
+  // ---------- Reajuste em massa ----------
+  const listaReajuste = reajusteGrupo === "insumos" ? insumos : maoDeObra;
+  const campoValor = reajusteGrupo === "insumos" ? "valor_unitario" : "salario_bruto";
+  const fatorReajuste = 1 + (Number(reajustePct) || 0) / 100;
+
+  async function aplicarReajusteEmMassa() {
+    const pct = Number(reajustePct);
+    if (!pct || pct === 0) {
+      notificar("Informe um percentual diferente de zero.", "erro");
+      return;
+    }
+    const ok = await confirmar({
+      titulo: "Aplicar reajuste em massa?",
+      texto: `${pct > 0 ? "+" : ""}${pct}% em ${
+        reajusteGrupo === "insumos" ? "TODOS os insumos" : "TODA a mão de obra"
+      } (${listaReajuste.length} itens). Cada alteração fica registrada no histórico de preços.`,
+      confirmarTexto: "Aplicar reajuste",
+    });
+    if (!ok) return;
+    setReajusteSalvando(true);
+    const { data: sessao } = await supabase.auth.getSession();
+    const usuario =
+      sessao?.session?.user?.user_metadata?.nome_completo ||
+      sessao?.session?.user?.email ||
+      null;
+    const { data, error } = await supabase.rpc("reajustar_precos_em_massa", {
+      grupo_input: reajusteGrupo,
+      percentual_input: pct,
+      nome_usuario_input: usuario,
+    });
+    setReajusteSalvando(false);
+    if (error) {
+      notificar("Erro no reajuste: " + error.message, "erro");
+      return;
+    }
+    notificar(`Reajuste aplicado em ${data} item(ns).`);
+    setReajusteAberto(false);
+    setReajustePct("");
+    await carregarTudo();
+  }
+
   if (loading) {
     return <p className="text-sm text-slate-500">Carregando...</p>;
   }
@@ -556,6 +601,103 @@ export default function PrecosPage() {
       {!souAdmin && (
         <div className="mb-4 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 px-4 py-3 text-sm">
           Você pode consultar os preços, mas só um administrador pode alterá-los, incluir ou excluir itens.
+        </div>
+      )}
+
+      {/* ---------- Reajuste em massa (admin) ---------- */}
+      {souAdmin && (
+        <div className="mb-5">
+          <button
+            type="button"
+            onClick={() => setReajusteAberto((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 px-3 py-2 transition"
+          >
+            <TrendingUp size={15} className="text-emerald-600" />
+            Reajustar preços em massa
+          </button>
+
+          {reajusteAberto && (
+            <div className="mt-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-end gap-3 mb-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Grupo</label>
+                  <select
+                    value={reajusteGrupo}
+                    onChange={(e) => setReajusteGrupo(e.target.value)}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="insumos">Insumos (materiais)</option>
+                    <option value="mao_de_obra">Mão de obra (salários)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Percentual (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={reajustePct}
+                    onChange={(e) => setReajustePct(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    placeholder="Ex: 8 ou -5"
+                    className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={aplicarReajusteEmMassa}
+                  disabled={reajusteSalvando || !reajustePct}
+                  className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
+                >
+                  {reajusteSalvando ? "Aplicando..." : "Aplicar"}
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 mb-2">
+                Prévia dos primeiros itens (o reajuste vale para todos os {listaReajuste.length}).
+                Cada alteração fica registrada no histórico de preços.
+              </p>
+              <div className="rounded-lg border border-slate-100 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-slate-500 text-left">
+                    <tr>
+                      <th className="px-3 py-1.5 font-medium">Item</th>
+                      <th className="px-3 py-1.5 font-medium text-right">Atual</th>
+                      <th className="px-3 py-1.5 font-medium text-right">
+                        {reajustePct ? `Com ${Number(reajustePct) > 0 ? "+" : ""}${reajustePct}%` : "Novo"}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listaReajuste.slice(0, 5).map((item) => {
+                      const atual = Number(item[campoValor]) || 0;
+                      const novo = Math.round(atual * fatorReajuste * 100) / 100;
+                      return (
+                        <tr key={item.id} className="border-t border-slate-100">
+                          <td className="px-3 py-1.5 text-slate-700">
+                            {item.nome || item.funcao}
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-slate-500">
+                            {formatarMoeda(atual)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-medium text-emerald-700">
+                            {reajustePct ? formatarMoeda(novo) : "-"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {reajusteGrupo === "mao_de_obra" && (
+                <p className="text-[11px] text-slate-400 mt-2">
+                  Reajusta o salário bruto; o valor/hora é recalculado. Rode &quot;Recalcular
+                  peças&quot; depois para propagar aos preços das composições.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
