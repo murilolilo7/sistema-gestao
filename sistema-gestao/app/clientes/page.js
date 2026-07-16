@@ -366,7 +366,6 @@ export default function ClientesPage() {
 
   const clientesFiltrados = clientes.filter((c) => {
     const termo = termoBusca.trim().toLowerCase();
-  const pag = usePaginacao(clientesFiltrados);
     if (!termo) return true;
     return (
       c.nome?.toLowerCase().includes(termo) ||
@@ -374,6 +373,8 @@ export default function ClientesPage() {
       String(c.codigo).includes(termo)
     );
   });
+
+  const pag = usePaginacao(clientesFiltrados);
 
   const campoClasse =
     "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
