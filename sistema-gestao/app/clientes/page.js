@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Pencil, Trash2, MessageCircle, FileText, Loader2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
-import { notificar, confirmar, LinhasEsqueleto, EstadoVazio } from "@/components/Ui";
+import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
 
 // ---------- Validação de CPF e CNPJ (dígitos verificadores) ----------
 function cpfValido(cpf) {
@@ -366,6 +366,7 @@ export default function ClientesPage() {
 
   const clientesFiltrados = clientes.filter((c) => {
     const termo = termoBusca.trim().toLowerCase();
+  const pag = usePaginacao(clientesFiltrados);
     if (!termo) return true;
     return (
       c.nome?.toLowerCase().includes(termo) ||
@@ -686,7 +687,7 @@ export default function ClientesPage() {
               </tr>
             </thead>
             <tbody>
-              {clientesFiltrados.map((c) => (
+              {pag.itensPagina.map((c) => (
                 <tr key={c.id} className="border-t border-slate-100">
                   <td className="px-4 py-2 whitespace-nowrap text-slate-400">
                     {c.codigo}
@@ -750,6 +751,7 @@ export default function ClientesPage() {
             </tbody>
           </table>
         )}
+        <ControlePaginacao {...pag} />
       </div>
 
       {/* ---------- Ficha do cliente (histórico) ---------- */}
