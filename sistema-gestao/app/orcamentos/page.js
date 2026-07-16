@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Copy, Eye, EyeOff, FileText, Pencil, Printer, ShoppingCart, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { notificar, confirmar, LinhasEsqueleto, EstadoVazio } from "@/components/Ui";
+import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
 
 function formatarMoeda(valor) {
   if (valor === null || valor === undefined) return "-";
@@ -469,6 +469,7 @@ export default function OrcamentosPage() {
       o.status?.toLowerCase().includes(termo)
     );
   });
+  const pag = usePaginacao(orcamentosFiltrados);
 
   // Dias até vencer (para destacar propostas vencendo em até 3 dias)
   function diasParaVencer(o) {
@@ -936,7 +937,7 @@ export default function OrcamentosPage() {
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
             </thead>
-            {orcamentosFiltrados.map((o) => (
+            {pag.itensPagina.map((o) => (
               <tbody key={o.id} className="border-t border-slate-100">
                 <tr>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-400">
@@ -1058,6 +1059,7 @@ export default function OrcamentosPage() {
             ))}
           </table>
         )}
+        <ControlePaginacao {...pag} />
       </div>
     </div>
   );
