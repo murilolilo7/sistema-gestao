@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Pencil, Trash2, ArrowUpDown, PackageX, History } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
-import { notificar, confirmar, LinhasEsqueleto, EstadoVazio } from "@/components/Ui";
+import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
 
 const UNIDADES = ["UN", "M", "M²", "M³", "KG", "PC", "CX", "L"];
 
@@ -236,6 +236,7 @@ export default function ProdutosPage() {
 
   const produtosFiltrados = produtos.filter((p) => {
     const termo = termoBusca.trim().toLowerCase();
+  const pag = usePaginacao(produtosFiltrados);
     if (!termo) return true;
     return (
       p.nome?.toLowerCase().includes(termo) ||
@@ -478,7 +479,7 @@ export default function ProdutosPage() {
               </tr>
             </thead>
             <tbody>
-              {produtosFiltrados.map((p) => (
+              {pag.itensPagina.map((p) => (
                 <tr key={p.id} className="border-t border-slate-100">
                   <td className="px-4 py-2 whitespace-nowrap text-slate-400">
                     {p.codigo}
@@ -547,6 +548,7 @@ export default function ProdutosPage() {
             </tbody>
           </table>
         )}
+        <ControlePaginacao {...pag} />
       </div>
 
       {/* ---------- Modal de movimentação de estoque ---------- */}
