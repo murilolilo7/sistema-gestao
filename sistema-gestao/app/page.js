@@ -293,7 +293,7 @@ export default function Home() {
                 return (
                   <Link
                     key={`${o.tipo}-${o.codigo}`}
-                    href={o.rota}
+                    href={`${o.rota}?editar=${o.codigo}`}
                     className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 hover:border-amber-300 hover:bg-amber-50/50 px-3 py-2 transition"
                   >
                     <div className="min-w-0">
