@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, ArrowUpDown, PackageX, History } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
-import { notificar, confirmar, LinhasEsqueleto } from "@/components/Ui";
+import { notificar, confirmar, LinhasEsqueleto, EstadoVazio } from "@/components/Ui";
 
 const UNIDADES = ["UN", "M", "M²", "M³", "KG", "PC", "CX", "L"];
 
@@ -16,6 +16,7 @@ const FORM_VAZIO = {
   preco: "",
   custo: "",
   quantidade_estoque: "",
+  estoque_minimo: "",
 };
 
 function formatarMoeda(valor) {
@@ -37,6 +38,12 @@ export default function ProdutosPage() {
   const [editingCodigo, setEditingCodigo] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
   const [form, setForm] = useState(FORM_VAZIO);
+  const [movProduto, setMovProduto] = useState(null); // produto no modal de movimentação
+  const [movTipo, setMovTipo] = useState("entrada");
+  const [movQtd, setMovQtd] = useState("");
+  const [movMotivo, setMovMotivo] = useState("");
+  const [movSalvando, setMovSalvando] = useState(false);
+  const [movHistorico, setMovHistorico] = useState([]);
 
   function buscarProdutosDB() {
     return supabase.from("produtos").select("*").order("codigo", { ascending: false });
@@ -96,6 +103,7 @@ export default function ProdutosPage() {
       preco: produto.preco ?? "",
       custo: produto.custo ?? "",
       quantidade_estoque: produto.quantidade_estoque ?? "",
+      estoque_minimo: produto.estoque_minimo ?? "",
     });
     setModo("editar");
   }
@@ -125,6 +133,8 @@ export default function ProdutosPage() {
       custo: form.custo === "" ? null : Number(form.custo),
       quantidade_estoque:
         form.quantidade_estoque === "" ? 0 : Number(form.quantidade_estoque),
+      estoque_minimo:
+        form.estoque_minimo === "" ? 0 : Number(form.estoque_minimo),
     };
 
     const resultado = editingId
@@ -147,6 +157,57 @@ export default function ProdutosPage() {
     setEditingId(null);
     setEditingCodigo(null);
     setSalvando(false);
+    await carregarProdutos();
+  }
+
+  // ---------- Movimentação de estoque ----------
+  async function abrirMovimentacao(produto) {
+    setMovProduto(produto);
+    setMovTipo("entrada");
+    setMovQtd("");
+    setMovMotivo("");
+    setMovHistorico([]);
+    const { data } = await supabase
+      .from("movimentacoes_estoque")
+      .select("*")
+      .eq("produto_id", produto.id)
+      .order("id", { ascending: false })
+      .limit(10);
+    setMovHistorico(data || []);
+  }
+
+  function fecharMovimentacao() {
+    setMovProduto(null);
+  }
+
+  async function confirmarMovimentacao() {
+    const qtd = Number(movQtd);
+    if (!qtd || qtd <= 0) {
+      notificar("Informe uma quantidade maior que zero.", "erro");
+      return;
+    }
+    setMovSalvando(true);
+    const { data: sessao } = await supabase.auth.getSession();
+    const usuario =
+      sessao?.session?.user?.user_metadata?.nome_completo ||
+      sessao?.session?.user?.email ||
+      null;
+    const { error } = await supabase.rpc("movimentar_estoque", {
+      produto_id_input: movProduto.id,
+      tipo_input: movTipo,
+      quantidade_input: qtd,
+      motivo_input: movMotivo.trim() || null,
+      usuario_input: usuario,
+    });
+    setMovSalvando(false);
+    if (error) {
+      notificar(error.message.replace(/^.*?:\s/, ""), "erro");
+      return;
+    }
+    const rotuloTipo =
+      movTipo === "entrada" ? "Entrada" : movTipo === "saida" ? "Saída" : "Ajuste";
+    notificar(`${rotuloTipo} de ${qtd} registrada em ${movProduto.nome}.`);
+    fecharMovimentacao();
     await carregarProdutos();
   }
 
@@ -295,7 +356,9 @@ export default function ProdutosPage() {
               </div>
 
               <div>
-                <label className={labelClasse}>Estoque atual</label>
+                <label className={labelClasse}>
+                  Estoque atual {editingId ? "(use Movimentar p/ alterar)" : ""}
+                </label>
                 <input
                   name="quantidade_estoque"
                   type="number"
@@ -307,7 +370,24 @@ export default function ProdutosPage() {
                   placeholder="0"
                 />
               </div>
+              <div>
+                <label className={labelClasse}>Estoque mínimo (alerta)</label>
+                <input
+                  name="estoque_minimo"
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={form.estoque_minimo}
+                  onChange={handleChange}
+                  className={campoClasse}
+                  placeholder="0"
+                />
+              </div>
             </div>
+            <p className="text-xs text-slate-400 mt-2">
+              Quando o estoque atual ficar igual ou abaixo do mínimo, o produto recebe um alerta
+              na lista e no painel inicial. Deixe 0 para não alertar.
+            </p>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
@@ -377,14 +457,12 @@ export default function ProdutosPage() {
         {loading ? (
           <LinhasEsqueleto linhas={5} />
         ) : produtos.length === 0 ? (
-          <p className="p-6 text-sm text-slate-500">
-            Nenhum produto cadastrado ainda. Clique em &quot;Incluir
-            produto&quot; para adicionar o primeiro.
-          </p>
+          <EstadoVazio
+            titulo="Nenhum produto cadastrado ainda"
+            texto='Clique em "Incluir produto" para adicionar o primeiro.'
+          />
         ) : produtosFiltrados.length === 0 ? (
-          <p className="p-6 text-sm text-slate-500">
-            Nenhum produto encontrado para essa busca.
-          </p>
+          <EstadoVazio titulo="Nenhum produto encontrado" texto="Ajuste a busca acima." />
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-slate-100 text-slate-600 text-left">
@@ -395,6 +473,7 @@ export default function ProdutosPage() {
                 <th className="px-4 py-2 font-medium">Un.</th>
                 <th className="px-4 py-2 font-medium">Preço</th>
                 <th className="px-4 py-2 font-medium">Estoque</th>
+                <th className="px-4 py-2 font-medium">Mínimo</th>
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
             </thead>
@@ -417,10 +496,36 @@ export default function ProdutosPage() {
                     {formatarMoeda(p.preco)}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
-                    {p.quantidade_estoque ?? 0}
+                    {(() => {
+                      const estoque = p.quantidade_estoque ?? 0;
+                      const minimo = p.estoque_minimo ?? 0;
+                      const baixo = minimo > 0 && estoque <= minimo;
+                      return (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className={baixo ? "font-semibold text-red-600" : ""}>
+                            {estoque}
+                          </span>
+                          {baixo && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-1.5 py-0.5">
+                              <PackageX size={11} /> baixo
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-4 py-2 whitespace-nowrap text-slate-400">
+                    {p.estoque_minimo ?? 0}
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => abrirMovimentacao(p)}
+                        className="text-slate-600 hover:text-slate-900"
+                        title="Movimentar estoque (entrada/saída)"
+                      >
+                        <ArrowUpDown size={16} />
+                      </button>
                       <button
                         onClick={() => abrirEdicao(p)}
                         className="text-emerald-700 hover:text-emerald-900"
@@ -443,6 +548,153 @@ export default function ProdutosPage() {
           </table>
         )}
       </div>
+
+      {/* ---------- Modal de movimentação de estoque ---------- */}
+      {movProduto && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={fecharMovimentacao} />
+          <div className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white shadow-2xl p-5">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Movimentar estoque</h3>
+                <p className="text-xs text-slate-500">
+                  {movProduto.nome} · atual: {movProduto.quantidade_estoque ?? 0}{" "}
+                  {movProduto.unidade || ""}
+                </p>
+              </div>
+              <button
+                onClick={fecharMovimentacao}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+                title="Fechar"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="flex gap-1.5 mb-3 rounded-lg bg-slate-100 p-1 text-sm">
+              {[
+                { chave: "entrada", rotulo: "Entrada" },
+                { chave: "saida", rotulo: "Saída" },
+                { chave: "ajuste", rotulo: "Ajuste" },
+              ].map((t) => (
+                <button
+                  key={t.chave}
+                  type="button"
+                  onClick={() => setMovTipo(t.chave)}
+                  className={`flex-1 rounded-md py-1.5 font-medium transition ${
+                    movTipo === t.chave ? "bg-white shadow text-slate-900" : "text-slate-500"
+                  }`}
+                >
+                  {t.rotulo}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className={labelClasse}>
+                  {movTipo === "ajuste" ? "Nova quantidade" : "Quantidade"}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={movQtd}
+                  onChange={(e) => setMovQtd(e.target.value)}
+                  onFocus={(e) => e.target.select()}
+                  className={campoClasse}
+                  placeholder="0"
+                  autoFocus
+                />
+              </div>
+              <div className="flex items-end">
+                <p className="text-xs text-slate-500 pb-2">
+                  {movQtd && Number(movQtd) > 0 ? (
+                    <>
+                      Ficará com{" "}
+                      <b className="text-slate-700">
+                        {movTipo === "entrada"
+                          ? (movProduto.quantidade_estoque ?? 0) + Number(movQtd)
+                          : movTipo === "saida"
+                            ? (movProduto.quantidade_estoque ?? 0) - Number(movQtd)
+                            : Number(movQtd)}
+                      </b>{" "}
+                      em estoque
+                    </>
+                  ) : (
+                    " "
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className={labelClasse}>Motivo (opcional)</label>
+              <input
+                type="text"
+                value={movMotivo}
+                onChange={(e) => setMovMotivo(e.target.value)}
+                className={campoClasse}
+                placeholder="Ex: compra, venda avulsa, perda, inventário..."
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 mb-4">
+              <button
+                type="button"
+                onClick={fecharMovimentacao}
+                className="rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm font-medium px-4 py-2"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarMovimentacao}
+                disabled={movSalvando}
+                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2"
+              >
+                {movSalvando ? "Registrando..." : "Registrar movimentação"}
+              </button>
+            </div>
+
+            {movHistorico.length > 0 && (
+              <div className="border-t border-slate-100 pt-3">
+                <p className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1.5">
+                  <History size={13} /> Últimas movimentações
+                </p>
+                <div className="space-y-1">
+                  {movHistorico.map((m) => (
+                    <div
+                      key={m.id}
+                      className="flex items-center justify-between gap-2 text-xs text-slate-500"
+                    >
+                      <span>
+                        <span
+                          className={`font-semibold ${
+                            m.tipo === "entrada"
+                              ? "text-emerald-600"
+                              : m.tipo === "saida"
+                                ? "text-red-600"
+                                : "text-slate-600"
+                          }`}
+                        >
+                          {m.tipo === "entrada" ? "+" : m.tipo === "saida" ? "−" : "="}
+                          {m.quantidade}
+                        </span>{" "}
+                        {m.motivo ? `· ${m.motivo}` : ""}
+                      </span>
+                      <span className="whitespace-nowrap text-slate-400">
+                        {new Date(m.created_at).toLocaleDateString("pt-BR")} · {m.quantidade_anterior}→
+                        {m.quantidade_nova}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
