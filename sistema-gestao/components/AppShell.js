@@ -156,8 +156,18 @@ export default function AppShell({ children }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((evento, newSession) => {
       setSession(newSession);
+      // Sessão expirada / logout em outra aba: avisa e manda pro login
+      if (evento === "SIGNED_OUT" && window.location.pathname !== "/login") {
+        try {
+          window.dispatchEvent(
+            new CustomEvent("ui:notificar", {
+              detail: { texto: "Sua sessão expirou. Entre novamente.", tipo: "erro" },
+            })
+          );
+        } catch (e) { /* ok */ }
+      }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
