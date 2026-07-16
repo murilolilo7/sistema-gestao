@@ -123,6 +123,11 @@ export default function Home() {
     .sort((a, b) => diasAteVencer(a.validade) - diasAteVencer(b.validade))
     .slice(0, 6);
 
+  // ---------------- Produtos com estoque baixo ----------------
+  const estoqueBaixo = produtos.filter(
+    (p) => (p.estoque_minimo ?? 0) > 0 && (p.quantidade_estoque ?? 0) <= p.estoque_minimo
+  );
+
   // ---------------- Gráfico: vendas dos últimos 6 meses ----------------
   const meses = [];
   for (let i = 5; i >= 0; i--) {
