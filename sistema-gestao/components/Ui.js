@@ -180,3 +180,59 @@ export function EstadoVazio({ icone: Icone = Inbox, titulo, texto, children }) {
     </div>
   );
 }
+
+// ---------------------- PAGINAÇÃO ----------------------
+
+export function usePaginacao(itens, porPagina = 20) {
+  const [pagina, setPagina] = useState(1);
+  const totalPaginas = Math.max(1, Math.ceil(itens.length / porPagina));
+  // Se a lista encolher (ex: filtro), volta para uma página válida
+  const paginaAtual = Math.min(pagina, totalPaginas);
+  const inicio = (paginaAtual - 1) * porPagina;
+  const itensPagina = itens.slice(inicio, inicio + porPagina);
+  return {
+    pagina: paginaAtual,
+    setPagina,
+    totalPaginas,
+    itensPagina,
+    total: itens.length,
+    inicio,
+    fim: inicio + itensPagina.length,
+  };
+}
+
+export function ControlePaginacao({ pagina, setPagina, totalPaginas, total, inicio, fim }) {
+  if (total === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 text-sm">
+      <p className="text-slate-500">
+        Mostrando <b className="text-slate-700">{inicio + 1}</b>–
+        <b className="text-slate-700">{fim}</b> de{" "}
+        <b className="text-slate-700">{total}</b>
+      </p>
+      {totalPaginas > 1 && (
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setPagina((p) => Math.max(1, p - 1))}
+            disabled={pagina <= 1}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Anterior
+          </button>
+          <span className="px-3 text-slate-500">
+            {pagina} / {totalPaginas}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+            disabled={pagina >= totalPaginas}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Próxima
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
