@@ -60,10 +60,11 @@ export default function Home() {
   const [vendas, setVendas] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
   const [orcamentosGalpao, setOrcamentosGalpao] = useState([]);
+  const [produtos, setProdutos] = useState([]);
 
   useEffect(() => {
     async function carregar() {
-      const [rVendas, rOrc, rOrcG] = await Promise.all([
+      const [rVendas, rOrc, rOrcG, rProd] = await Promise.all([
         supabase.from("vendas").select("id, total, created_at"),
         supabase
           .from("orcamentos")
@@ -71,14 +72,16 @@ export default function Home() {
         supabase
           .from("orcamentos_galpao")
           .select("codigo, status, validade, total, created_at, titulo, clientes(nome)"),
+        supabase.from("produtos").select("id, nome, quantidade_estoque, estoque_minimo"),
       ]);
-      const falha = rVendas.error || rOrc.error || rOrcG.error;
+      const falha = rVendas.error || rOrc.error || rOrcG.error || rProd.error;
       if (falha) {
         setErro("Não foi possível carregar os indicadores: " + falha.message);
       } else {
         setVendas(rVendas.data || []);
         setOrcamentos(rOrc.data || []);
         setOrcamentosGalpao(rOrcG.data || []);
+        setProdutos(rProd.data || []);
       }
       setCarregando(false);
     }
@@ -261,12 +264,25 @@ export default function Home() {
                 <div key={i} className="h-10 bg-slate-50 rounded animate-pulse" />
               ))}
             </div>
-          ) : vencendo.length === 0 ? (
+          ) : vencendo.length === 0 && estoqueBaixo.length === 0 ? (
             <p className="text-sm text-slate-400 py-6 text-center">
-              Tudo em dia — nenhuma proposta vencendo nos próximos 7 dias. 🎉
+              Tudo em dia — nada vencendo e estoque saudável. 🎉
             </p>
           ) : (
             <div className="space-y-1.5">
+              {estoqueBaixo.length > 0 && (
+                <Link
+                  href="/produtos"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-red-100 bg-red-50/50 hover:border-red-300 px-3 py-2 transition"
+                >
+                  <span className="text-sm text-red-700 truncate">
+                    {estoqueBaixo.length} produto(s) com estoque baixo
+                  </span>
+                  <span className="text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full whitespace-nowrap">
+                    repor
+                  </span>
+                </Link>
+              )}
               {vencendo.map((o) => {
                 const dias = diasAteVencer(o.validade);
                 return (
