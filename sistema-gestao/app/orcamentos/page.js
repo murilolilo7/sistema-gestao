@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Copy, Eye, EyeOff, FileText, Pencil, Printer, ShoppingCart, Loader2 } from "lucide-react";
+import { Copy, Eye, EyeOff, FileText, Pencil, Printer, ShoppingCart, Loader2, MessageCircle, XCircle, RotateCcw } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
 
@@ -54,11 +54,31 @@ function diasAPartirDeHoje(dataISO) {
 // pode ser editado ou convertido normalmente — nada é apagado. Isso só
 // controla o que aparece no badge de status, pra avisar visualmente.
 function estaVencido(orcamento) {
-  if (orcamento.status === "aprovado" || !orcamento.validade) return false;
+  if (orcamento.status === "aprovado" || orcamento.status === "recusado" || !orcamento.validade)
+    return false;
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
   const validade = new Date(orcamento.validade + "T00:00:00");
   return validade < hoje;
+}
+
+// Monta o link do WhatsApp com a mensagem de cobrança pronta.
+// Retorna null se o cliente não tiver telefone.
+function linkFollowUpWhatsApp(orcamento) {
+  const tel = (orcamento.clientes?.telefone || "").replace(/\D/g, "");
+  if (tel.length < 10) return null;
+  const nome = orcamento.clientes?.nome || "";
+  const valor = Number(orcamento.total || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+  const dataValidade = orcamento.validade
+    ? new Date(orcamento.validade + "T00:00:00").toLocaleDateString("pt-BR")
+    : null;
+  const msg = estaVencido(orcamento)
+    ? `Olá, ${nome}! Sobre o orçamento Nº ${orcamento.codigo} da MR7 Pré-Moldados (${valor}): ele venceu em ${dataValidade}. Quer que a gente atualize os valores para dar andamento?`
+    : `Olá, ${nome}! Sobre o orçamento Nº ${orcamento.codigo} da MR7 Pré-Moldados (${valor})${dataValidade ? `, válido até ${dataValidade}` : ""} — podemos dar andamento?`;
+  return `https://wa.me/55${tel}?text=${encodeURIComponent(msg)}`;
 }
 
 function BadgeStatus({ status }) {
@@ -66,11 +86,13 @@ function BadgeStatus({ status }) {
     pendente: "bg-amber-50 text-amber-700 border-amber-200",
     vencido: "bg-rose-50 text-rose-700 border-rose-200",
     aprovado: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    recusado: "bg-slate-100 text-slate-500 border-slate-200",
   };
   const rotulos = {
     pendente: "Pendente",
     vencido: "Vencido",
     aprovado: "Aprovado",
+    recusado: "Perdido",
   };
   const classe =
     estilos[status] || "bg-slate-50 text-slate-700 border-slate-200";
@@ -93,6 +115,10 @@ function OrcamentosPageInterno() {
   const [mensagem, setMensagem] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [convertendoId, setConvertendoId] = useState(null);
+  const [perdidoAlvo, setPerdidoAlvo] = useState(null); // orçamento no modal "marcar como perdido"
+  const [perdidoMotivo, setPerdidoMotivo] = useState("sem retorno do cliente");
+  const [perdidoDetalhe, setPerdidoDetalhe] = useState("");
+  const [perdidoSalvando, setPerdidoSalvando] = useState(false);
   const [expandidoId, setExpandidoId] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -133,7 +159,7 @@ function OrcamentosPageInterno() {
     return supabase
       .from("orcamentos")
       .select(
-        "*, clientes(nome), itens_orcamento(id, produto_id, quantidade, preco_unitario, produtos(nome))"
+        "*, clientes(nome, telefone), itens_orcamento(id, produto_id, quantidade, preco_unitario, produtos(nome))"
       )
       .order("codigo", { ascending: false });
   }
@@ -444,6 +470,53 @@ function OrcamentosPageInterno() {
     await carregarTudo();
   }
 
+  // ---------- Marcar como perdido / reabrir ----------
+  function abrirPerdido(orcamento) {
+    setPerdidoAlvo(orcamento);
+    setPerdidoMotivo("sem retorno do cliente");
+    setPerdidoDetalhe("");
+  }
+
+  async function confirmarPerdido() {
+    if (!perdidoAlvo) return;
+    setPerdidoSalvando(true);
+    const motivoFinal =
+      perdidoMotivo === "outro"
+        ? perdidoDetalhe.trim() || "outro"
+        : perdidoMotivo + (perdidoDetalhe.trim() ? ` — ${perdidoDetalhe.trim()}` : "");
+    const { error } = await supabase
+      .from("orcamentos")
+      .update({ status: "recusado", motivo_recusa: motivoFinal })
+      .eq("id", perdidoAlvo.id);
+    setPerdidoSalvando(false);
+    if (error) {
+      notificar("Erro ao marcar como perdido: " + error.message, "erro");
+      return;
+    }
+    notificar(`Orçamento Nº ${perdidoAlvo.codigo} marcado como perdido.`);
+    setPerdidoAlvo(null);
+    await buscarOrcamentos().then((res) => setOrcamentos(res.data || []));
+  }
+
+  async function reabrirOrcamento(orcamento) {
+    const ok = await confirmar({
+      titulo: "Reabrir orçamento?",
+      texto: `O orçamento Nº ${orcamento.codigo} volta para Pendente.`,
+      confirmarTexto: "Reabrir",
+    });
+    if (!ok) return;
+    const { error } = await supabase
+      .from("orcamentos")
+      .update({ status: "pendente", motivo_recusa: null })
+      .eq("id", orcamento.id);
+    if (error) {
+      notificar("Erro ao reabrir: " + error.message, "erro");
+      return;
+    }
+    notificar(`Orçamento Nº ${orcamento.codigo} reaberto.`);
+    await buscarOrcamentos().then((res) => setOrcamentos(res.data || []));
+  }
+
   async function handleConverter(orcamentoId) {
     const ok = await confirmar({
       titulo: "Converter em venda?",
@@ -470,12 +543,14 @@ function OrcamentosPageInterno() {
     setConvertendoId(null);
   }
 
-  const statusEfetivo = (o) => (estaVencido(o) ? "vencido" : o.status);
+  const statusEfetivo = (o) =>
+    o.status === "recusado" ? "recusado" : estaVencido(o) ? "vencido" : o.status;
   const contadores = {
     todos: orcamentos.length,
     pendente: orcamentos.filter((o) => statusEfetivo(o) === "pendente").length,
     aprovado: orcamentos.filter((o) => statusEfetivo(o) === "aprovado").length,
     vencido: orcamentos.filter((o) => statusEfetivo(o) === "vencido").length,
+    recusado: orcamentos.filter((o) => statusEfetivo(o) === "recusado").length,
   };
 
   const orcamentosFiltrados = orcamentos.filter((o) => {
@@ -910,6 +985,7 @@ function OrcamentosPageInterno() {
           { chave: "pendente", rotulo: "Pendentes" },
           { chave: "aprovado", rotulo: "Aprovados" },
           { chave: "vencido", rotulo: "Vencidos" },
+          { chave: "recusado", rotulo: "Perdidos" },
         ].map((f) => (
           <button
             key={f.chave}
@@ -1022,8 +1098,19 @@ function OrcamentosPageInterno() {
                       >
                         <Copy size={16} />
                       </button>
-                      {o.status !== "aprovado" && (
+                      {o.status !== "aprovado" && o.status !== "recusado" && (
                         <>
+                          {linkFollowUpWhatsApp(o) && (
+                            <a
+                              href={linkFollowUpWhatsApp(o)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-green-600 hover:text-green-800"
+                              title="Cobrar retorno no WhatsApp (mensagem pronta)"
+                            >
+                              <MessageCircle size={16} />
+                            </a>
+                          )}
                           <button
                             onClick={() => abrirEdicao(o)}
                             className="text-emerald-700 hover:text-emerald-900"
@@ -1043,7 +1130,23 @@ function OrcamentosPageInterno() {
                               <ShoppingCart size={16} />
                             )}
                           </button>
+                          <button
+                            onClick={() => abrirPerdido(o)}
+                            className="text-slate-400 hover:text-rose-600"
+                            title="Marcar como perdido (cliente não fechou)"
+                          >
+                            <XCircle size={16} />
+                          </button>
                         </>
+                      )}
+                      {o.status === "recusado" && (
+                        <button
+                          onClick={() => reabrirOrcamento(o)}
+                          className="text-slate-500 hover:text-emerald-700"
+                          title={`Reabrir (volta para Pendente)${o.motivo_recusa ? ` — perdido por: ${o.motivo_recusa}` : ""}`}
+                        >
+                          <RotateCcw size={16} />
+                        </button>
                       )}
                     </div>
                   </td>
@@ -1075,6 +1178,63 @@ function OrcamentosPageInterno() {
         )}
         <ControlePaginacao {...pag} />
       </div>
+
+      {/* ---------- Modal: marcar como perdido ---------- */}
+      {perdidoAlvo && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setPerdidoAlvo(null)} />
+          <div className="relative w-full max-w-sm rounded-2xl bg-white shadow-2xl p-5">
+            <h3 className="text-lg font-bold text-slate-900 mb-1">Marcar como perdido?</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Orçamento Nº {perdidoAlvo.codigo} · {perdidoAlvo.clientes?.nome || "sem cliente"}.
+              Ele sai dos pendentes, mas pode ser reaberto depois.
+            </p>
+
+            <label className="block text-xs font-medium text-slate-600 mb-1">Motivo</label>
+            <select
+              value={perdidoMotivo}
+              onChange={(e) => setPerdidoMotivo(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 mb-3"
+            >
+              <option value="sem retorno do cliente">Sem retorno do cliente</option>
+              <option value="preço">Preço</option>
+              <option value="prazo">Prazo</option>
+              <option value="fechou com concorrente">Fechou com concorrente</option>
+              <option value="desistiu da obra">Desistiu da obra</option>
+              <option value="outro">Outro</option>
+            </select>
+
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Detalhe (opcional)
+            </label>
+            <input
+              type="text"
+              value={perdidoDetalhe}
+              onChange={(e) => setPerdidoDetalhe(e.target.value)}
+              placeholder="Ex: achou R$ 5 mil mais barato em..."
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 mb-4"
+            />
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPerdidoAlvo(null)}
+                className="rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm font-medium px-4 py-2"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarPerdido}
+                disabled={perdidoSalvando}
+                className="rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2"
+              >
+                {perdidoSalvando ? "Salvando..." : "Marcar como perdido"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
