@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Copy, Eye, EyeOff, Pencil, Printer, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { notificar, confirmar } from "@/components/Ui";
 import DesenhoGalpao from "./desenho-galpao";
 
 const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
@@ -399,7 +400,10 @@ function OrcamentosGalpaoPageInterno() {
   // ---------- RASCUNHO AUTOMÁTICO (não perde orçamento com F5/queda) ----------
   const RASCUNHO_CHAVE = "rascunho-orcamento-galpao";
   useEffect(() => {
-    if (modo === "lista") return;
+    // Rascunho automático só ao CRIAR um novo orçamento. Ao editar um
+    // existente, ele já está salvo no banco — não faz sentido gerar
+    // rascunho (era o que fazia aparecer "orçamento não salvo" à toa).
+    if (modo !== "novo") return;
     const temConteudo = clienteId || modeloId || vao || itens.length > 0;
     if (!temConteudo) return;
     const t = setTimeout(() => {
@@ -469,9 +473,9 @@ function OrcamentosGalpaoPageInterno() {
     setRascunhoDisponivel(null);
   }
 
-  // Aviso do navegador ao tentar sair com o orçamento aberto e não salvo
+  // Aviso do navegador ao tentar sair criando um novo orçamento
   useEffect(() => {
-    if (modo === "lista") return;
+    if (modo !== "novo") return;
     const aviso = (e) => {
       e.preventDefault();
       e.returnValue = "";
@@ -1429,10 +1433,12 @@ function OrcamentosGalpaoPageInterno() {
   }
 
   async function handleConverter(orcamentoId) {
-    const confirmar = window.confirm(
-      "Converter este orçamento em venda? Essa ação não pode ser desfeita."
-    );
-    if (!confirmar) return;
+    const ok = await confirmar({
+      titulo: "Converter em venda?",
+      texto: "Essa ação não pode ser desfeita.",
+      confirmarTexto: "Converter em venda",
+    });
+    if (!ok) return;
 
     setConvertendoId(orcamentoId);
     setErro("");
@@ -2717,7 +2723,7 @@ function OrcamentosGalpaoPageInterno() {
                       >
                         <Copy size={16} />
                       </button>
-                      {o.status !== "aprovado" && !estaVencido(o) && (
+                      {o.status !== "aprovado" && (
                         <>
                           <button
                             onClick={() => abrirEdicao(o)}
@@ -2735,11 +2741,6 @@ function OrcamentosGalpaoPageInterno() {
                             <ShoppingCart size={16} />
                           </button>
                         </>
-                      )}
-                      {o.status !== "aprovado" && estaVencido(o) && (
-                        <span className="text-xs text-slate-400" title="Vencido — crie um novo orçamento">
-                          Vencido
-                        </span>
                       )}
                     </div>
                   </td>
