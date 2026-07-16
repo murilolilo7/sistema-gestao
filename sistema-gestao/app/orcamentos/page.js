@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Copy, Eye, EyeOff, FileText, Pencil, Printer, ShoppingCart, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
@@ -82,7 +83,7 @@ function BadgeStatus({ status }) {
   );
 }
 
-export default function OrcamentosPage() {
+function OrcamentosPageInterno() {
   const [modo, setModo] = useState("lista"); // 'lista' | 'novo' | 'editar'
   const [clientes, setClientes] = useState([]);
   const [produtos, setProdutos] = useState([]);
@@ -176,6 +177,22 @@ export default function OrcamentosPage() {
       ativo = false;
     };
   }, []);
+
+  // Abre direto um orçamento quando a URL trouxer ?editar=CODIGO
+  // (ex: clique no aviso "vencendo" do painel inicial). Roda uma vez,
+  // assim que a lista de orçamentos estiver carregada.
+  const searchParams = useSearchParams();
+  const [abriuPelaUrl, setAbriuPelaUrl] = useState(false);
+  useEffect(() => {
+    if (abriuPelaUrl || loading) return;
+    const codigo = searchParams.get("editar");
+    if (!codigo) return;
+    const alvo = orcamentos.find((o) => String(o.codigo) === String(codigo));
+    if (alvo) {
+      abrirEdicao(alvo);
+      setAbriuPelaUrl(true);
+    }
+  }, [loading, orcamentos, searchParams, abriuPelaUrl]);
 
   // ---------- RASCUNHO AUTOMÁTICO (não perde orçamento com F5/queda) ----------
   const RASCUNHO_CHAVE = "rascunho-orcamento-produtos";
@@ -1003,7 +1020,7 @@ export default function OrcamentosPage() {
                       >
                         <Copy size={16} />
                       </button>
-                      {o.status !== "aprovado" && !estaVencido(o) && (
+                      {o.status !== "aprovado" && (
                         <>
                           <button
                             onClick={() => abrirEdicao(o)}
@@ -1025,11 +1042,6 @@ export default function OrcamentosPage() {
                             )}
                           </button>
                         </>
-                      )}
-                      {o.status !== "aprovado" && estaVencido(o) && (
-                        <span className="text-xs text-slate-400" title="Vencido — crie um novo orçamento">
-                          Vencido
-                        </span>
                       )}
                     </div>
                   </td>
@@ -1062,5 +1074,13 @@ export default function OrcamentosPage() {
         <ControlePaginacao {...pag} />
       </div>
     </div>
+  );
+}
+
+export default function OrcamentosPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">Carregando...</p>}>
+      <OrcamentosPageInterno />
+    </Suspense>
   );
 }
