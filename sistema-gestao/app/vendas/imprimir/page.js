@@ -5,13 +5,27 @@ import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 // Dados fixos da empresa que aparecem no cabeçalho do pedido impresso.
-const EMPRESA = {
+const EMPRESA_PADRAO = {
   nome: "MR7 PRÉ MOLDADOS LTDA",
   telefone: "(82) 98181-0774",
   endereco: "Rodovia AL485, Nº 400",
   cidadeUf: "57340000 - Feira Grande, AL",
   cnpj: "43.926.578/0001-86",
 };
+
+// Mescla os dados salvos em Configurações com os padrões (fallback):
+// se o campo não foi preenchido lá, usa o valor fixo de sempre.
+function dadosEmpresa(config) {
+  return {
+    nome: config?.nome_empresa || EMPRESA_PADRAO.nome,
+    telefone: config?.telefone || EMPRESA_PADRAO.telefone,
+    endereco: config?.endereco || EMPRESA_PADRAO.endereco,
+    cidadeUf: config?.cidade_uf || EMPRESA_PADRAO.cidadeUf,
+    cnpj: config?.cnpj || EMPRESA_PADRAO.cnpj,
+    logo: config?.logo_base64 || null,
+    rodape: config?.rodape_impressos || null,
+  };
+}
 
 function formatarMoeda(valor) {
   if (valor === null || valor === undefined) return "-";
@@ -53,7 +67,7 @@ function ConteudoImpressao() {
           .single(),
         supabase
           .from("configuracao_empresa")
-          .select("nome_diretor, assinatura_base64")
+          .select("nome_diretor, assinatura_base64, nome_empresa, cnpj, telefone, endereco, cidade_uf, logo_base64, rodape_impressos")
           .eq("id", 1)
           .single(),
       ]);
@@ -82,6 +96,8 @@ function ConteudoImpressao() {
   if (loading) return <p className="p-8 text-sm text-slate-500">Carregando...</p>;
   if (erro) return <p className="p-8 text-sm text-red-600">{erro}</p>;
   if (!venda) return null;
+
+  const empresa = dadosEmpresa(config);
 
   const itens = venda.itens_venda || [];
   const subtotal = itens.reduce((soma, i) => soma + i.quantidade * Number(i.preco_unitario), 0);
@@ -121,17 +137,22 @@ function ConteudoImpressao() {
 
       {/* Cabeçalho */}
       <div className="flex justify-between items-start border-b-2 border-slate-800 pb-4 mb-4">
-        <div>
-          <p className="font-bold text-xl">
-            MR7 <span className="text-emerald-600">Pré-Moldados</span>
-          </p>
+        <div className="flex items-center gap-3">
+          {empresa.logo ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={empresa.logo} alt="Logo" className="max-h-16 max-w-[160px] object-contain" />
+          ) : (
+            <p className="font-bold text-xl">
+              MR7 <span className="text-emerald-600">Pré-Moldados</span>
+            </p>
+          )}
         </div>
         <div className="text-right text-xs leading-relaxed">
-          <p className="font-semibold">{EMPRESA.nome}</p>
-          <p>{EMPRESA.telefone}</p>
-          <p>{EMPRESA.endereco}</p>
-          <p>{EMPRESA.cidadeUf}</p>
-          <p>CNPJ: {EMPRESA.cnpj}</p>
+          <p className="font-semibold">{empresa.nome}</p>
+          <p>{empresa.telefone}</p>
+          <p>{empresa.endereco}</p>
+          <p>{empresa.cidadeUf}</p>
+          <p>CNPJ: {empresa.cnpj}</p>
         </div>
       </div>
 
@@ -211,6 +232,11 @@ function ConteudoImpressao() {
       </div>
 
       {/* Assinaturas */}
+      {empresa.rodape && (
+        <div className="mt-8 pt-3 border-t border-slate-300 text-[11px] text-slate-600 whitespace-pre-line">
+          {empresa.rodape}
+        </div>
+      )}
       <div className="mt-16 grid grid-cols-2 gap-10 text-xs">
         <div className="text-center">
           <div className="border-t border-slate-800 pt-2">
@@ -222,7 +248,7 @@ function ConteudoImpressao() {
                 className="max-h-16 mx-auto mb-1 -mt-16"
               />
             )}
-            <p>{config?.nome_diretor || EMPRESA.nome}</p>
+            <p>{config?.nome_diretor || empresa.nome}</p>
             <p className="text-slate-500">MR7 Pré-Moldados</p>
           </div>
         </div>
