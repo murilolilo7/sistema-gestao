@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import * as XLSX from "xlsx";
+import { Download } from "lucide-react";
 import { notificar } from "@/components/Ui";
 
 const TAMANHO_MAXIMO_MB = 2;
@@ -17,6 +19,7 @@ export default function ConfiguracoesPage() {
   const [cidadeUf, setCidadeUf] = useState("");
   const [logoBase64, setLogoBase64] = useState("");
   const [rodapeImpressos, setRodapeImpressos] = useState("");
+  const [gerandoBackup, setGerandoBackup] = useState(false);
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
@@ -105,6 +108,82 @@ export default function ConfiguracoesPage() {
       notificar("Configurações salvas com sucesso.");
     }
     setSalvando(false);
+  }
+
+  // ---------------------------------------------------------------------
+  // Backup completo: baixa TODAS as tabelas num único Excel (uma aba cada).
+  // Campos de imagem (base64 gigantes) são omitidos para o arquivo abrir bem.
+  // ---------------------------------------------------------------------
+  const TABELAS_BACKUP = [
+    ["clientes", "Clientes"],
+    ["produtos", "Produtos"],
+    ["orcamentos", "Orcamentos"],
+    ["itens_orcamento", "Itens orcamento"],
+    ["orcamentos_galpao", "Orcamentos galpao"],
+    ["itens_orcamento_galpao", "Itens orc galpao"],
+    ["vendas", "Vendas"],
+    ["itens_venda", "Itens venda"],
+    ["movimentacoes_estoque", "Mov estoque"],
+    ["insumos", "Insumos"],
+    ["mao_de_obra", "Mao de obra"],
+    ["composicoes_galpao", "Composicoes galpao"],
+    ["composicao_itens", "Itens composicao"],
+    ["modelos_galpao", "Modelos galpao"],
+    ["historico_alteracoes_precos", "Historico precos"],
+    ["configuracao_empresa", "Config empresa"],
+    ["perfis_usuario", "Usuarios"],
+  ];
+
+  async function buscarTabelaInteira(tabela) {
+    const POR_PAGINA = 1000;
+    let todos = [];
+    let de = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from(tabela)
+        .select("*")
+        .range(de, de + POR_PAGINA - 1);
+      if (error) throw new Error(`${tabela}: ${error.message}`);
+      todos = todos.concat(data || []);
+      if (!data || data.length < POR_PAGINA) break;
+      de += POR_PAGINA;
+    }
+    return todos;
+  }
+
+  function linhaParaExcel(linha) {
+    const saida = {};
+    for (const [chave, valor] of Object.entries(linha)) {
+      if (valor && typeof valor === "object") {
+        saida[chave] = JSON.stringify(valor);
+      } else if (typeof valor === "string" && valor.length > 20000) {
+        saida[chave] = "[imagem/conteudo longo omitido do backup]";
+      } else {
+        saida[chave] = valor;
+      }
+    }
+    return saida;
+  }
+
+  async function handleBackup() {
+    setGerandoBackup(true);
+    setErro("");
+    try {
+      const pasta = XLSX.utils.book_new();
+      for (const [tabela, aba] of TABELAS_BACKUP) {
+        const linhas = await buscarTabelaInteira(tabela);
+        const planilha = XLSX.utils.json_to_sheet(
+          linhas.length ? linhas.map(linhaParaExcel) : [{ aviso: "tabela vazia" }]
+        );
+        XLSX.utils.book_append_sheet(pasta, planilha, aba);
+      }
+      const hoje = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(pasta, `backup-mr7-${hoje}.xlsx`);
+      setMensagem("Backup gerado! O arquivo foi baixado — guarde em local seguro.");
+    } catch (e) {
+      setErro("Erro ao gerar o backup: " + e.message);
+    }
+    setGerandoBackup(false);
   }
 
   const campoClasse =
@@ -297,6 +376,27 @@ export default function ConfiguracoesPage() {
             </button>
           </div>
         </form>
+      )}
+
+      {/* ---------- Backup completo ---------- */}
+      {!loading && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm max-w-lg">
+          <p className="text-sm font-semibold text-slate-700 mb-1">Backup dos dados</p>
+          <p className="text-xs text-slate-500 mb-3">
+            Baixa um arquivo Excel com TODOS os dados do sistema (clientes, produtos, orçamentos,
+            vendas, estoque, preços...), uma aba por tabela. Guarde em local seguro — pendrive,
+            Google Drive ou e-mail. Recomendado: uma vez por semana.
+          </p>
+          <button
+            type="button"
+            onClick={handleBackup}
+            disabled={gerandoBackup}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
+          >
+            <Download size={15} />
+            {gerandoBackup ? "Gerando backup..." : "Baixar backup completo"}
+          </button>
+        </div>
       )}
     </div>
   );
