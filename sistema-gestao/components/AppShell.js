@@ -17,6 +17,7 @@ import {
   LogOut,
   Menu,
   X,
+  BarChart3,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { Notificacoes, Confirmador } from "@/components/Ui";
@@ -41,6 +42,7 @@ const MENU = [
       { href: "/vendas", label: "Vendas", icone: ShoppingCart },
       { href: "/orcamentos", label: "Orçamentos", icone: FileText },
       { href: "/orcamentos-galpao", label: "Orçamentos Galpão", icone: Warehouse },
+      { href: "/relatorios", label: "Relatórios", icone: BarChart3 },
     ],
   },
   {
