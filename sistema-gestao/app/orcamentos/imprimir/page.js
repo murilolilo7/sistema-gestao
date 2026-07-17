@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { QuadroPecas } from "@/components/DesenhoPecas";
 
 // Dados fixos da empresa que aparecem no cabeçalho do orçamento impresso.
 const EMPRESA_PADRAO = {
@@ -69,7 +70,7 @@ function ConteudoImpressao() {
         supabase
           .from("orcamentos")
           .select(
-            "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), itens_orcamento(id, quantidade, preco_unitario, produtos(nome, codigo, unidade))"
+            "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), itens_orcamento(id, quantidade, preco_unitario, produtos(nome, codigo, unidade, molde, comprimento_cm, largura_cm, altura_cm))"
           )
           .eq("codigo", codigo)
           .single(),
@@ -201,6 +202,9 @@ function ConteudoImpressao() {
         </div>
       </div>
 
+      {/* Quadro de desenho das peças (só aparece se algum produto tiver molde) */}
+      <QuadroImpresso itens={itens} />
+
       {/* Itens */}
       <p className="font-semibold text-xs text-slate-500 mb-1">
         ITENS DO ORÇAMENTO
@@ -328,5 +332,35 @@ export default function ImprimirOrcamentoPage() {
     >
       <ConteudoImpressao />
     </Suspense>
+  );
+}
+
+// Quadro "Peças deste orçamento": desenhos técnicos gerados pelas medidas
+// cadastradas em cada produto (molde + cm). Sem peças desenháveis, não aparece.
+function QuadroImpresso({ itens }) {
+  const pecas = [];
+  const vistos = new Set();
+  for (const item of itens) {
+    const p = item.produtos;
+    if (!p || !p.molde) continue;
+    const chave = `${p.molde}|${p.comprimento_cm}|${p.largura_cm}|${p.altura_cm}|${p.nome}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    pecas.push({
+      nome: p.nome,
+      molde: p.molde,
+      comprimento: p.comprimento_cm,
+      largura: p.largura_cm,
+      altura: p.altura_cm,
+    });
+  }
+  if (pecas.length === 0) return null;
+  return (
+    <div className="border border-slate-200 rounded-lg px-3 py-2 mb-4">
+      <p className="font-semibold text-[10px] text-slate-500 uppercase tracking-wide mb-1">
+        Peças deste orçamento
+      </p>
+      <QuadroPecas pecas={pecas} escala={1.15} larguraMaxPeca={190} />
+    </div>
   );
 }
