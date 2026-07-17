@@ -6,6 +6,7 @@ import { Pencil, Trash2, ArrowUpDown, PackageX, History } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
+import { DesenhoPeca, MOLDES } from "@/components/DesenhoPecas";
 
 const UNIDADES = ["UN", "M", "M²", "M³", "KG", "PC", "CX", "L"];
 
@@ -17,6 +18,10 @@ const FORM_VAZIO = {
   custo: "",
   quantidade_estoque: "",
   estoque_minimo: "",
+  molde: "",
+  comprimento_cm: "",
+  largura_cm: "",
+  altura_cm: "",
 };
 
 function formatarMoeda(valor) {
@@ -104,6 +109,10 @@ export default function ProdutosPage() {
       custo: produto.custo ?? "",
       quantidade_estoque: produto.quantidade_estoque ?? "",
       estoque_minimo: produto.estoque_minimo ?? "",
+      molde: produto.molde ?? "",
+      comprimento_cm: produto.comprimento_cm ?? "",
+      largura_cm: produto.largura_cm ?? "",
+      altura_cm: produto.altura_cm ?? "",
     });
     setModo("editar");
   }
@@ -135,6 +144,10 @@ export default function ProdutosPage() {
         form.quantidade_estoque === "" ? 0 : Number(form.quantidade_estoque),
       estoque_minimo:
         form.estoque_minimo === "" ? 0 : Number(form.estoque_minimo),
+      molde: form.molde || null,
+      comprimento_cm: form.comprimento_cm === "" ? null : Number(form.comprimento_cm),
+      largura_cm: form.largura_cm === "" ? null : Number(form.largura_cm),
+      altura_cm: form.altura_cm === "" ? null : Number(form.altura_cm),
     };
 
     const resultado = editingId
@@ -390,6 +403,98 @@ export default function ProdutosPage() {
               Quando o estoque atual ficar igual ou abaixo do mínimo, o produto recebe um alerta
               na lista e no painel inicial. Deixe 0 para não alertar.
             </p>
+
+            {/* ---------- Desenho da peça (aparece no orçamento impresso) ---------- */}
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <p className="text-sm font-semibold text-slate-700 mb-1">
+                Desenho da peça no orçamento (opcional)
+              </p>
+              <p className="text-xs text-slate-400 mb-3">
+                Escolha o formato e digite as medidas em centímetros: o desenho técnico é gerado
+                sozinho e aparece no topo do orçamento impresso, com as cotas. Sem formato, o
+                produto simplesmente não entra no quadro de desenhos.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label className={labelClasse}>Formato (molde)</label>
+                  <select
+                    name="molde"
+                    value={form.molde}
+                    onChange={handleChange}
+                    className={campoClasse}
+                  >
+                    <option value="">— sem desenho —</option>
+                    {MOLDES.map((m) => (
+                      <option key={m.valor} value={m.valor}>
+                        {m.rotulo}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClasse}>Comprimento (cm)</label>
+                  <input
+                    name="comprimento_cm"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={form.comprimento_cm}
+                    onChange={handleChange}
+                    onFocus={(e) => e.target.select()}
+                    className={campoClasse}
+                    placeholder="Ex: 39"
+                  />
+                </div>
+                <div>
+                  <label className={labelClasse}>Largura (cm)</label>
+                  <input
+                    name="largura_cm"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={form.largura_cm}
+                    onChange={handleChange}
+                    onFocus={(e) => e.target.select()}
+                    className={campoClasse}
+                    placeholder="Ex: 9"
+                  />
+                </div>
+                <div>
+                  <label className={labelClasse}>Altura (cm)</label>
+                  <input
+                    name="altura_cm"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={form.altura_cm}
+                    onChange={handleChange}
+                    onFocus={(e) => e.target.select()}
+                    className={campoClasse}
+                    placeholder="Ex: 19"
+                  />
+                </div>
+              </div>
+              {form.molde && (
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  {MOLDES.find((m) => m.valor === form.molde)?.dica}
+                </p>
+              )}
+              {form.molde && (
+                <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/60 p-3 flex items-center gap-4">
+                  <DesenhoPeca
+                    molde={form.molde}
+                    comprimento={form.comprimento_cm}
+                    largura={form.largura_cm}
+                    altura={form.altura_cm}
+                    escala={2}
+                    larguraMax={280}
+                  />
+                  <p className="text-xs text-slate-400">
+                    Prévia do desenho — muda na hora conforme você digita as medidas.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
