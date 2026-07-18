@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Pencil, Trash2, ArrowUpDown, PackageX, History } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
-import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
+import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao, useOrdenacao, ThOrdenavel } from "@/components/Ui";
 import { DesenhoPeca, MOLDES } from "@/components/DesenhoPecas";
 
 const UNIDADES = ["UN", "M", "M²", "M³", "KG", "PC", "CX", "L"];
@@ -257,7 +257,11 @@ export default function ProdutosPage() {
     );
   });
 
-  const pag = usePaginacao(produtosFiltrados);
+  const ordenacao = useOrdenacao();
+  const pag = usePaginacao(ordenacao.aplicar(produtosFiltrados));
+
+  // Categorias já usadas (sugestões no cadastro)
+  const categoriasExistentes = [...new Set(produtos.map((p) => p.categoria).filter(Boolean))].sort();
 
   const campoClasse =
     "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
@@ -341,7 +345,13 @@ export default function ProdutosPage() {
                   onChange={handleChange}
                   className={campoClasse}
                   placeholder="Ex: Blocos, Pisos, Postes..."
+                  list="categorias-existentes"
                 />
+                <datalist id="categorias-existentes">
+                  {categoriasExistentes.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
               </div>
               <div>
                 <label className={labelClasse}>Preço de venda</label>
@@ -574,13 +584,13 @@ export default function ProdutosPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-100 text-slate-600 text-left">
               <tr>
-                <th className="px-4 py-2 font-medium">Código</th>
-                <th className="px-4 py-2 font-medium">Nome</th>
-                <th className="px-4 py-2 font-medium">Categoria</th>
+                <ThOrdenavel campo="codigo" ordenacao={ordenacao}>Código</ThOrdenavel>
+                <ThOrdenavel campo="nome" ordenacao={ordenacao}>Nome</ThOrdenavel>
+                <ThOrdenavel campo="categoria" ordenacao={ordenacao}>Categoria</ThOrdenavel>
                 <th className="px-4 py-2 font-medium">Un.</th>
-                <th className="px-4 py-2 font-medium">Preço</th>
-                <th className="px-4 py-2 font-medium">Estoque</th>
-                <th className="px-4 py-2 font-medium">Mínimo</th>
+                <ThOrdenavel campo="preco" ordenacao={ordenacao}>Preço</ThOrdenavel>
+                <ThOrdenavel campo="quantidade_estoque" ordenacao={ordenacao}>Estoque</ThOrdenavel>
+                <ThOrdenavel campo="estoque_minimo" ordenacao={ordenacao}>Mínimo</ThOrdenavel>
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
             </thead>
