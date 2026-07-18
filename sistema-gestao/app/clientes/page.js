@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Pencil, Trash2, MessageCircle, FileText, Loader2 } from "lucide-react";
 
 import { supabase } from "@/lib/supabaseClient";
-import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
+import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao, useOrdenacao, ThOrdenavel } from "@/components/Ui";
 
 // ---------- Validação de CPF e CNPJ (dígitos verificadores) ----------
 function cpfValido(cpf) {
@@ -374,7 +374,8 @@ export default function ClientesPage() {
     );
   });
 
-  const pag = usePaginacao(clientesFiltrados);
+  const ordenacao = useOrdenacao();
+  const pag = usePaginacao(ordenacao.aplicar(clientesFiltrados));
 
   const campoClasse =
     "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
@@ -679,10 +680,10 @@ export default function ClientesPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-100 text-slate-600 text-left">
               <tr>
-                <th className="px-4 py-2 font-medium">Código</th>
-                <th className="px-4 py-2 font-medium">Nome</th>
+                <ThOrdenavel campo="codigo" ordenacao={ordenacao}>Código</ThOrdenavel>
+                <ThOrdenavel campo="nome" ordenacao={ordenacao}>Nome</ThOrdenavel>
                 <th className="px-4 py-2 font-medium">CPF/CNPJ</th>
-                <th className="px-4 py-2 font-medium">Cidade/UF</th>
+                <ThOrdenavel campo="cidade" ordenacao={ordenacao}>Cidade/UF</ThOrdenavel>
                 <th className="px-4 py-2 font-medium">Telefone</th>
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
