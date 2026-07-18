@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import { useSouAdmin, AcessoRestrito } from "@/components/Ui";
 import * as XLSX from "xlsx";
 import { Download } from "lucide-react";
 import { notificar } from "@/components/Ui";
 
 const TAMANHO_MAXIMO_MB = 2;
 
-export default function ConfiguracoesPage() {
+function ConfiguracoesPage() {
   const [nomeDiretor, setNomeDiretor] = useState("");
   const [assinaturaBase64, setAssinaturaBase64] = useState("");
   const [nomeEmpresa, setNomeEmpresa] = useState("");
@@ -400,4 +401,12 @@ export default function ConfiguracoesPage() {
       )}
     </div>
   );
+}
+
+// Porteiro: esta tela é exclusiva de administradores.
+export default function ConfiguracoesPageProtegida() {
+  const souAdmin = useSouAdmin();
+  if (souAdmin === false) return <AcessoRestrito />;
+  if (souAdmin !== true) return null;
+  return <ConfiguracoesPage />;
 }
