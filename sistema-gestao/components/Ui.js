@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, XCircle, AlertTriangle, Inbox } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, Inbox, Lock } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 
 /* =====================================================================
    COMPONENTES VISUAIS COMPARTILHADOS DO SISTEMA
@@ -295,5 +296,45 @@ export function ThOrdenavel({ campo, ordenacao, children, className }) {
         <span className="text-[9px] w-2">{ativo ? (ordenacao.asc ? "▲" : "▼") : ""}</span>
       </button>
     </th>
+  );
+}
+
+// ---------------------- ACESSO DE ADMINISTRADOR ----------------------
+
+// Verifica se o usuário logado é administrador.
+// Retorna: null (ainda verificando), true (admin) ou false (não é).
+export function useSouAdmin() {
+  const [souAdmin, setSouAdmin] = useState(null);
+  useEffect(() => {
+    let ativo = true;
+    supabase
+      .rpc("eh_admin")
+      .then(({ data }) => {
+        if (ativo) setSouAdmin(!!data);
+      })
+      .catch(() => {
+        if (ativo) setSouAdmin(false);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, []);
+  return souAdmin;
+}
+
+// Tela padrão exibida quando alguém sem permissão tenta abrir
+// uma área exclusiva de administradores.
+export function AcessoRestrito() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm max-w-lg mx-auto mt-8">
+      <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-slate-100 text-slate-400 mb-3">
+        <Lock size={22} />
+      </span>
+      <p className="font-semibold text-slate-800">Acesso restrito</p>
+      <p className="text-sm text-slate-500 mt-1">
+        Esta área é exclusiva dos administradores do sistema. Se você precisa de
+        acesso, fale com o responsável.
+      </p>
+    </div>
   );
 }
