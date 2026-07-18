@@ -20,7 +20,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { Notificacoes, Confirmador } from "@/components/Ui";
+import { Notificacoes, Confirmador, useSouAdmin } from "@/components/Ui";
 
 // Estrutura do menu lateral: seções com ícones. Para adicionar uma nova
 // tela no futuro, basta incluir uma linha aqui.
@@ -42,21 +42,21 @@ const MENU = [
       { href: "/vendas", label: "Vendas", icone: ShoppingCart },
       { href: "/orcamentos", label: "Orçamentos", icone: FileText },
       { href: "/orcamentos-galpao", label: "Orçamentos Galpão", icone: Warehouse },
-      { href: "/relatorios", label: "Relatórios", icone: BarChart3 },
+      { href: "/relatorios", label: "Relatórios", icone: BarChart3, adminOnly: true },
     ],
   },
   {
     titulo: "Preços",
     itens: [
-      { href: "/precos", label: "Preços", icone: Tags },
-      { href: "/historico-precos", label: "Histórico de Preços", icone: History },
+      { href: "/precos", label: "Preços", icone: Tags, adminOnly: true },
+      { href: "/historico-precos", label: "Histórico de Preços", icone: History, adminOnly: true },
     ],
   },
   {
     titulo: "Administração",
     itens: [
-      { href: "/usuarios", label: "Usuários", icone: UserCog },
-      { href: "/configuracoes", label: "Configurações", icone: Settings },
+      { href: "/usuarios", label: "Usuários", icone: UserCog, adminOnly: true },
+      { href: "/configuracoes", label: "Configurações", icone: Settings, adminOnly: true },
     ],
   },
 ];
@@ -90,7 +90,13 @@ function ItemMenu({ href, label, icone: Icone, ativo, onClick }) {
   );
 }
 
-function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, onLogout }) {
+function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, onLogout, souAdmin }) {
+  // Esconde itens exclusivos de admin (e seções que ficarem vazias)
+  const menuVisivel = MENU.map((secao) => ({
+    ...secao,
+    itens: secao.itens.filter((item) => !item.adminOnly || souAdmin === true),
+  })).filter((secao) => secao.itens.length > 0);
+
   return (
     <div className="flex flex-col h-full">
       <Link
@@ -107,7 +113,7 @@ function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, on
       </Link>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-        {MENU.map((secao, idx) => (
+        {menuVisivel.map((secao, idx) => (
           <div key={idx}>
             {secao.titulo && (
               <p className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
@@ -155,6 +161,7 @@ export default function AppShell({ children }) {
   const [menuMobileAberto, setMenuMobileAberto] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
+  const souAdmin = useSouAdmin();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -224,6 +231,7 @@ export default function AppShell({ children }) {
           nomeExibido={nomeExibido}
           iniciaisUsuario={iniciaisUsuario}
           onLogout={handleLogout}
+          souAdmin={souAdmin}
         />
       </aside>
 
@@ -267,6 +275,7 @@ export default function AppShell({ children }) {
               nomeExibido={nomeExibido}
               iniciaisUsuario={iniciaisUsuario}
               onLogout={handleLogout}
+          souAdmin={souAdmin}
             />
           </div>
         </div>
