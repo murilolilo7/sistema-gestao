@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import { useSouAdmin, AcessoRestrito } from "@/components/Ui";
 
 const NOMES_TABELA = {
   insumos: "Insumo",
@@ -74,7 +75,7 @@ function formatarDataHora(valor) {
   });
 }
 
-export default function HistoricoPrecosPage() {
+function HistoricoPrecosPage() {
   const [registros, setRegistros] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
@@ -176,4 +177,12 @@ export default function HistoricoPrecosPage() {
       )}
     </div>
   );
+}
+
+// Porteiro: esta tela é exclusiva de administradores.
+export default function HistoricoPrecosPageProtegida() {
+  const souAdmin = useSouAdmin();
+  if (souAdmin === false) return <AcessoRestrito />;
+  if (souAdmin !== true) return null;
+  return <HistoricoPrecosPage />;
 }
