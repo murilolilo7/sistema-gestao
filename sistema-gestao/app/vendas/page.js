@@ -55,6 +55,8 @@ export default function VendasPage() {
   const [expandidoId, setExpandidoId] = useState(null);
   const [filtroMes, setFiltroMes] = useState("todos");
   const [filtroCliente, setFiltroCliente] = useState("todos");
+  const [filtroDataIni, setFiltroDataIni] = useState("");
+  const [filtroDataFim, setFiltroDataFim] = useState("");
 
   function buscarVendas() {
     return supabase
@@ -100,6 +102,10 @@ export default function VendasPage() {
 
   const vendasFiltradas = vendas.filter((v) => {
     if (filtroMes !== "todos" && chaveMes(v.created_at) !== filtroMes) return false;
+    // Período por data (inclusivo): compara só a parte AAAA-MM-DD
+    const dia = (v.created_at || "").slice(0, 10);
+    if (filtroDataIni && dia < filtroDataIni) return false;
+    if (filtroDataFim && dia > filtroDataFim) return false;
     if (filtroCliente !== "todos" && String(v.cliente_id) !== String(filtroCliente))
       return false;
     return true;
@@ -108,7 +114,8 @@ export default function VendasPage() {
   const totalFiltrado = vendasFiltradas.reduce((soma, v) => soma + Number(v.total || 0), 0);
   const ticketMedio = vendasFiltradas.length > 0 ? totalFiltrado / vendasFiltradas.length : 0;
   const resumoMensal = agruparPorMes(vendasFiltradas);
-  const temFiltro = filtroMes !== "todos" || filtroCliente !== "todos";
+  const temFiltro =
+    filtroMes !== "todos" || filtroCliente !== "todos" || filtroDataIni !== "" || filtroDataFim !== "";
 
   // ---------- Exportar CSV (abre direto no Excel) ----------
   function exportarCsv() {
@@ -188,12 +195,32 @@ export default function VendasPage() {
               </option>
             ))}
           </select>
+          <div className="flex items-center gap-1.5 text-sm text-slate-500">
+            <span className="text-xs">de</span>
+            <input
+              type="date"
+              value={filtroDataIni}
+              onChange={(e) => setFiltroDataIni(e.target.value)}
+              className={campoClasse}
+              title="Data inicial do período"
+            />
+            <span className="text-xs">até</span>
+            <input
+              type="date"
+              value={filtroDataFim}
+              onChange={(e) => setFiltroDataFim(e.target.value)}
+              className={campoClasse}
+              title="Data final do período"
+            />
+          </div>
           {temFiltro && (
             <button
               type="button"
               onClick={() => {
                 setFiltroMes("todos");
                 setFiltroCliente("todos");
+                setFiltroDataIni("");
+                setFiltroDataFim("");
               }}
               className="text-xs text-slate-500 hover:text-slate-700 border border-slate-300 rounded-lg px-3 py-2"
             >
