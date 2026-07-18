@@ -236,3 +236,64 @@ export function ControlePaginacao({ pagina, setPagina, totalPaginas, total, inic
     </div>
   );
 }
+
+// ---------------------- ORDENAÇÃO CLICÁVEL ----------------------
+
+export function useOrdenacao() {
+  const [campo, setCampo] = useState(null);
+  const [asc, setAsc] = useState(true);
+
+  function ordenar(novoCampo) {
+    if (campo === novoCampo) {
+      setAsc((v) => !v);
+    } else {
+      setCampo(novoCampo);
+      setAsc(true);
+    }
+  }
+
+  // Ordena a lista pelo campo escolhido: números como números,
+  // textos por ordem alfabética (pt-BR), vazios sempre no fim.
+  function aplicar(itens) {
+    if (!campo) return itens;
+    const copia = [...itens];
+    copia.sort((a, b) => {
+      const va = a?.[campo];
+      const vb = b?.[campo];
+      const vazioA = va === null || va === undefined || va === "";
+      const vazioB = vb === null || vb === undefined || vb === "";
+      if (vazioA && vazioB) return 0;
+      if (vazioA) return 1;
+      if (vazioB) return -1;
+      const na = Number(va);
+      const nb = Number(vb);
+      let r;
+      if (!Number.isNaN(na) && !Number.isNaN(nb)) {
+        r = na - nb;
+      } else {
+        r = String(va).localeCompare(String(vb), "pt-BR", { sensitivity: "base" });
+      }
+      return asc ? r : -r;
+    });
+    return copia;
+  }
+
+  return { campo, asc, ordenar, aplicar };
+}
+
+export function ThOrdenavel({ campo, ordenacao, children, className }) {
+  const ativo = ordenacao.campo === campo;
+  return (
+    <th className={className || "px-4 py-2 font-medium"}>
+      <button
+        type="button"
+        onClick={() => ordenacao.ordenar(campo)}
+        className="inline-flex items-center gap-0.5 hover:text-slate-900 select-none"
+        title="Clique para ordenar"
+      >
+        {children}
+        <span className="text-[9px] w-2">{ativo ? (ordenacao.asc ? "▲" : "▼") : ""}</span>
+      </button>
+    </th>
+  );
+}
