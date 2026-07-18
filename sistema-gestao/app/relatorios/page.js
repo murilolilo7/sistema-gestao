@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Printer, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { useSouAdmin, AcessoRestrito } from "@/components/Ui";
 import { LinhasEsqueleto } from "@/components/Ui";
 
 // ============================================================================
@@ -44,7 +45,7 @@ function Variacao({ atual, anterior }) {
   );
 }
 
-export default function RelatoriosPage() {
+function RelatoriosPage() {
   const hoje = new Date();
   const [mesAno, setMesAno] = useState(
     `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`
@@ -339,4 +340,12 @@ export default function RelatoriosPage() {
       )}
     </div>
   );
+}
+
+// Porteiro: esta tela é exclusiva de administradores.
+export default function RelatoriosPageProtegida() {
+  const souAdmin = useSouAdmin();
+  if (souAdmin === false) return <AcessoRestrito />;
+  if (souAdmin !== true) return null;
+  return <RelatoriosPage />;
 }
