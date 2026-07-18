@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Trash2, Plus, ChevronDown, ChevronRight, Copy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { useSouAdmin, AcessoRestrito } from "@/components/Ui";
 import { notificar, confirmar } from "@/components/Ui";
 
 function formatarMoeda(valor) {
@@ -16,7 +17,7 @@ const PAPEIS_SUGERIDOS = [
   "TELHA", "CALHA", "CAPOTE", "MONTAGEM", "FUNDACAO",
 ];
 
-export default function PrecosPage() {
+function PrecosPage() {
   const [insumos, setInsumos] = useState([]);
   const [maoDeObra, setMaoDeObra] = useState([]);
   const [composicoes, setComposicoes] = useState([]);
@@ -1324,4 +1325,12 @@ export default function PrecosPage() {
       )}
     </div>
   );
+}
+
+// Porteiro: esta tela é exclusiva de administradores.
+export default function PrecosPageProtegida() {
+  const souAdmin = useSouAdmin();
+  if (souAdmin === false) return <AcessoRestrito />;
+  if (souAdmin !== true) return null;
+  return <PrecosPage />;
 }
