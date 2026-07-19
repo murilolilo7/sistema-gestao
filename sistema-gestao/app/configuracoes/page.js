@@ -21,6 +21,47 @@ function ConfiguracoesPage() {
   const [logoBase64, setLogoBase64] = useState("");
   const [rodapeImpressos, setRodapeImpressos] = useState("");
   const [gerandoBackup, setGerandoBackup] = useState(false);
+  const [freteRaioKm, setFreteRaioKm] = useState("");
+  const [freteValorFixo, setFreteValorFixo] = useState("");
+  const [freteValorKm, setFreteValorKm] = useState("");
+  const [freteConfigId, setFreteConfigId] = useState(null);
+  const [salvandoFrete, setSalvandoFrete] = useState(false);
+  const [msgFrete, setMsgFrete] = useState("");
+
+  // Parâmetros do frete (independentes do formulário principal)
+  useEffect(() => {
+    let ativo = true;
+    supabase
+      .from("configuracao_empresa")
+      .select("id, frete_raio_km, frete_valor_fixo, frete_valor_km")
+      .limit(1)
+      .then(({ data }) => {
+        if (!ativo || !data || !data[0]) return;
+        setFreteConfigId(data[0].id);
+        setFreteRaioKm(data[0].frete_raio_km ?? "");
+        setFreteValorFixo(data[0].frete_valor_fixo ?? "");
+        setFreteValorKm(data[0].frete_valor_km ?? "");
+      });
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  async function handleSalvarFrete() {
+    if (!freteConfigId) return;
+    setSalvandoFrete(true);
+    setMsgFrete("");
+    const { error } = await supabase
+      .from("configuracao_empresa")
+      .update({
+        frete_raio_km: freteRaioKm === "" ? null : Number(freteRaioKm),
+        frete_valor_fixo: freteValorFixo === "" ? null : Number(freteValorFixo),
+        frete_valor_km: freteValorKm === "" ? null : Number(freteValorKm),
+      })
+      .eq("id", freteConfigId);
+    setSalvandoFrete(false);
+    setMsgFrete(error ? "Erro ao salvar: " + error.message : "Parâmetros do frete salvos!");
+  }
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
@@ -377,6 +418,66 @@ function ConfiguracoesPage() {
             </button>
           </div>
         </form>
+      )}
+
+      {/* ---------- Parâmetros do frete ---------- */}
+      {!loading && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm max-w-lg">
+          <p className="text-sm font-semibold text-slate-700 mb-1">Frete dos orçamentos de produtos</p>
+          <p className="text-xs text-slate-500 mb-3">
+            Regra: até o raio abaixo, cobra o valor fixo. Passou do raio, cobra o
+            valor por km × distância × 2 (ida e volta) sobre a distância toda.
+          </p>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Raio (km)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={freteRaioKm}
+                onChange={(e) => setFreteRaioKm(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Valor fixo (R$)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={freteValorFixo}
+                onChange={(e) => setFreteValorFixo(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">R$ por km</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={freteValorKm}
+                onChange={(e) => setFreteValorKm(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSalvarFrete}
+              disabled={salvandoFrete}
+              className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
+            >
+              {salvandoFrete ? "Salvando..." : "Salvar frete"}
+            </button>
+            {msgFrete && <span className="text-xs text-slate-500">{msgFrete}</span>}
+          </div>
+        </div>
       )}
 
       {/* ---------- Backup completo ---------- */}
