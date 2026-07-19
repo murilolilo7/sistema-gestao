@@ -701,6 +701,8 @@ function OrcamentosPageInterno() {
     ? "Escolha o cliente"
     : itens.filter((i) => i.quantidade > 0).length === 0
       ? "Adicione produtos ao orçamento"
+      : itens.some((i) => i.quantidade > estoqueDoProduto(i.produto_id))
+      ? "Há itens acima do estoque disponível"
       : null;
 
   // ---------- TELA DE INCLUSÃO / EDIÇÃO ----------
@@ -963,6 +965,16 @@ function OrcamentosPageInterno() {
                 placeholder="Ex: Rua X, 100, Centro, Arapiraca - AL"
                 className={campoClasse}
               />
+              {enderecoEntrega.trim() !== "" && (
+                <a
+                  href={"https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(enderecoEntrega)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block mt-1 text-xs text-emerald-700 hover:text-emerald-900 underline"
+                >
+                  Ver no Google Maps ↗
+                </a>
+              )}
             </div>
             <div className="flex items-end">
               <button
