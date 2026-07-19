@@ -142,6 +142,7 @@ function OrcamentosPageInterno() {
   const [calculandoFrete, setCalculandoFrete] = useState(false);
   const [freteConfig, setFreteConfig] = useState(null);
   const [unidade, setUnidade] = useState("matriz");
+  const [viagens, setViagens] = useState("1");
 
   // Parâmetros do frete definidos em Configurações (raio, fixo, R$/km)
   useEffect(() => {
@@ -172,13 +173,16 @@ function OrcamentosPageInterno() {
     };
   }
 
-  function aplicarRegraFrete(km) {
+  function aplicarRegraFrete(km, viagensOverride) {
+    // O frete calculado vale por VIAGEM: multiplica pelo número de viagens
+    // necessárias para entregar todo o material.
+    const nViagens = Math.max(1, Number(viagensOverride ?? viagens) || 1);
     const raio = Number(freteConfig?.frete_raio_km ?? 10);
     const fixo = Number(freteConfig?.frete_valor_fixo ?? 100);
     const porKm = Number(freteConfig?.frete_valor_km ?? 9);
     if (!km || km <= 0) return 0;
-    if (km <= raio) return fixo;
-    return Math.round(porKm * km * 2 * 100) / 100;
+    if (km <= raio) return Math.round(fixo * nViagens * 100) / 100;
+    return Math.round(porKm * km * 2 * nViagens * 100) / 100;
   }
 
   // Busca o endereço (OpenStreetMap) e a distância de carro (OSRM) — serviços gratuitos.
@@ -329,6 +333,7 @@ function OrcamentosPageInterno() {
             desconto,
             observacao,
             unidade,
+            viagens,
             enderecoEntrega,
             distanciaKm,
             valorFrete,
@@ -363,6 +368,7 @@ function OrcamentosPageInterno() {
     setObservacao(r.observacao || "");
     setEnderecoEntrega(r.enderecoEntrega || "");
     setUnidade(r.unidade || "matriz");
+    setViagens(r.viagens || "1");
     setDistanciaKm(r.distanciaKm || "");
     setValorFrete(r.valorFrete || "");
     setItens(Array.isArray(r.itens) ? r.itens : []);
@@ -472,6 +478,7 @@ function OrcamentosPageInterno() {
     setObservacao("");
     setEnderecoEntrega("");
     setUnidade("matriz");
+    setViagens("1");
     setDistanciaKm("");
     setValorFrete("");
   }
@@ -493,6 +500,7 @@ function OrcamentosPageInterno() {
     setDesconto(orcamento.desconto ? String(orcamento.desconto) : "");
     setObservacao(orcamento.observacao || "");
     setUnidade(orcamento.unidade || "matriz");
+    setViagens(orcamento.viagens ? String(orcamento.viagens) : "1");
     setEnderecoEntrega(orcamento.endereco_entrega || "");
     setDistanciaKm(orcamento.distancia_km != null ? String(orcamento.distancia_km) : "");
     setValorFrete(orcamento.valor_frete != null && Number(orcamento.valor_frete) > 0 ? String(orcamento.valor_frete) : "");
@@ -566,6 +574,7 @@ function OrcamentosPageInterno() {
           distancia_km_input: distanciaKm === "" ? null : Number(distanciaKm),
           valor_frete_input: valorFreteNumerico,
           unidade_input: unidade,
+          viagens_input: Math.max(1, Number(viagens) || 1),
         })
       : await supabase.rpc("criar_orcamento", {
           cliente_id_input: Number(clienteId),
@@ -578,6 +587,7 @@ function OrcamentosPageInterno() {
           distancia_km_input: distanciaKm === "" ? null : Number(distanciaKm),
           valor_frete_input: valorFreteNumerico,
           unidade_input: unidade,
+          viagens_input: Math.max(1, Number(viagens) || 1),
         });
 
     if (error) {
@@ -1050,8 +1060,24 @@ function OrcamentosPageInterno() {
                 className={campoClasse}
               />
             </div>
+            <div>
+              <label className={labelClasse}>Viagens</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={viagens}
+                onChange={(e) => {
+                  setViagens(e.target.value);
+                  const km = Number(distanciaKm) || 0;
+                  if (km > 0) setValorFrete(String(aplicarRegraFrete(km, e.target.value)));
+                }}
+                onFocus={(e) => e.target.select()}
+                className={campoClasse}
+              />
+            </div>
             <p className="col-span-2 self-end text-[11px] text-slate-400 pb-1">
-              Até {Number(freteConfig?.frete_raio_km ?? 10)} km: fixo de {formatarMoeda(freteConfig?.frete_valor_fixo ?? 100)}. Acima: {formatarMoeda(freteConfig?.frete_valor_km ?? 9)}/km × km × 2 (ida e volta). Se o mapa falhar, digite os km na mão.
+              Até {Number(freteConfig?.frete_raio_km ?? 10)} km: fixo de {formatarMoeda(freteConfig?.frete_valor_fixo ?? 100)}. Acima: {formatarMoeda(freteConfig?.frete_valor_km ?? 9)}/km × km × 2 (ida e volta). O valor é multiplicado pelo nº de viagens. Se o mapa falhar, digite os km na mão.
             </p>
           </div>
         </div>
