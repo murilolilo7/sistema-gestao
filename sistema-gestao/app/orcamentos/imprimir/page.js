@@ -402,6 +402,9 @@ function EntregaImpresso({ orcamento }) {
       {orcamento.distancia_km != null && (
         <span className="text-slate-500"> · {Number(orcamento.distancia_km).toLocaleString("pt-BR")} km</span>
       )}
+      {Number(orcamento.viagens || 1) > 1 && (
+        <span className="text-slate-500"> · {orcamento.viagens} viagens</span>
+      )}
       {temFrete && (
         <span className="text-slate-500"> · Frete: <b className="text-slate-700">{moeda(orcamento.valor_frete)}</b> (incluso no total)</span>
       )}
