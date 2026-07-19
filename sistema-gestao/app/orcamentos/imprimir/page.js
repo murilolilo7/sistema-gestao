@@ -16,7 +16,18 @@ const EMPRESA_PADRAO = {
 
 // Mescla os dados salvos em Configurações com os padrões (fallback):
 // se o campo não foi preenchido lá, usa o valor fixo de sempre.
-function dadosEmpresa(config) {
+function dadosEmpresa(config, unidade) {
+  if (unidade === "filial") {
+    return {
+      nome: config?.filial_nome_empresa || EMPRESA_PADRAO.nome,
+      telefone: config?.filial_telefone || config?.telefone || EMPRESA_PADRAO.telefone,
+      endereco: config?.filial_endereco || EMPRESA_PADRAO.endereco,
+      cidadeUf: config?.filial_cidade_uf || EMPRESA_PADRAO.cidadeUf,
+      cnpj: config?.filial_cnpj || config?.cnpj || EMPRESA_PADRAO.cnpj,
+      logo: config?.logo_base64 || null,
+      rodape: config?.rodape_impressos || null,
+    };
+  }
   return {
     nome: config?.nome_empresa || EMPRESA_PADRAO.nome,
     telefone: config?.telefone || EMPRESA_PADRAO.telefone,
@@ -74,7 +85,7 @@ function ConteudoImpressao() {
           )
           .eq("codigo", codigo)
           .single(),
-        supabase.from("configuracao_empresa").select("nome_diretor, assinatura_base64, nome_empresa, cnpj, telefone, endereco, cidade_uf, logo_base64, rodape_impressos").eq("id", 1).single(),
+        supabase.from("configuracao_empresa").select("nome_diretor, assinatura_base64, nome_empresa, cnpj, telefone, endereco, cidade_uf, logo_base64, rodape_impressos, filial_nome_empresa, filial_cnpj, filial_telefone, filial_endereco, filial_cidade_uf").eq("id", 1).single(),
       ]);
       if (!ativo) return;
       if (resOrcamento.error) {
@@ -110,7 +121,7 @@ function ConteudoImpressao() {
   }
   if (!orcamento) return null;
 
-  const empresa = dadosEmpresa(config);
+  const empresa = dadosEmpresa(config, orcamento.unidade);
 
   const itens = orcamento.itens_orcamento || [];
   const subtotal = itens.reduce(
