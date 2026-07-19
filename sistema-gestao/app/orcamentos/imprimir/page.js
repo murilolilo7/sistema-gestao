@@ -281,6 +281,14 @@ function ConteudoImpressao() {
                 {desconto > 0 ? `− ${formatarMoeda(desconto)}` : formatarMoeda(0)}
               </td>
             </tr>
+              {Number(orcamento.valor_frete || 0) > 0 && (
+                <tr>
+                  <td className="px-2 py-0.5 text-slate-500">Frete</td>
+                  <td className="px-2 py-0.5 text-right">
+                    {formatarMoeda(orcamento.valor_frete)}
+                  </td>
+                </tr>
+              )}
             <tr className="border-t border-slate-400">
               <td className="px-2 py-1 font-bold">Total do orçamento</td>
               <td className="px-2 py-1 text-right font-bold">
