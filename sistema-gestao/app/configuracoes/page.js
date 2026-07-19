@@ -27,13 +27,20 @@ function ConfiguracoesPage() {
   const [freteConfigId, setFreteConfigId] = useState(null);
   const [salvandoFrete, setSalvandoFrete] = useState(false);
   const [msgFrete, setMsgFrete] = useState("");
+  const [filialNome, setFilialNome] = useState("");
+  const [filialCnpj, setFilialCnpj] = useState("");
+  const [filialTelefone, setFilialTelefone] = useState("");
+  const [filialEndereco, setFilialEndereco] = useState("");
+  const [filialCidadeUf, setFilialCidadeUf] = useState("");
+  const [salvandoFilial, setSalvandoFilial] = useState(false);
+  const [msgFilial, setMsgFilial] = useState("");
 
   // Parâmetros do frete (independentes do formulário principal)
   useEffect(() => {
     let ativo = true;
     supabase
       .from("configuracao_empresa")
-      .select("id, frete_raio_km, frete_valor_fixo, frete_valor_km")
+      .select("id, frete_raio_km, frete_valor_fixo, frete_valor_km, filial_nome_empresa, filial_cnpj, filial_telefone, filial_endereco, filial_cidade_uf")
       .limit(1)
       .then(({ data }) => {
         if (!ativo || !data || !data[0]) return;
@@ -41,6 +48,11 @@ function ConfiguracoesPage() {
         setFreteRaioKm(data[0].frete_raio_km ?? "");
         setFreteValorFixo(data[0].frete_valor_fixo ?? "");
         setFreteValorKm(data[0].frete_valor_km ?? "");
+        setFilialNome(data[0].filial_nome_empresa ?? "");
+        setFilialCnpj(data[0].filial_cnpj ?? "");
+        setFilialTelefone(data[0].filial_telefone ?? "");
+        setFilialEndereco(data[0].filial_endereco ?? "");
+        setFilialCidadeUf(data[0].filial_cidade_uf ?? "");
       });
     return () => {
       ativo = false;
@@ -61,6 +73,24 @@ function ConfiguracoesPage() {
       .eq("id", freteConfigId);
     setSalvandoFrete(false);
     setMsgFrete(error ? "Erro ao salvar: " + error.message : "Parâmetros do frete salvos!");
+  }
+
+  async function handleSalvarFilial() {
+    if (!freteConfigId) return;
+    setSalvandoFilial(true);
+    setMsgFilial("");
+    const { error } = await supabase
+      .from("configuracao_empresa")
+      .update({
+        filial_nome_empresa: filialNome.trim() || null,
+        filial_cnpj: filialCnpj.trim() || null,
+        filial_telefone: filialTelefone.trim() || null,
+        filial_endereco: filialEndereco.trim() || null,
+        filial_cidade_uf: filialCidadeUf.trim() || null,
+      })
+      .eq("id", freteConfigId);
+    setSalvandoFilial(false);
+    setMsgFilial(error ? "Erro ao salvar: " + error.message : "Dados da filial salvos!");
   }
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -418,6 +448,77 @@ function ConfiguracoesPage() {
             </button>
           </div>
         </form>
+      )}
+
+      {/* ---------- Dados da filial ---------- */}
+      {!loading && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm max-w-lg">
+          <p className="text-sm font-semibold text-slate-700 mb-1">Dados da filial</p>
+          <p className="text-xs text-slate-500 mb-3">
+            Aparecem no impresso quando o orçamento é feito pela unidade Filial. O ponto
+            de partida do frete da filial já está gravado (Barra dos Coqueiros, SE).
+          </p>
+          <div className="grid grid-cols-1 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Nome da empresa (filial)</label>
+              <input
+                type="text"
+                value={filialNome}
+                onChange={(e) => setFilialNome(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">CNPJ</label>
+              <input
+                type="text"
+                value={filialCnpj}
+                onChange={(e) => setFilialCnpj(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+              <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Telefone</label>
+              <input
+                type="text"
+                value={filialTelefone}
+                onChange={(e) => setFilialTelefone(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Endereço</label>
+              <input
+                type="text"
+                value={filialEndereco}
+                onChange={(e) => setFilialEndereco(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">CEP - Cidade, UF</label>
+              <input
+                type="text"
+                value={filialCidadeUf}
+                onChange={(e) => setFilialCidadeUf(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSalvarFilial}
+              disabled={salvandoFilial}
+              className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
+            >
+              {salvandoFilial ? "Salvando..." : "Salvar filial"}
+            </button>
+            {msgFilial && <span className="text-xs text-slate-500">{msgFilial}</span>}
+          </div>
+        </div>
       )}
 
       {/* ---------- Parâmetros do frete ---------- */}
