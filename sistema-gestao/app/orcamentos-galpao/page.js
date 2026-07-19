@@ -346,12 +346,16 @@ function OrcamentosGalpaoPageInterno() {
       // bordas externas + 1 calha central por cada junção entre galpões).
       // multiplicador = nº de galpões germinados + 1 (1 galpão => 2, como
       // antes; 2 galpões germinados => 3; 3 => 4; e assim por diante).
-      if (numeroVaos) {
+      // Nº de vãos: usa o informado; vazio, deduz pelo comprimento (5m/6m)
+      // para a calha nunca ficar zerada à toa.
+      const dCalha = decomporComprimentoEmModulos(comprimento);
+      const vaosCalha = Number(numeroVaos) || (dCalha ? dCalha.vaos5 + dCalha.vaos6 : 0);
+      if (vaosCalha > 0) {
         const multiplicadorCalha = germinados + 1;
         const qtdCalha =
           Math.round(
             (multiplicadorCalha * Number(comprimento) +
-              0.5 * multiplicadorCalha * Number(numeroVaos)) *
+              0.5 * multiplicadorCalha * vaosCalha) *
               100
           ) / 100;
         novos = novos.map((i) => (i.nome === "CALHA FIBRA" ? { ...i, quantidade: qtdCalha } : i));
@@ -610,6 +614,41 @@ function OrcamentosGalpaoPageInterno() {
   // Pilares: (nº de vãos + 1) linhas x (nº de galpões + 1) fileiras —
   // 2 fileiras laterais no galpão solo; nos geminados, a divisa usa
   // UM pilar compartilhado entre os dois galpões.
+  // Quantidade sugerida ao escolher uma peça no seletor. Cobre os papeis
+  // conhecidos; sem regra, devolve null e o campo volta para 1 — assim a
+  // quantidade nunca fica presa na da peça anterior.
+  function sugestaoQuantidadePara(comp) {
+    if (!comp) return null;
+    const dedu = decomporComprimentoEmModulos(comprimento);
+    const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
+    if (comp.papel === "PILAR") {
+      const s = sugestaoPilares();
+      return s ? s.qtd : null;
+    }
+    if (comp.papel === "TERCA") {
+      const s = sugestaoTerca(comp);
+      return s && s.qtd > 0 ? s.qtd : null;
+    }
+    if (comp.papel === "TESOURA") {
+      if (nV <= 0) return null;
+      // O tamanho vem no nome (ex: TESOURA 11,50M): conta quantos galpões
+      // têm essa largura; sem correspondência, sugere para um galpão.
+      const m = (comp.nome || "").match(/(\d+(?:[.,]\d+)?)\s*M\b/i)?.[1];
+      const tam = m ? parseFloat(m.replace(",", ".")) : null;
+      const larguras = listaLarguras || [Number(vao) || 0];
+      const iguais = tam !== null ? larguras.filter((l) => Math.abs(l - tam) < 0.01).length : 0;
+      return (nV + 1) * (iguais > 0 ? iguais : 1);
+    }
+    if (comp.papel === "BASE_CALICE") {
+      const pilares = itens.reduce(
+        (s, i) => (i.papel === "PILAR" ? s + (Number(i.quantidade) || 0) : s),
+        0
+      );
+      return pilares > 0 ? pilares : null;
+    }
+    return null;
+  }
+
   function sugestaoPilares() {
     const numVaos = Number(numeroVaos) || 0;
     if (numVaos <= 0) return null;
@@ -1043,7 +1082,8 @@ function OrcamentosGalpaoPageInterno() {
   // já foi LANÇADO. Tolerância de 0,5 para itens por metragem.
   const checklistEstrutura = (() => {
     if (!vao || !comprimento) return [];
-    const nV = Number(numeroVaos) || 0;
+    const dCheck = decomporComprimentoEmModulos(comprimento);
+    const nV = Number(numeroVaos) || (dCheck ? dCheck.vaos5 + dCheck.vaos6 : 0);
     const G = totalGalpoes;
     const somaQtd = (filtro) =>
       itens.filter(filtro).reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
@@ -1155,17 +1195,30 @@ function OrcamentosGalpaoPageInterno() {
       });
     }
 
+    // Montagem da estrutura (VB): não pode ficar esquecida
+    {
+      const lanMont = somaQtd((i) => i.secao !== "laje" && i.nome === "MONTAGEM");
+      linhas.push({
+        rotulo: "Montagem (VB)",
+        detalhe: "quantidade em VB",
+        necessario: 1,
+        lancado: lanMont,
+        ok: lanMont > 0,
+        texto: lanMont > 0 ? fmtNum(lanMont) + " VB" : "não lançada",
+      });
+    }
+
     // Fundação: 1 dia por pilar (estrutura + laje) — conta visível
     {
       const pilaresTotais = somaQtd((i) => i.papel === "PILAR");
-      if (pilaresTotais > 0) {
+      if (true) {
         const lan = somaQtd((i) => i.nome === "FUNDAÇÃO");
         linhas.push({
           rotulo: "Fundação (dias)",
-          detalhe: `1 dia × ${fmtNum(pilaresTotais)} pilares`,
+          detalhe: pilaresTotais > 0 ? `1 dia × ${fmtNum(pilaresTotais)} pilares` : "1 dia por pilar — lance os pilares",
           necessario: pilaresTotais,
           lancado: lan,
-          ok: lan >= pilaresTotais,
+          ok: pilaresTotais > 0 && lan >= pilaresTotais,
           texto: `${fmtNum(lan)} de ${fmtNum(pilaresTotais)}`,
         });
       }
@@ -1256,6 +1309,7 @@ function OrcamentosGalpaoPageInterno() {
     setTesouraQtd("1");
     setPerdaTelha("10");
     setChaveRecente(null);
+    setExpandidoId(null);
   }
 
   function abrirNovo() {
@@ -1936,13 +1990,8 @@ function OrcamentosGalpaoPageInterno() {
                     // quantidade preenche sozinha pelas medidas
                     // (editável — é só um ponto de partida).
                     const comp = composicoes.find((c) => String(c.id) === String(id));
-                    if (comp?.papel === "PILAR") {
-                      const s = sugestaoPilares();
-                      if (s) setQuantidadeParaAdicionar(String(s.qtd));
-                    } else if (comp?.papel === "TERCA") {
-                      const s = sugestaoTerca(comp);
-                      if (s && s.qtd > 0) setQuantidadeParaAdicionar(String(s.qtd));
-                    }
+                    const qtdSugerida = sugestaoQuantidadePara(comp);
+                    setQuantidadeParaAdicionar(qtdSugerida ? String(qtdSugerida) : "1");
                   }}
                   className={campoClasse}
                 >
