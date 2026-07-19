@@ -141,13 +141,14 @@ function OrcamentosPageInterno() {
   const [valorFrete, setValorFrete] = useState("");
   const [calculandoFrete, setCalculandoFrete] = useState(false);
   const [freteConfig, setFreteConfig] = useState(null);
+  const [unidade, setUnidade] = useState("matriz");
 
   // Parâmetros do frete definidos em Configurações (raio, fixo, R$/km)
   useEffect(() => {
     let ativo = true;
     supabase
       .from("configuracao_empresa")
-      .select("frete_raio_km, frete_valor_fixo, frete_valor_km")
+      .select("frete_raio_km, frete_valor_fixo, frete_valor_km, matriz_lat, matriz_lon, filial_nome_empresa, filial_cidade_uf, filial_lat, filial_lon")
       .limit(1)
       .then(({ data }) => {
         if (ativo && data && data[0]) setFreteConfig(data[0]);
@@ -157,8 +158,19 @@ function OrcamentosPageInterno() {
     };
   }, []);
 
-  // Local da MR7 (Rodovia AL-485, Feira Grande - AL)
-  const ORIGEM_FABRICA = { lat: -9.897, lon: -36.679 };
+  // Ponto de partida do frete conforme a unidade escolhida
+  function origemDaUnidade() {
+    if (unidade === "filial") {
+      return {
+        lat: Number(freteConfig?.filial_lat ?? -10.803975),
+        lon: Number(freteConfig?.filial_lon ?? -36.932065),
+      };
+    }
+    return {
+      lat: Number(freteConfig?.matriz_lat ?? -9.897),
+      lon: Number(freteConfig?.matriz_lon ?? -36.679),
+    };
+  }
 
   function aplicarRegraFrete(km) {
     const raio = Number(freteConfig?.frete_raio_km ?? 10);
@@ -177,8 +189,10 @@ function OrcamentosPageInterno() {
       return;
     }
     setCalculandoFrete(true);
+    const origem = origemDaUnidade();
     try {
-      const busca = /alagoas|\bal\b/i.test(endereco) ? endereco : endereco + ", Alagoas, Brasil";
+      const ufPadrao = unidade === "filial" ? ", Sergipe, Brasil" : ", Alagoas, Brasil";
+      const busca = /alagoas|sergipe|\bal\b|\bse\b/i.test(endereco) ? endereco : endereco + ufPadrao;
       const geo = await fetch(
         "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=" +
           encodeURIComponent(busca)
@@ -191,7 +205,7 @@ function OrcamentosPageInterno() {
       const destino = { lat: Number(geo[0].lat), lon: Number(geo[0].lon) };
       const rota = await fetch(
         "https://router.project-osrm.org/route/v1/driving/" +
-          ORIGEM_FABRICA.lon + "," + ORIGEM_FABRICA.lat + ";" +
+          origem.lon + "," + origem.lat + ";" +
           destino.lon + "," + destino.lat + "?overview=false"
       ).then((r) => r.json());
       const metros = rota && rota.routes && rota.routes[0] ? rota.routes[0].distance : null;
@@ -314,6 +328,7 @@ function OrcamentosPageInterno() {
             diasValidade,
             desconto,
             observacao,
+            unidade,
             enderecoEntrega,
             distanciaKm,
             valorFrete,
@@ -347,6 +362,7 @@ function OrcamentosPageInterno() {
     setDesconto(r.desconto || "");
     setObservacao(r.observacao || "");
     setEnderecoEntrega(r.enderecoEntrega || "");
+    setUnidade(r.unidade || "matriz");
     setDistanciaKm(r.distanciaKm || "");
     setValorFrete(r.valorFrete || "");
     setItens(Array.isArray(r.itens) ? r.itens : []);
@@ -455,6 +471,7 @@ function OrcamentosPageInterno() {
     setDesconto("");
     setObservacao("");
     setEnderecoEntrega("");
+    setUnidade("matriz");
     setDistanciaKm("");
     setValorFrete("");
   }
@@ -475,6 +492,7 @@ function OrcamentosPageInterno() {
     setDiasValidade(diasAPartirDeHoje(orcamento.validade));
     setDesconto(orcamento.desconto ? String(orcamento.desconto) : "");
     setObservacao(orcamento.observacao || "");
+    setUnidade(orcamento.unidade || "matriz");
     setEnderecoEntrega(orcamento.endereco_entrega || "");
     setDistanciaKm(orcamento.distancia_km != null ? String(orcamento.distancia_km) : "");
     setValorFrete(orcamento.valor_frete != null && Number(orcamento.valor_frete) > 0 ? String(orcamento.valor_frete) : "");
@@ -547,6 +565,7 @@ function OrcamentosPageInterno() {
           endereco_entrega_input: enderecoEntrega.trim() || null,
           distancia_km_input: distanciaKm === "" ? null : Number(distanciaKm),
           valor_frete_input: valorFreteNumerico,
+          unidade_input: unidade,
         })
       : await supabase.rpc("criar_orcamento", {
           cliente_id_input: Number(clienteId),
@@ -558,6 +577,7 @@ function OrcamentosPageInterno() {
           endereco_entrega_input: enderecoEntrega.trim() || null,
           distancia_km_input: distanciaKm === "" ? null : Number(distanciaKm),
           valor_frete_input: valorFreteNumerico,
+          unidade_input: unidade,
         });
 
     if (error) {
@@ -955,6 +975,20 @@ function OrcamentosPageInterno() {
 
         <div className="mt-4 rounded-lg border border-slate-200 p-4 bg-slate-50">
           <p className="text-xs font-medium text-slate-600 mb-2">Entrega e frete (opcional)</p>
+          <div className="mb-3 sm:max-w-xs">
+            <label className={labelClasse}>Unidade do orçamento</label>
+            <select
+              value={unidade}
+              onChange={(e) => setUnidade(e.target.value)}
+              className={campoClasse}
+            >
+              <option value="matriz">Matriz — Feira Grande, AL</option>
+              <option value="filial">{"Filial — " + (freteConfig?.filial_cidade_uf || "Barra dos Coqueiros, SE")}</option>
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Define de onde sai o frete e os dados da empresa no impresso.
+            </p>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2">
             <div className="sm:col-span-3">
               <label className={labelClasse}>Endereço de entrega</label>
