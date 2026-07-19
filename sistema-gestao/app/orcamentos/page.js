@@ -435,7 +435,14 @@ function OrcamentosPageInterno() {
   itens.forEach((i) => {
     const p = produtos.find((x) => x.id === i.produto_id);
     if (p && p.molde && !pecasDoOrcamento.some((x) => x.id === p.id)) {
-      pecasDoOrcamento.push(p);
+      pecasDoOrcamento.push({
+        id: p.id,
+        nome: p.nome,
+        molde: p.molde,
+        comprimento: p.comprimento_cm,
+        largura: p.largura_cm,
+        altura: p.altura_cm,
+      });
     }
   });
 
