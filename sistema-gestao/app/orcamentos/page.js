@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Copy, Eye, EyeOff, FileText, Pencil, Printer, ShoppingCart, Loader2, MessageCircle, XCircle, RotateCcw } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar, LinhasEsqueleto, EstadoVazio, usePaginacao, ControlePaginacao } from "@/components/Ui";
+import { QuadroPecas } from "@/components/DesenhoPecas";
 
 function formatarMoeda(valor) {
   if (valor === null || valor === undefined) return "-";
@@ -135,6 +136,79 @@ function OrcamentosPageInterno() {
   const [buscaProduto, setBuscaProduto] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("todos");
   const [rascunhoDisponivel, setRascunhoDisponivel] = useState(null);
+  const [enderecoEntrega, setEnderecoEntrega] = useState("");
+  const [distanciaKm, setDistanciaKm] = useState("");
+  const [valorFrete, setValorFrete] = useState("");
+  const [calculandoFrete, setCalculandoFrete] = useState(false);
+  const [freteConfig, setFreteConfig] = useState(null);
+
+  // Parâmetros do frete definidos em Configurações (raio, fixo, R$/km)
+  useEffect(() => {
+    let ativo = true;
+    supabase
+      .from("configuracao_empresa")
+      .select("frete_raio_km, frete_valor_fixo, frete_valor_km")
+      .limit(1)
+      .then(({ data }) => {
+        if (ativo && data && data[0]) setFreteConfig(data[0]);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  // Local da MR7 (Rodovia AL-485, Feira Grande - AL)
+  const ORIGEM_FABRICA = { lat: -9.897, lon: -36.679 };
+
+  function aplicarRegraFrete(km) {
+    const raio = Number(freteConfig?.frete_raio_km ?? 10);
+    const fixo = Number(freteConfig?.frete_valor_fixo ?? 100);
+    const porKm = Number(freteConfig?.frete_valor_km ?? 9);
+    if (!km || km <= 0) return 0;
+    if (km <= raio) return fixo;
+    return Math.round(porKm * km * 2 * 100) / 100;
+  }
+
+  // Busca o endereço (OpenStreetMap) e a distância de carro (OSRM) — serviços gratuitos.
+  async function calcularFrete() {
+    const endereco = enderecoEntrega.trim();
+    if (!endereco) {
+      notificar("Digite o endereço de entrega primeiro.", "erro");
+      return;
+    }
+    setCalculandoFrete(true);
+    try {
+      const busca = /alagoas|\bal\b/i.test(endereco) ? endereco : endereco + ", Alagoas, Brasil";
+      const geo = await fetch(
+        "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=" +
+          encodeURIComponent(busca)
+      ).then((r) => r.json());
+      if (!geo || !geo[0]) {
+        notificar("Endereço não encontrado no mapa. Digite os km manualmente.", "erro");
+        setCalculandoFrete(false);
+        return;
+      }
+      const destino = { lat: Number(geo[0].lat), lon: Number(geo[0].lon) };
+      const rota = await fetch(
+        "https://router.project-osrm.org/route/v1/driving/" +
+          ORIGEM_FABRICA.lon + "," + ORIGEM_FABRICA.lat + ";" +
+          destino.lon + "," + destino.lat + "?overview=false"
+      ).then((r) => r.json());
+      const metros = rota && rota.routes && rota.routes[0] ? rota.routes[0].distance : null;
+      if (!metros) {
+        notificar("Não foi possível calcular a rota. Digite os km manualmente.", "erro");
+        setCalculandoFrete(false);
+        return;
+      }
+      const km = Math.round((metros / 1000) * 10) / 10;
+      setDistanciaKm(String(km));
+      setValorFrete(String(aplicarRegraFrete(km)));
+      notificar("Distância: " + km + " km — frete calculado.");
+    } catch (e) {
+      notificar("Serviço de mapas indisponível agora. Digite os km manualmente.", "erro");
+    }
+    setCalculandoFrete(false);
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -152,7 +226,7 @@ function OrcamentosPageInterno() {
   function buscarProdutos() {
     return supabase
       .from("produtos")
-      .select("id, nome, unidade, preco, quantidade_estoque")
+      .select("id, nome, unidade, preco, quantidade_estoque, molde, comprimento_cm, largura_cm, altura_cm")
       .order("nome");
   }
   function buscarOrcamentos() {
@@ -240,6 +314,9 @@ function OrcamentosPageInterno() {
             diasValidade,
             desconto,
             observacao,
+            enderecoEntrega,
+            distanciaKm,
+            valorFrete,
             itens,
           })
         );
@@ -269,6 +346,9 @@ function OrcamentosPageInterno() {
     setDiasValidade(r.diasValidade || "");
     setDesconto(r.desconto || "");
     setObservacao(r.observacao || "");
+    setEnderecoEntrega(r.enderecoEntrega || "");
+    setDistanciaKm(r.distanciaKm || "");
+    setValorFrete(r.valorFrete || "");
     setItens(Array.isArray(r.itens) ? r.itens : []);
     setErro("");
     setMensagem("");
@@ -347,6 +427,17 @@ function OrcamentosPageInterno() {
     subtotalOrcamento
   );
   const totalComDesconto = subtotalOrcamento - descontoNumerico;
+  const valorFreteNumerico = Math.max(0, Number(valorFrete) || 0);
+  const totalFinalOrcamento = totalComDesconto + valorFreteNumerico;
+
+  // Peças com desenho técnico presentes no orçamento (sem repetir)
+  const pecasDoOrcamento = [];
+  itens.forEach((i) => {
+    const p = produtos.find((x) => x.id === i.produto_id);
+    if (p && p.molde && !pecasDoOrcamento.some((x) => x.id === p.id)) {
+      pecasDoOrcamento.push(p);
+    }
+  });
 
   function limparFormulario() {
     setClienteId("");
@@ -356,6 +447,9 @@ function OrcamentosPageInterno() {
     setQuantidadeParaAdicionar("1");
     setDesconto("");
     setObservacao("");
+    setEnderecoEntrega("");
+    setDistanciaKm("");
+    setValorFrete("");
   }
 
   function abrirNovo() {
@@ -374,6 +468,9 @@ function OrcamentosPageInterno() {
     setDiasValidade(diasAPartirDeHoje(orcamento.validade));
     setDesconto(orcamento.desconto ? String(orcamento.desconto) : "");
     setObservacao(orcamento.observacao || "");
+    setEnderecoEntrega(orcamento.endereco_entrega || "");
+    setDistanciaKm(orcamento.distancia_km != null ? String(orcamento.distancia_km) : "");
+    setValorFrete(orcamento.valor_frete != null && Number(orcamento.valor_frete) > 0 ? String(orcamento.valor_frete) : "");
     setItens(
       (orcamento.itens_orcamento || []).map((item) => ({
         produto_id: item.produto_id,
@@ -440,6 +537,9 @@ function OrcamentosPageInterno() {
           desconto_input: descontoNumerico,
           observacao_input: observacao.trim() || null,
           vendedor_input: nomeUsuario || null,
+          endereco_entrega_input: enderecoEntrega.trim() || null,
+          distancia_km_input: distanciaKm === "" ? null : Number(distanciaKm),
+          valor_frete_input: valorFreteNumerico,
         })
       : await supabase.rpc("criar_orcamento", {
           cliente_id_input: Number(clienteId),
@@ -448,6 +548,9 @@ function OrcamentosPageInterno() {
           desconto_input: descontoNumerico,
           observacao_input: observacao.trim() || null,
           vendedor_input: nomeUsuario || null,
+          endereco_entrega_input: enderecoEntrega.trim() || null,
+          distancia_km_input: distanciaKm === "" ? null : Number(distanciaKm),
+          valor_frete_input: valorFreteNumerico,
         });
 
     if (error) {
@@ -834,6 +937,72 @@ function OrcamentosPageInterno() {
             )}
           </div>
 
+          {pecasDoOrcamento.length > 0 && (
+          <div className="mt-4 rounded-lg border border-slate-200 p-4">
+            <p className="text-xs font-medium text-slate-600 mb-2">Desenhos das peças (ilustrativo)</p>
+            <QuadroPecas pecas={pecasDoOrcamento} />
+          </div>
+        )}
+
+        <div className="mt-4 rounded-lg border border-slate-200 p-4 bg-slate-50">
+          <p className="text-xs font-medium text-slate-600 mb-2">Entrega e frete (opcional)</p>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2">
+            <div className="sm:col-span-3">
+              <label className={labelClasse}>Endereço de entrega</label>
+              <input
+                type="text"
+                value={enderecoEntrega}
+                onChange={(e) => setEnderecoEntrega(e.target.value)}
+                placeholder="Ex: Rua X, 100, Centro, Arapiraca - AL"
+                className={campoClasse}
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={calcularFrete}
+                disabled={calculandoFrete || !enderecoEntrega.trim()}
+                className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
+              >
+                {calculandoFrete ? "Calculando..." : "Calcular frete"}
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div>
+              <label className={labelClasse}>Distância (km)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={distanciaKm}
+                onChange={(e) => {
+                  setDistanciaKm(e.target.value);
+                  const km = Number(e.target.value) || 0;
+                  if (km > 0) setValorFrete(String(aplicarRegraFrete(km)));
+                }}
+                placeholder="0"
+                className={campoClasse}
+              />
+            </div>
+            <div>
+              <label className={labelClasse}>Frete (R$)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={valorFrete}
+                onChange={(e) => setValorFrete(e.target.value)}
+                placeholder="0,00"
+                className={campoClasse}
+              />
+            </div>
+            <p className="col-span-2 self-end text-[11px] text-slate-400 pb-1">
+              Até {Number(freteConfig?.frete_raio_km ?? 10)} km: fixo de {formatarMoeda(freteConfig?.frete_valor_fixo ?? 100)}. Acima: {formatarMoeda(freteConfig?.frete_valor_km ?? 9)}/km × km × 2 (ida e volta). Se o mapa falhar, digite os km na mão.
+            </p>
+          </div>
+        </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
               <label className={labelClasse}>Desconto (R$)</label>
@@ -869,10 +1038,15 @@ function OrcamentosPageInterno() {
                   Desconto: − {formatarMoeda(descontoNumerico)}
                 </p>
               )}
+              {valorFreteNumerico > 0 && (
+                <p className="text-slate-500">
+                  Frete: + {formatarMoeda(valorFreteNumerico)}
+                </p>
+              )}
               <p>
                 <span className="text-slate-500">Total do orçamento: </span>
                 <span className="font-semibold text-lg">
-                  {formatarMoeda(totalComDesconto)}
+                  {formatarMoeda(totalFinalOrcamento)}
                 </span>
               </p>
               <p className="text-xs text-slate-400">Vendedor: {nomeUsuario}</p>
