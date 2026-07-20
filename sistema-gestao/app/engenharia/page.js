@@ -4,7 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus, Trash2, Calculator } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { useSouAdmin, AcessoRestrito, notificar, LinhasEsqueleto } from "@/components/Ui";
+import {
+  useSouAdmin,
+  AcessoRestrito,
+  notificar,
+  confirmar,
+  LinhasEsqueleto,
+} from "@/components/Ui";
 
 // =====================================================================
 // ENGENHARIA DE CUSTOS
@@ -30,6 +36,8 @@ function EngenhariaPage() {
   const [faixas, setFaixas] = useState([]);
   const [faixaAberta, setFaixaAberta] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [formAltura, setFormAltura] = useState(null);
+  const [formVao, setFormVao] = useState(null);
 
   const [simPe, setSimPe] = useState("7,5");
   const [simVao, setSimVao] = useState("16");
@@ -164,6 +172,89 @@ function EngenhariaPage() {
     );
   }
 
+  // As faixas sao livres: da para incluir alturas e vaos alem dos padroes
+  async function criarFaixaAltura() {
+    const min = Number(String(formAltura.min).replace(",", "."));
+    const max = Number(String(formAltura.max).replace(",", "."));
+    if (!min || !max || max <= min) {
+      notificar("Informe a altura de e ate (a segunda maior que a primeira).", "erro");
+      return;
+    }
+    const linhas = vaos.map((v) => {
+      const f = faixasPilar.find((x) => x.vao_min === v);
+      return {
+        papel: "PILAR",
+        altura_min: min,
+        altura_max: max,
+        vao_min: v,
+        vao_max: f ? f.vao_max : v,
+      };
+    });
+    if (linhas.length === 0) {
+      notificar("Crie ao menos uma faixa de vao antes.", "erro");
+      return;
+    }
+    const { error } = await supabase.from("armadura_faixa").insert(linhas);
+    if (error) {
+      notificar("Erro: " + error.message, "erro");
+      return;
+    }
+    setFormAltura(null);
+    await carregar();
+    notificar("Faixa de altura adicionada.");
+  }
+
+  async function criarFaixaVao() {
+    const min = Number(String(formVao.min).replace(",", "."));
+    const max = Number(String(formVao.max).replace(",", "."));
+    if (!min || !max || max <= min) {
+      notificar("Informe o vao de e ate (o segundo maior que o primeiro).", "erro");
+      return;
+    }
+    const linhas = alturas.map((a) => {
+      const f = faixasPilar.find((x) => x.altura_min === a);
+      return {
+        papel: "PILAR",
+        altura_min: a,
+        altura_max: f ? f.altura_max : a,
+        vao_min: min,
+        vao_max: max,
+      };
+    });
+    linhas.push({ papel: "TESOURA", vao_min: min, vao_max: max });
+    const { error } = await supabase.from("armadura_faixa").insert(linhas);
+    if (error) {
+      notificar("Erro: " + error.message, "erro");
+      return;
+    }
+    setFormVao(null);
+    await carregar();
+    notificar("Faixa de vao adicionada (pilar e tesoura).");
+  }
+
+  async function removerFaixaAltura(min) {
+    const ok = await confirmar({
+      titulo: "Remover esta faixa de altura?",
+      texto: "A ferragem lancada nesta linha sera apagada.",
+      perigoso: true,
+    });
+    if (!ok) return;
+    await supabase.from("armadura_faixa").delete().eq("papel", "PILAR").eq("altura_min", min);
+    setFaixaAberta(null);
+    await carregar();
+  }
+
+  async function removerFaixaVao(min) {
+    const ok = await confirmar({
+      titulo: "Remover esta faixa de vao?",
+      texto: "A ferragem desta coluna (pilar e tesoura) sera apagada.",
+      perigoso: true,
+    });
+    if (!ok) return;
+    await supabase.from("armadura_faixa").delete().eq("vao_min", min);
+    setFaixaAberta(null);
+    await carregar();
+  }
   // Resumo curto da ferragem para mostrar na celula da matriz
   function resumoFaixa(f) {
     const itens = f.armadura_faixa_item || [];
@@ -368,7 +459,17 @@ function EngenhariaPage() {
                       const f = faixasPilar.find((x) => x.vao_min === v);
                       return (
                         <th key={v} className="text-left px-3 py-2 font-medium">
-                          Vao {num(v, 0)}-{num(f ? f.vao_max : 0, 0)} m
+                          <span className="inline-flex items-center gap-1">
+                            Vao {num(v, 0)}-{num(f ? f.vao_max : 0, 0)} m
+                            <button
+                              type="button"
+                              onClick={() => removerFaixaVao(v)}
+                              className="text-slate-300 hover:text-red-500"
+                              title="Remover esta faixa de vao"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </span>
                         </th>
                       );
                     })}
@@ -381,7 +482,17 @@ function EngenhariaPage() {
                     return (
                       <tr key={a}>
                         <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">
-                          {num(a, 0)} a {num(amax, 0)} m
+                          <span className="inline-flex items-center gap-1">
+                            {num(a, 0)} a {num(amax, 0)} m
+                            <button
+                              type="button"
+                              onClick={() => removerFaixaAltura(a)}
+                              className="text-slate-300 hover:text-red-500"
+                              title="Remover esta faixa de altura"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </span>
                         </td>
                         {vaos.map((v) => {
                           const f = faixasPilar.find((x) => x.altura_min === a && x.vao_min === v);
@@ -417,6 +528,99 @@ function EngenhariaPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Faixas sao livres: inclua alturas e vaos conforme a demanda */}
+            <div className="flex flex-wrap items-end gap-2 mt-3">
+              {formAltura ? (
+                <div className="flex items-end gap-2 bg-slate-50 rounded-lg p-2 border border-slate-200">
+                  <div>
+                    <label className="block text-[10px] text-slate-500">Altura de (m)</label>
+                    <input
+                      type="text"
+                      value={formAltura.min}
+                      onChange={(e) => setFormAltura({ ...formAltura, min: e.target.value })}
+                      className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500">ate (m)</label>
+                    <input
+                      type="text"
+                      value={formAltura.max}
+                      onChange={(e) => setFormAltura({ ...formAltura, max: e.target.value })}
+                      className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={criarFaixaAltura}
+                    className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-1.5"
+                  >
+                    Criar linha
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormAltura(null)}
+                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setFormAltura({ min: "", max: "" })}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-1.5"
+                >
+                  <Plus size={13} /> Nova faixa de altura
+                </button>
+              )}
+
+              {formVao ? (
+                <div className="flex items-end gap-2 bg-slate-50 rounded-lg p-2 border border-slate-200">
+                  <div>
+                    <label className="block text-[10px] text-slate-500">Vao de (m)</label>
+                    <input
+                      type="text"
+                      value={formVao.min}
+                      onChange={(e) => setFormVao({ ...formVao, min: e.target.value })}
+                      className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500">ate (m)</label>
+                    <input
+                      type="text"
+                      value={formVao.max}
+                      onChange={(e) => setFormVao({ ...formVao, max: e.target.value })}
+                      className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={criarFaixaVao}
+                    className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-1.5"
+                  >
+                    Criar coluna
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormVao(null)}
+                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setFormVao({ min: "", max: "" })}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-1.5"
+                >
+                  <Plus size={13} /> Nova faixa de vao (pilar e tesoura)
+                </button>
+              )}
             </div>
 
             {faixaAberta &&
