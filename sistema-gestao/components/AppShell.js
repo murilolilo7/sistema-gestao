@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   BarChart3,
+  Ruler,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { Notificacoes, Confirmador, useSouAdmin } from "@/components/Ui";
@@ -50,6 +51,7 @@ const MENU = [
     itens: [
       { href: "/precos", label: "Preços", icone: Tags, adminOnly: true },
       { href: "/historico-precos", label: "Histórico de Preços", icone: History, adminOnly: true },
+      { href: "/engenharia", label: "Engenharia de Custos", icone: Ruler, adminOnly: true },
     ],
   },
   {
