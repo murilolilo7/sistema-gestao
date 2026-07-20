@@ -622,8 +622,9 @@ function OrcamentosGalpaoPageInterno() {
     const dedu = decomporComprimentoEmModulos(comprimento);
     const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
     if (comp.papel === "PILAR") {
-      const s = sugestaoPilares();
-      return s ? s.qtd : null;
+      // usa o nº de vãos informado OU o deduzido pelo comprimento
+      if (nV <= 0) return null;
+      return (nV + 1) * (totalGalpoes + 1);
     }
     if (comp.papel === "TERCA") {
       const s = sugestaoTerca(comp);
