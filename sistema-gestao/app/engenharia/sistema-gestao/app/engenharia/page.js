@@ -1,0 +1,679 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, Plus, Trash2, Calculator } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
+import { useSouAdmin, AcessoRestrito, notificar, LinhasEsqueleto } from "@/components/Ui";
+
+// =====================================================================
+// ENGENHARIA DE CUSTOS
+// Traco do concreto (referencia unica), regras de fundacao do pilar,
+// ferragem por faixa (altura livre x vao) e simulador de custo da peca.
+// =====================================================================
+
+const moeda = (v) =>
+  Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const num = (v, c = 2) =>
+  Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: c, maximumFractionDigits: c });
+
+const campoClasse =
+  "w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
+const cardClasse = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";
+
+function EngenhariaPage() {
+  const [loading, setLoading] = useState(true);
+  const [insumos, setInsumos] = useState([]);
+  const [traco, setTraco] = useState(null);
+  const [itensTraco, setItensTraco] = useState([]);
+  const [fundacoes, setFundacoes] = useState([]);
+  const [faixas, setFaixas] = useState([]);
+  const [faixaAberta, setFaixaAberta] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+
+  const [simPe, setSimPe] = useState("7,5");
+  const [simVao, setSimVao] = useState("16");
+  const [simLaje, setSimLaje] = useState(false);
+  const [sim, setSim] = useState(null);
+
+  useEffect(() => {
+    carregar();
+  }, []);
+
+  async function carregar() {
+    setLoading(true);
+    const [rIns, rTraco, rFund, rFaixas] = await Promise.all([
+      supabase
+        .from("insumos")
+        .select("id, nome, unidade, valor_unitario, kg_por_unidade, bitola_mm, kg_por_metro")
+        .order("nome"),
+      supabase
+        .from("traco_concreto")
+        .select("id, nome, resistencia_mpa, densidade_kg_m3, traco_item(id, insumo_id, kg_por_m3)")
+        .eq("ativo", true)
+        .limit(1),
+      supabase.from("fundacao_regra").select("*").order("com_laje").order("altura_ate"),
+      supabase
+        .from("armadura_faixa")
+        .select(
+          "id, papel, altura_min, altura_max, vao_min, vao_max, observacao, armadura_faixa_item(id, tipo, insumo_id, quantidade, acrescimo_m, espacamento_cm, perimetro_m)"
+        )
+        .eq("ativo", true)
+        .order("papel")
+        .order("altura_min")
+        .order("vao_min"),
+    ]);
+    setInsumos(rIns.data || []);
+    const t = (rTraco.data || [])[0] || null;
+    setTraco(t);
+    setItensTraco(t ? (t.traco_item || []).map((i) => ({ ...i })) : []);
+    setFundacoes(rFund.data || []);
+    setFaixas(rFaixas.data || []);
+    setLoading(false);
+  }
+  const acos = insumos.filter((i) => i.bitola_mm);
+  const insumoPorId = (id) => insumos.find((i) => i.id === id);
+
+  // Custo de 1 m3: converte kg do traco para a unidade de compra do insumo
+  const custoM3 = itensTraco.reduce((s, it) => {
+    const ins = insumoPorId(it.insumo_id);
+    if (!ins) return s;
+    const kgUn = Number(ins.kg_por_unidade) || 1;
+    return s + ((Number(it.kg_por_m3) || 0) / kgUn) * (Number(ins.valor_unitario) || 0);
+  }, 0);
+
+  const somaTraco = itensTraco.reduce((s, i) => s + (Number(i.kg_por_m3) || 0), 0);
+
+  async function salvarTraco() {
+    setSalvando(true);
+    for (const it of itensTraco) {
+      await supabase
+        .from("traco_item")
+        .update({ kg_por_m3: Number(String(it.kg_por_m3).replace(",", ".")) || 0 })
+        .eq("id", it.id);
+    }
+    setSalvando(false);
+    notificar("Traco salvo. O novo custo do m3 ja vale para todas as pecas.");
+  }
+
+  async function salvarConversao(insumoId, valor) {
+    const v = Number(String(valor).replace(",", ".")) || null;
+    setInsumos((a) => a.map((i) => (i.id === insumoId ? { ...i, kg_por_unidade: v } : i)));
+    await supabase.from("insumos").update({ kg_por_unidade: v }).eq("id", insumoId);
+  }
+
+  async function salvarFundacao(id, valor) {
+    const v = Number(String(valor).replace(",", ".")) || 0;
+    setFundacoes((a) => a.map((f) => (f.id === id ? { ...f, profundidade_m: v } : f)));
+    await supabase.from("fundacao_regra").update({ profundidade_m: v }).eq("id", id);
+  }
+
+  async function adicionarItemFaixa(faixaId, tipo) {
+    const aco = acos[0];
+    if (!aco) {
+      notificar("Cadastre os acos em Precos antes.", "erro");
+      return;
+    }
+    const base =
+      tipo === "ESTRIBO"
+        ? { faixa_id: faixaId, tipo, insumo_id: aco.id, espacamento_cm: 15, perimetro_m: 1.2 }
+        : { faixa_id: faixaId, tipo, insumo_id: aco.id, quantidade: 4, acrescimo_m: 0 };
+    const { data, error } = await supabase
+      .from("armadura_faixa_item")
+      .insert(base)
+      .select()
+      .single();
+    if (error) {
+      notificar("Erro ao adicionar: " + error.message, "erro");
+      return;
+    }
+    setFaixas((a) =>
+      a.map((f) =>
+        f.id === faixaId
+          ? { ...f, armadura_faixa_item: [...(f.armadura_faixa_item || []), data] }
+          : f
+      )
+    );
+  }
+
+  async function atualizarItemFaixa(faixaId, itemId, campo, valor) {
+    setFaixas((a) =>
+      a.map((f) =>
+        f.id === faixaId
+          ? {
+              ...f,
+              armadura_faixa_item: f.armadura_faixa_item.map((i) =>
+                i.id === itemId ? { ...i, [campo]: valor } : i
+              ),
+            }
+          : f
+      )
+    );
+    const v = valor === "" ? null : Number(String(valor).replace(",", "."));
+    await supabase.from("armadura_faixa_item").update({ [campo]: v }).eq("id", itemId);
+  }
+
+  async function removerItemFaixa(faixaId, itemId) {
+    await supabase.from("armadura_faixa_item").delete().eq("id", itemId);
+    setFaixas((a) =>
+      a.map((f) =>
+        f.id === faixaId
+          ? { ...f, armadura_faixa_item: f.armadura_faixa_item.filter((i) => i.id !== itemId) }
+          : f
+      )
+    );
+  }
+
+  // Resumo curto da ferragem para mostrar na celula da matriz
+  function resumoFaixa(f) {
+    const itens = f.armadura_faixa_item || [];
+    if (itens.length === 0) return null;
+    return itens
+      .map((i) => {
+        const ins = insumoPorId(i.insumo_id);
+        const bit = ins && ins.bitola_mm ? String(ins.bitola_mm).replace(".", ",") : "?";
+        return i.tipo === "ESTRIBO"
+          ? "est " + bit + " c/" + num(i.espacamento_cm, 0)
+          : num(i.quantidade, 0) + " x " + bit;
+      })
+      .join(" + ");
+  }
+
+  async function simular() {
+    const pe = Number(String(simPe).replace(",", "."));
+    const vao = Number(String(simVao).replace(",", "."));
+    if (!pe || !vao) {
+      notificar("Informe o pe-direito e o vao.", "erro");
+      return;
+    }
+    const { data, error } = await supabase.rpc("calcular_pilar", {
+      pe_direito_input: pe,
+      vao_input: vao,
+      com_laje_input: simLaje,
+    });
+    if (error) {
+      notificar("Erro no calculo: " + error.message, "erro");
+      return;
+    }
+    setSim(data);
+  }
+
+  const faixasPilar = faixas.filter((f) => f.papel === "PILAR");
+  const faixasTesoura = faixas.filter((f) => f.papel === "TESOURA");
+  const alturas = [...new Set(faixasPilar.map((f) => f.altura_min))].sort((a, b) => a - b);
+  const vaos = [...new Set(faixasPilar.map((f) => f.vao_min))].sort((a, b) => a - b);
+  return (
+    <div>
+      <Link
+        href="/precos"
+        className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-3"
+      >
+        <ArrowLeft size={15} /> Voltar para Precos
+      </Link>
+      <h1 className="text-2xl font-bold text-slate-900 mb-1">Engenharia de custos</h1>
+      <p className="text-sm text-slate-500 mb-6">
+        O traco vale para todas as pecas: mudou o preco de um insumo, o custo de tudo se ajusta.
+      </p>
+
+      {loading ? (
+        <div className={cardClasse}>
+          <LinhasEsqueleto linhas={6} />
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {/* ---------- 1. TRACO DO CONCRETO ---------- */}
+          <div className={cardClasse}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+              <p className="text-sm font-semibold text-slate-700">
+                Traco do concreto {traco ? "- " + traco.nome : ""}
+              </p>
+              <p className="text-sm">
+                <span className="text-slate-500">Custo de 1 m3: </span>
+                <b className="text-emerald-700 text-lg">{moeda(custoM3)}</b>
+              </p>
+            </div>
+            <p className="text-xs text-slate-500 mb-3">
+              Quantidades em kg por m3 (laudo do laboratorio). A coluna kg por unidade converte
+              para a unidade de compra: lata, litro ou kg.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-slate-500 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left px-2 py-2 font-medium">Insumo</th>
+                    <th className="text-left px-2 py-2 font-medium">kg por m3</th>
+                    <th className="text-left px-2 py-2 font-medium">kg por unidade</th>
+                    <th className="text-left px-2 py-2 font-medium">Consumo</th>
+                    <th className="text-right px-2 py-2 font-medium">Custo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {itensTraco.map((it) => {
+                    const ins = insumoPorId(it.insumo_id);
+                    if (!ins) return null;
+                    const kgUn = Number(ins.kg_por_unidade) || 1;
+                    const consumo = (Number(it.kg_por_m3) || 0) / kgUn;
+                    const custo = consumo * (Number(ins.valor_unitario) || 0);
+                    return (
+                      <tr key={it.id}>
+                        <td className="px-2 py-2 text-slate-700">
+                          {ins.nome}
+                          <span className="text-xs text-slate-400">
+                            {" "}({moeda(ins.valor_unitario)}/{ins.unidade})
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 w-28">
+                          <input
+                            type="text"
+                            value={it.kg_por_m3}
+                            onChange={(e) =>
+                              setItensTraco((a) =>
+                                a.map((x) => (x.id === it.id ? { ...x, kg_por_m3: e.target.value } : x))
+                              )
+                            }
+                            className={campoClasse}
+                          />
+                        </td>
+                        <td className="px-2 py-1.5 w-28">
+                          <input
+                            type="text"
+                            defaultValue={ins.kg_por_unidade ?? ""}
+                            onBlur={(e) => salvarConversao(ins.id, e.target.value)}
+                            className={campoClasse}
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-slate-600 whitespace-nowrap">
+                          {num(consumo)} {ins.unidade}
+                        </td>
+                        <td className="px-2 py-2 text-right text-slate-700 whitespace-nowrap">
+                          {moeda(custo)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-slate-200">
+                    <td className="px-2 py-2 text-xs text-slate-500">
+                      Soma: {num(somaTraco, 2)} kg/m3
+                      {traco && traco.densidade_kg_m3
+                        ? " (densidade do laudo: " + num(traco.densidade_kg_m3, 2) + ")"
+                        : ""}
+                    </td>
+                    <td colSpan={3}></td>
+                    <td className="px-2 py-2 text-right font-bold text-slate-900">{moeda(custoM3)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <button
+              type="button"
+              onClick={salvarTraco}
+              disabled={salvando}
+              className="mt-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
+            >
+              {salvando ? "Salvando..." : "Salvar traco"}
+            </button>
+          </div>
+
+          {/* ---------- 2. FUNDACAO ---------- */}
+          <div className={cardClasse}>
+            <p className="text-sm font-semibold text-slate-700 mb-1">Fundacao do pilar</p>
+            <p className="text-xs text-slate-500 mb-3">
+              A altura informada no orcamento e o pe-direito LIVRE. O trecho enterrado entra no
+              comprimento da peca (concreto e ferragem).
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[false, true].map((laje) => (
+                <div key={String(laje)}>
+                  <p className="text-xs font-semibold text-slate-600 mb-1.5">
+                    {laje ? "Galpao COM laje" : "Galpao SEM laje"}
+                  </p>
+                  <div className="space-y-1.5">
+                    {fundacoes
+                      .filter((f) => f.com_laje === laje)
+                      .map((f) => (
+                        <div key={f.id} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 flex-1">
+                            {f.altura_ate >= 900
+                              ? "acima da faixa anterior"
+                              : "pe-direito ate " + num(f.altura_ate, 2) + " m"}
+                          </span>
+                          <input
+                            type="text"
+                            defaultValue={f.profundidade_m}
+                            onBlur={(e) => salvarFundacao(f.id, e.target.value)}
+                            className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <span className="text-xs text-slate-400">m</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* ---------- 3. MATRIZ DE FERRAGEM DO PILAR ---------- */}
+          <div className={cardClasse}>
+            <p className="text-sm font-semibold text-slate-700 mb-1">Ferragem do pilar por faixa</p>
+            <p className="text-xs text-slate-500 mb-3">
+              Clique na celula para lancar as barras e os estribos daquela combinacao.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border border-slate-200 rounded-lg">
+                <thead className="bg-slate-50 text-xs text-slate-600">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Altura livre</th>
+                    {vaos.map((v) => {
+                      const f = faixasPilar.find((x) => x.vao_min === v);
+                      return (
+                        <th key={v} className="text-left px-3 py-2 font-medium">
+                          Vao {num(v, 0)}-{num(f ? f.vao_max : 0, 0)} m
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {alturas.map((a) => {
+                    const linha = faixasPilar.filter((f) => f.altura_min === a);
+                    const amax = linha[0] ? linha[0].altura_max : 0;
+                    return (
+                      <tr key={a}>
+                        <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">
+                          {num(a, 0)} a {num(amax, 0)} m
+                        </td>
+                        {vaos.map((v) => {
+                          const f = faixasPilar.find((x) => x.altura_min === a && x.vao_min === v);
+                          if (!f)
+                            return (
+                              <td key={v} className="px-3 py-2 text-slate-300">
+                                -
+                              </td>
+                            );
+                          const resumo = resumoFaixa(f);
+                          const aberta = faixaAberta === f.id;
+                          return (
+                            <td key={v} className="px-2 py-1.5 align-top">
+                              <button
+                                type="button"
+                                onClick={() => setFaixaAberta(aberta ? null : f.id)}
+                                className={
+                                  "w-full text-left rounded-lg px-2 py-1.5 text-xs transition " +
+                                  (aberta
+                                    ? "bg-emerald-600 text-white"
+                                    : resumo
+                                    ? "bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                                    : "bg-slate-50 text-slate-400 hover:bg-slate-100")
+                                }
+                              >
+                                {resumo || "cadastrar"}
+                              </button>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {faixaAberta &&
+              faixas
+                .filter((f) => f.id === faixaAberta)
+                .map((f) => (
+                  <div
+                    key={f.id}
+                    className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4"
+                  >
+                    <p className="text-sm font-semibold text-slate-700 mb-2">
+                      {f.papel === "PILAR"
+                        ? "Pilar de " +
+                          num(f.altura_min, 0) +
+                          " a " +
+                          num(f.altura_max, 0) +
+                          " m - vao " +
+                          num(f.vao_min, 0) +
+                          " a " +
+                          num(f.vao_max, 0) +
+                          " m"
+                        : "Tesoura - vao " + num(f.vao_min, 0) + " a " + num(f.vao_max, 0) + " m"}
+                    </p>
+                    <div className="space-y-2">
+                      {(f.armadura_faixa_item || []).map((i) => (
+                        <div
+                          key={i.id}
+                          className="flex flex-wrap items-end gap-2 bg-white rounded-lg p-2 border border-slate-200"
+                        >
+                          <span className="text-xs font-semibold text-slate-500 w-16">
+                            {i.tipo === "ESTRIBO" ? "Estribo" : "Barras"}
+                          </span>
+                          <div>
+                            <label className="block text-[10px] text-slate-500">Bitola</label>
+                            <select
+                              value={i.insumo_id}
+                              onChange={(e) => atualizarItemFaixa(f.id, i.id, "insumo_id", e.target.value)}
+                              className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                            >
+                              {acos.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.nome}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {i.tipo === "ESTRIBO" ? (
+                            <>
+                              <div className="w-24">
+                                <label className="block text-[10px] text-slate-500">Espacamento (cm)</label>
+                                <input
+                                  type="text"
+                                  value={i.espacamento_cm ?? ""}
+                                  onChange={(e) =>
+                                    atualizarItemFaixa(f.id, i.id, "espacamento_cm", e.target.value)
+                                  }
+                                  className={campoClasse}
+                                />
+                              </div>
+                              <div className="w-28">
+                                <label className="block text-[10px] text-slate-500">Cada um tem (m)</label>
+                                <input
+                                  type="text"
+                                  value={i.perimetro_m ?? ""}
+                                  onChange={(e) =>
+                                    atualizarItemFaixa(f.id, i.id, "perimetro_m", e.target.value)
+                                  }
+                                  className={campoClasse}
+                                />
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="w-20">
+                                <label className="block text-[10px] text-slate-500">Quantas</label>
+                                <input
+                                  type="text"
+                                  value={i.quantidade ?? ""}
+                                  onChange={(e) =>
+                                    atualizarItemFaixa(f.id, i.id, "quantidade", e.target.value)
+                                  }
+                                  className={campoClasse}
+                                />
+                              </div>
+                              <div className="w-28">
+                                <label className="block text-[10px] text-slate-500">Dobra extra (m)</label>
+                                <input
+                                  type="text"
+                                  value={i.acrescimo_m ?? ""}
+                                  onChange={(e) =>
+                                    atualizarItemFaixa(f.id, i.id, "acrescimo_m", e.target.value)
+                                  }
+                                  className={campoClasse}
+                                />
+                              </div>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removerItemFaixa(f.id, i.id)}
+                            className="text-slate-400 hover:text-red-600 p-1"
+                            title="Remover"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        type="button"
+                        onClick={() => adicionarItemFaixa(f.id, "LONGITUDINAL")}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-1.5"
+                      >
+                        <Plus size={13} /> Barras longitudinais
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => adicionarItemFaixa(f.id, "ESTRIBO")}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-1.5"
+                      >
+                        <Plus size={13} /> Estribos
+                      </button>
+                    </div>
+                  </div>
+                ))}
+          </div>
+
+          {/* ---------- 4. TESOURAS ---------- */}
+          <div className={cardClasse}>
+            <p className="text-sm font-semibold text-slate-700 mb-1">Ferragem da tesoura por vao</p>
+            <p className="text-xs text-slate-500 mb-3">Clique para lancar a ferragem de cada vao.</p>
+            <div className="flex flex-wrap gap-2">
+              {faixasTesoura.map((f) => {
+                const resumo = resumoFaixa(f);
+                const aberta = faixaAberta === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFaixaAberta(aberta ? null : f.id)}
+                    className={
+                      "rounded-lg px-3 py-2 text-xs transition border text-left " +
+                      (aberta
+                        ? "bg-emerald-600 text-white border-emerald-600"
+                        : resumo
+                        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                        : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100")
+                    }
+                  >
+                    <span className="font-medium block">
+                      Vao {num(f.vao_min, 0)}-{num(f.vao_max, 0)} m
+                    </span>
+                    <span>{resumo || "cadastrar"}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ---------- 5. SIMULADOR ---------- */}
+          <div className={cardClasse}>
+            <p className="text-sm font-semibold text-slate-700 mb-1">Simulador de custo do pilar</p>
+            <p className="text-xs text-slate-500 mb-3">
+              Informe a medida LIVRE: o sistema soma a fundacao, calcula o concreto pelo traco e
+              busca a ferragem da faixa.
+            </p>
+            <div className="flex flex-wrap items-end gap-3 mb-3">
+              <div className="w-32">
+                <label className="block text-xs text-slate-500 mb-1">Pe-direito livre (m)</label>
+                <input
+                  type="text"
+                  value={simPe}
+                  onChange={(e) => setSimPe(e.target.value)}
+                  className={campoClasse}
+                />
+              </div>
+              <div className="w-32">
+                <label className="block text-xs text-slate-500 mb-1">Vao da tesoura (m)</label>
+                <input
+                  type="text"
+                  value={simVao}
+                  onChange={(e) => setSimVao(e.target.value)}
+                  className={campoClasse}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-600 pb-2">
+                <input
+                  type="checkbox"
+                  checked={simLaje}
+                  onChange={(e) => setSimLaje(e.target.checked)}
+                  className="rounded"
+                />
+                Galpao com laje
+              </label>
+              <button
+                type="button"
+                onClick={simular}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 transition"
+              >
+                <Calculator size={15} /> Calcular
+              </button>
+            </div>
+
+            {sim && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm space-y-1">
+                {sim.erro ? (
+                  <p className="text-red-600">{sim.erro}</p>
+                ) : (
+                  <>
+                    <p className="text-slate-600">
+                      Fundacao: <b>{num(sim.fundacao_m, 2)} m</b> - peca fabricada:{" "}
+                      <b className="text-slate-900">{num(sim.comprimento_total_m, 2)} m</b>
+                    </p>
+                    <p className="text-slate-600">
+                      Volume: <b>{num(sim.volume_m3, 3)} m3</b> - concreto:{" "}
+                      <b>{moeda(sim.custo_concreto)}</b>
+                      <span className="text-xs text-slate-400">
+                        {" "}({moeda(sim.custo_m3_concreto)}/m3)
+                      </span>
+                    </p>
+                    {sim.aviso ? (
+                      <p className="text-amber-700 bg-amber-50 rounded px-2 py-1 text-xs">{sim.aviso}</p>
+                    ) : (
+                      <>
+                        {(sim.aco || []).map((a, k) => (
+                          <p key={k} className="text-xs text-slate-500">
+                            {a.tipo === "ESTRIBO" ? "Estribos" : "Barras"} {a.insumo}:{" "}
+                            {num(a.quantidade, 0)} un - {num(a.metros, 1)} m - {num(a.peso_kg, 1)} kg -{" "}
+                            {moeda(a.custo)}
+                          </p>
+                        ))}
+                        <p className="text-slate-600">
+                          Aco: <b>{num(sim.peso_aco_kg, 1)} kg</b> - <b>{moeda(sim.custo_aco)}</b>
+                        </p>
+                      </>
+                    )}
+                    <p className="text-base pt-1 border-t border-slate-200 mt-2">
+                      <span className="text-slate-500">Material da peca: </span>
+                      <b className="text-emerald-700">{moeda(sim.custo_material)}</b>
+                      <span className="text-xs text-slate-400"> (falta mao de obra e perdas)</span>
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Porteiro: esta tela e exclusiva de administradores.
+export default function EngenhariaPageProtegida() {
+  const souAdmin = useSouAdmin();
+  if (souAdmin === false) return <AcessoRestrito />;
+  if (souAdmin !== true) return null;
+  return <EngenhariaPage />;
+}
