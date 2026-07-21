@@ -119,12 +119,30 @@ function BadgeStatus({ status }) {
 
 // Recalcula a quantidade de FUNDAÇÃO = soma das quantidades de todos os
 // itens cujo papel é PILAR (1 dia de fundação por pilar).
+// Produtividade de montagem por peca (preenchida quando as composicoes carregam)
+let mapaMontagem = {};
+
+// Diarias de MONTAGEM: soma quantidade / pecas montadas por dia de cada item.
+// Ex: 7 tesouras (4/dia) + 14 pilares (3/dia) + 48 tercas (30/dia) = 8 diarias.
+function recalcularMontagem(listaItens) {
+  const dias = listaItens.reduce((soma, i) => {
+    const porDia = Number(mapaMontagem[i.nome]) || 0;
+    if (!porDia) return soma;
+    return soma + (Number(i.quantidade) || 0) / porDia;
+  }, 0);
+  if (dias <= 0) return listaItens;
+  const diarias = Math.ceil(dias * 10) / 10;
+  return listaItens.map((i) =>
+    i.nome === "MONTAGEM" && i.secao !== "laje" ? { ...i, quantidade: diarias } : i
+  );
+}
+
 function recalcularFundacao(listaItens) {
   const totalPilares = listaItens.reduce(
     (soma, i) => (i.papel === "PILAR" ? soma + Number(i.quantidade || 0) : soma),
     0
   );
-  return listaItens.map((i) => (i.nome === "FUNDAÇÃO" ? { ...i, quantidade: totalPilares } : i));
+  return recalcularMontagem(listaItens.map((i) => (i.nome === "FUNDAÇÃO" ? { ...i, quantidade: totalPilares } : i)));
 }
 
 function OrcamentosGalpaoPageInterno() {
@@ -202,10 +220,18 @@ function OrcamentosGalpaoPageInterno() {
   function buscarClientes() {
     return supabase.from("clientes").select("id, nome").order("nome");
   }
+  // Mantem o mapa de produtividade em dia com o catalogo
+  useEffect(() => {
+    mapaMontagem = {};
+    composicoes.forEach((comp) => {
+      if (comp.montagem_por_dia) mapaMontagem[comp.nome] = Number(comp.montagem_por_dia);
+    });
+  }, [composicoes]);
+
   function buscarComposicoes() {
     return supabase
       .from("composicoes_galpao")
-      .select("id, codigo, nome, unidade, preco, papel, comprimento_referencia")
+      .select("id, codigo, nome, unidade, preco, papel, comprimento_referencia, montagem_por_dia")
       .order("nome");
   }
   function buscarModelos() {
