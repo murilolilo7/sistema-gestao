@@ -872,7 +872,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         },
       ];
-      return composicao.papel === "PILAR" ? recalcularFundacao(novos) : novos;
+      return composicao.papel === "PILAR" ? recalcularFundacao(novos) : recalcularMontagem(novos);
     });
     setComposicaoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
@@ -1042,7 +1042,7 @@ function OrcamentosGalpaoPageInterno() {
     setItens((atual) => {
       const itemRemovido = atual.find((i) => i.chave === chave);
       const restantes = atual.filter((i) => i.chave !== chave);
-      return itemRemovido?.papel === "PILAR" ? recalcularFundacao(restantes) : restantes;
+      return itemRemovido?.papel === "PILAR" ? recalcularFundacao(restantes) : recalcularMontagem(restantes);
     });
   }
 
