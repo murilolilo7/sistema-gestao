@@ -192,7 +192,10 @@ function EngenhariaPage() {
 
   async function salvarParametro(campo, valor) {
     if (!param) return;
-    const v = campo === "modo_calculo_pilar" ? valor : Number(String(valor).replace(",", ".")) || 0;
+    const v =
+      campo === "modo_calculo_pilar" || typeof valor === "boolean"
+        ? valor
+        : Number(String(valor).replace(",", ".")) || 0;
     setParam((p) => ({ ...p, [campo]: v }));
     await supabase.from("parametros_engenharia").update({ [campo]: v }).eq("id", param.id);
     notificar("Parametro salvo.");
@@ -404,6 +407,20 @@ function EngenhariaPage() {
                     className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </div>
+                <label className="flex items-center gap-2 text-sm text-slate-700 pb-2 bg-white rounded-lg px-3 py-2 border border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={!!param.pilar_automatico}
+                    onChange={(e) => salvarParametro("pilar_automatico", e.target.checked)}
+                    className="rounded"
+                  />
+                  <span>
+                    Gerar os pilares automaticamente no orçamento
+                    <span className="block text-[11px] text-slate-400">
+                      Desligado: voce escolhe o pilar na lista, como sempre.
+                    </span>
+                  </span>
+                </label>
                 <p className="text-xs text-slate-500 pb-2">
                   Exemplo: pilar de 0,73 m3 sai por{" "}
                   <b>{moeda(0.73 * (Number(param.valor_m3_armado) || 0))}</b>
