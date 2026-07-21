@@ -347,7 +347,8 @@ function OrcamentosGalpaoPageInterno() {
         const dedu = decomporComprimentoEmModulos(comprimento);
         const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
         if (nV <= 0) return;
-        const qtd = (nV + 1) * totalGalpoes;
+        // (linhas de pilar) x (fileiras): 1 galpao = 2 fileiras
+        const qtd = (nV + 1) * (totalGalpoes + 1);
         const nome =
           "PILAR " +
           doisDec(data.secao_largura_m, 2) +
