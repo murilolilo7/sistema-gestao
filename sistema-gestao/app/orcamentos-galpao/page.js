@@ -1792,6 +1792,19 @@ function OrcamentosGalpaoPageInterno() {
                   placeholder="Ex: 20"
                   className={campoClasse}
                 />
+                {(() => {
+                  const d = decomporComprimentoEmModulos(comprimento);
+                  if (!d) return null;
+                  const totalVaos = d.vaos5 + d.vaos6;
+                  const partes = [];
+                  if (d.vaos5) partes.push(d.vaos5 + " de 5m");
+                  if (d.vaos6) partes.push(d.vaos6 + " de 6m");
+                  return (
+                    <p className="text-[11px] text-emerald-700 mt-1">
+                      Sugestão: {totalVaos} vão(s) — {partes.join(" + ")}
+                    </p>
+                  );
+                })()}
               </div>
               <div>
                 <label className={labelClasse}>Pé direito (m)</label>
