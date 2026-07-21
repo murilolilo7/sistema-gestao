@@ -20,6 +20,10 @@ import {
 
 const moeda = (v) =>
   Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// Campos de digitacao sempre com virgula (padrao brasileiro)
+const txt = (v) =>
+  v === null || v === undefined || v === "" ? "" : String(v).replace(".", ",");
+
 const num = (v, c = 2) =>
   Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: c, maximumFractionDigits: c });
 
@@ -403,7 +407,7 @@ function EngenhariaPage() {
                         <td className="px-2 py-1.5 w-28">
                           <input
                             type="text"
-                            value={it.kg_por_m3}
+                            value={txt(it.kg_por_m3)}
                             onChange={(e) =>
                               setItensTraco((a) =>
                                 a.map((x) => (x.id === it.id ? { ...x, kg_por_m3: e.target.value } : x))
@@ -415,7 +419,7 @@ function EngenhariaPage() {
                         <td className="px-2 py-1.5 w-28">
                           <input
                             type="text"
-                            defaultValue={ins.kg_por_unidade ?? ""}
+                            defaultValue={txt(ins.kg_por_unidade)}
                             onBlur={(e) => salvarConversao(ins.id, e.target.value)}
                             className={campoClasse}
                           />
@@ -479,7 +483,7 @@ function EngenhariaPage() {
                           </span>
                           <input
                             type="text"
-                            defaultValue={f.profundidade_m}
+                            defaultValue={txt(f.profundidade_m)}
                             onBlur={(e) => salvarFundacao(f.id, e.target.value)}
                             className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           />
@@ -697,7 +701,7 @@ function EngenhariaPage() {
                           <label className="block text-[10px] text-slate-500">Secao: largura (m)</label>
                           <input
                             type="text"
-                            defaultValue={f.secao_largura_m ?? ""}
+                            defaultValue={txt(f.secao_largura_m)}
                             onBlur={(e) => salvarSecaoFaixa(f.id, "secao_largura_m", e.target.value)}
                             className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           />
@@ -706,7 +710,7 @@ function EngenhariaPage() {
                           <label className="block text-[10px] text-slate-500">altura (m)</label>
                           <input
                             type="text"
-                            defaultValue={f.secao_altura_m ?? ""}
+                            defaultValue={txt(f.secao_altura_m)}
                             onBlur={(e) => salvarSecaoFaixa(f.id, "secao_altura_m", e.target.value)}
                             className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           />
@@ -745,7 +749,7 @@ function EngenhariaPage() {
                                 <label className="block text-[10px] text-slate-500">Espacamento (cm)</label>
                                 <input
                                   type="text"
-                                  value={i.espacamento_cm ?? ""}
+                                  value={txt(i.espacamento_cm)}
                                   onChange={(e) =>
                                     atualizarItemFaixa(f.id, i.id, "espacamento_cm", e.target.value)
                                   }
@@ -756,7 +760,7 @@ function EngenhariaPage() {
                                 <label className="block text-[10px] text-slate-500">Cada um tem (m)</label>
                                 <input
                                   type="text"
-                                  value={i.perimetro_m ?? ""}
+                                  value={txt(i.perimetro_m)}
                                   onChange={(e) =>
                                     atualizarItemFaixa(f.id, i.id, "perimetro_m", e.target.value)
                                   }
@@ -770,7 +774,7 @@ function EngenhariaPage() {
                                 <label className="block text-[10px] text-slate-500">Quantas</label>
                                 <input
                                   type="text"
-                                  value={i.quantidade ?? ""}
+                                  value={txt(i.quantidade)}
                                   onChange={(e) =>
                                     atualizarItemFaixa(f.id, i.id, "quantidade", e.target.value)
                                   }
@@ -781,7 +785,7 @@ function EngenhariaPage() {
                                 <label className="block text-[10px] text-slate-500">Dobra extra (m)</label>
                                 <input
                                   type="text"
-                                  value={i.acrescimo_m ?? ""}
+                                  value={txt(i.acrescimo_m)}
                                   onChange={(e) =>
                                     atualizarItemFaixa(f.id, i.id, "acrescimo_m", e.target.value)
                                   }
@@ -879,7 +883,7 @@ function EngenhariaPage() {
                         <td className="px-2 py-1.5">
                           <input
                             type="text"
-                            defaultValue={a.minutos}
+                            defaultValue={txt(a.minutos)}
                             onBlur={(e) => salvarAtividade(a.id, "minutos", e.target.value)}
                             className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           />
@@ -898,7 +902,7 @@ function EngenhariaPage() {
                           {a.tipo === "POR_METRO" ? (
                             <input
                               type="text"
-                              defaultValue={a.referencia_m ?? ""}
+                              defaultValue={txt(a.referencia_m)}
                               onBlur={(e) => salvarAtividade(a.id, "referencia_m", e.target.value)}
                               className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
@@ -924,7 +928,7 @@ function EngenhariaPage() {
                       </label>
                       <input
                         type="text"
-                        defaultValue={e.quantidade}
+                        defaultValue={txt(e.quantidade)}
                         onBlur={(ev) => salvarEquipe(e.id, ev.target.value)}
                         className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       />
