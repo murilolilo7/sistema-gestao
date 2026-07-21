@@ -45,6 +45,7 @@ function EngenhariaPage() {
   const [atividades, setAtividades] = useState([]);
   const [equipe, setEquipe] = useState([]);
   const [funcoes, setFuncoes] = useState([]);
+  const [param, setParam] = useState(null);
 
   const [simPe, setSimPe] = useState("7,5");
   const [simVao, setSimVao] = useState("16");
@@ -92,6 +93,8 @@ function EngenhariaPage() {
     setAtividades(rAtiv.data || []);
     setEquipe(rEq.data || []);
     setFuncoes(rFun.data || []);
+    const rPar = await supabase.from("parametros_engenharia").select("*").order("id").limit(1);
+    setParam((rPar.data || [])[0] || null);
     setLoading(false);
   }
   const acos = insumos.filter((i) => i.bitola_mm);
@@ -185,6 +188,14 @@ function EngenhariaPage() {
           : f
       )
     );
+  }
+
+  async function salvarParametro(campo, valor) {
+    if (!param) return;
+    const v = campo === "modo_calculo_pilar" ? valor : Number(String(valor).replace(",", ".")) || 0;
+    setParam((p) => ({ ...p, [campo]: v }));
+    await supabase.from("parametros_engenharia").update({ [campo]: v }).eq("id", param.id);
+    notificar("Parametro salvo.");
   }
 
   async function salvarAtividade(id, campo, valor) {
@@ -363,6 +374,44 @@ function EngenhariaPage() {
         </div>
       ) : (
         <div className="space-y-5">
+          {/* ---------- MODO DE CALCULO ---------- */}
+          {param && (
+            <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-5">
+              <p className="text-sm font-semibold text-slate-700 mb-1">Como o pilar e calculado</p>
+              <p className="text-xs text-slate-500 mb-3">
+                Pelo valor do m3 de concreto armado (rapido, o numero validado no caixa) ou pela
+                composicao detalhada (concreto + aco + mao de obra). O volume sempre sai do
+                calculo: fundacao somada e secao da peca.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Modo</label>
+                  <select
+                    value={param.modo_calculo_pilar}
+                    onChange={(e) => salvarParametro("modo_calculo_pilar", e.target.value)}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="M3">Pelo valor do m3 de concreto armado</option>
+                    <option value="DETALHADO">Pela composicao detalhada</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Valor do m3 armado (R$)</label>
+                  <input
+                    type="text"
+                    defaultValue={txt(param.valor_m3_armado)}
+                    onBlur={(e) => salvarParametro("valor_m3_armado", e.target.value)}
+                    className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 pb-2">
+                  Exemplo: pilar de 0,73 m3 sai por{" "}
+                  <b>{moeda(0.73 * (Number(param.valor_m3_armado) || 0))}</b>
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* ---------- 1. TRACO DO CONCRETO ---------- */}
           <div className={cardClasse}>
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
@@ -1036,11 +1085,19 @@ function EngenhariaPage() {
                       <span className="text-slate-500"> + mao de obra: </span>
                       <b>{moeda(sim.custo_mao_de_obra)}</b>
                     </p>
-                    <p className="text-base">
-                      <span className="text-slate-500">Custo da peca: </span>
-                      <b className="text-emerald-700">{moeda(sim.custo_total)}</b>
-                      <span className="text-xs text-slate-400"> (falta perdas e BDI)</span>
-                    </p>
+                    <div className="pt-2 border-t border-slate-200 mt-2 space-y-1">
+                      <p className="text-base">
+                        <span className="text-slate-500">Custo da peca: </span>
+                        <b className="text-emerald-700">{moeda(sim.custo_total)}</b>
+                        <span className="text-xs text-slate-400">
+                          {" "}({sim.modo === "M3" ? "pelo m3 de concreto armado" : "composicao detalhada"})
+                        </span>
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        Comparativo: pelo m3 = {moeda(sim.custo_por_m3)} ({num(sim.volume_m3, 3)} m3 x{" "}
+                        {moeda(sim.valor_m3_armado)}) | detalhado = {moeda(sim.custo_detalhado)}
+                      </p>
+                    </div>
                   </>
                 )}
               </div>
