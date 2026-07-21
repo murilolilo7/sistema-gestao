@@ -38,6 +38,9 @@ function EngenhariaPage() {
   const [salvando, setSalvando] = useState(false);
   const [formAltura, setFormAltura] = useState(null);
   const [formVao, setFormVao] = useState(null);
+  const [atividades, setAtividades] = useState([]);
+  const [equipe, setEquipe] = useState([]);
+  const [funcoes, setFuncoes] = useState([]);
 
   const [simPe, setSimPe] = useState("7,5");
   const [simVao, setSimVao] = useState("16");
@@ -77,6 +80,14 @@ function EngenhariaPage() {
     setItensTraco(t ? (t.traco_item || []).map((i) => ({ ...i })) : []);
     setFundacoes(rFund.data || []);
     setFaixas(rFaixas.data || []);
+    const [rAtiv, rEq, rFun] = await Promise.all([
+      supabase.from("mao_obra_atividade").select("*").order("ordem"),
+      supabase.from("mao_obra_equipe").select("id, papel, quantidade, mao_de_obra_id").order("id"),
+      supabase.from("mao_de_obra").select("id, funcao, valor_hora").order("funcao"),
+    ]);
+    setAtividades(rAtiv.data || []);
+    setEquipe(rEq.data || []);
+    setFuncoes(rFun.data || []);
     setLoading(false);
   }
   const acos = insumos.filter((i) => i.bitola_mm);
@@ -171,6 +182,42 @@ function EngenhariaPage() {
       )
     );
   }
+
+  async function salvarAtividade(id, campo, valor) {
+    const v = campo === "tipo" ? valor : Number(String(valor).replace(",", ".")) || 0;
+    setAtividades((a) => a.map((x) => (x.id === id ? { ...x, [campo]: v } : x)));
+    await supabase.from("mao_obra_atividade").update({ [campo]: v }).eq("id", id);
+  }
+
+  async function salvarEquipe(id, valor) {
+    const v = Number(String(valor).replace(",", ".")) || 0;
+    setEquipe((a) => a.map((x) => (x.id === id ? { ...x, quantidade: v } : x)));
+    await supabase.from("mao_obra_equipe").update({ quantidade: v }).eq("id", id);
+  }
+
+  async function salvarSecaoFaixa(faixaId, campo, valor) {
+    const v = Number(String(valor).replace(",", ".")) || null;
+    setFaixas((a) => a.map((f) => (f.id === faixaId ? { ...f, [campo]: v } : f)));
+    await supabase.from("armadura_faixa").update({ [campo]: v }).eq("id", faixaId);
+  }
+
+  // Tempo total da peca conforme os tempos medidos (fixo + por metro)
+  function minutosDaPeca(comprimento) {
+    const fixo = atividades
+      .filter((a) => a.papel === "PILAR" && a.tipo === "FIXO")
+      .reduce((s, a) => s + (Number(a.minutos) || 0), 0);
+    const porMetro = atividades
+      .filter((a) => a.papel === "PILAR" && a.tipo === "POR_METRO")
+      .reduce((s, a) => s + (Number(a.minutos) || 0) / (Number(a.referencia_m) || 1), 0);
+    return fixo + porMetro * (Number(comprimento) || 0);
+  }
+
+  const equipePilar = equipe.filter((e) => e.papel === "PILAR");
+  const pessoasTotal = equipePilar.reduce((s, e) => s + (Number(e.quantidade) || 0), 0);
+  const custoHoraEquipe = equipePilar.reduce((s, e) => {
+    const f = funcoes.find((x) => x.id === e.mao_de_obra_id);
+    return s + (Number(e.quantidade) || 0) * (Number(f?.valor_hora) || 0);
+  }, 0);
 
   // As faixas sao livres: da para incluir alturas e vaos alem dos padroes
   async function criarFaixaAltura() {
@@ -644,6 +691,31 @@ function EngenhariaPage() {
                           " m"
                         : "Tesoura - vao " + num(f.vao_min, 0) + " a " + num(f.vao_max, 0) + " m"}
                     </p>
+                    {f.papel === "PILAR" && (
+                      <div className="flex items-end gap-2 mb-3">
+                        <div>
+                          <label className="block text-[10px] text-slate-500">Secao: largura (m)</label>
+                          <input
+                            type="text"
+                            defaultValue={f.secao_largura_m ?? ""}
+                            onBlur={(e) => salvarSecaoFaixa(f.id, "secao_largura_m", e.target.value)}
+                            className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500">altura (m)</label>
+                          <input
+                            type="text"
+                            defaultValue={f.secao_altura_m ?? ""}
+                            onBlur={(e) => salvarSecaoFaixa(f.id, "secao_altura_m", e.target.value)}
+                            className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-400 pb-1">
+                          Esta faixa pode ter secao propria (ex: 0,25 x 0,30 num galpao menor).
+                        </p>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       {(f.armadura_faixa_item || []).map((i) => (
                         <div
@@ -781,6 +853,94 @@ function EngenhariaPage() {
             </div>
           </div>
 
+          {/* ---------- MAO DE OBRA ---------- */}
+          <div className={cardClasse}>
+            <p className="text-sm font-semibold text-slate-700 mb-1">Mao de obra do pilar</p>
+            <p className="text-xs text-slate-500 mb-3">
+              Tempos cronometrados na producao. O que e FIXO nao muda com o tamanho; o que e
+              POR METRO foi medido numa peca de referencia e vira tempo por metro.
+            </p>
+            <div className="overflow-x-auto mb-4">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-slate-500 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left px-2 py-2 font-medium">Atividade</th>
+                    <th className="text-left px-2 py-2 font-medium">Minutos</th>
+                    <th className="text-left px-2 py-2 font-medium">Tipo</th>
+                    <th className="text-left px-2 py-2 font-medium">Peca medida (m)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {atividades
+                    .filter((a) => a.papel === "PILAR")
+                    .map((a) => (
+                      <tr key={a.id}>
+                        <td className="px-2 py-2 text-slate-700">{a.nome}</td>
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="text"
+                            defaultValue={a.minutos}
+                            onBlur={(e) => salvarAtividade(a.id, "minutos", e.target.value)}
+                            className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <select
+                            value={a.tipo}
+                            onChange={(e) => salvarAtividade(a.id, "tipo", e.target.value)}
+                            className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                          >
+                            <option value="FIXO">Fixo por peca</option>
+                            <option value="POR_METRO">Varia com o tamanho</option>
+                          </select>
+                        </td>
+                        <td className="px-2 py-1.5">
+                          {a.tipo === "POR_METRO" ? (
+                            <input
+                              type="text"
+                              defaultValue={a.referencia_m ?? ""}
+                              onBlur={(e) => salvarAtividade(a.id, "referencia_m", e.target.value)}
+                              className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="text-xs font-semibold text-slate-600 mb-2">Equipe que produz a peca</p>
+            <div className="flex flex-wrap gap-3 mb-3">
+              {equipePilar.map((e) => {
+                const f = funcoes.find((x) => x.id === e.mao_de_obra_id);
+                return (
+                  <div key={e.id} className="flex items-end gap-2 bg-slate-50 rounded-lg p-2 border border-slate-200">
+                    <div>
+                      <label className="block text-[10px] text-slate-500">
+                        {f ? f.funcao : "?"} ({moeda(f?.valor_hora)}/h)
+                      </label>
+                      <input
+                        type="text"
+                        defaultValue={e.quantidade}
+                        onBlur={(ev) => salvarEquipe(e.id, ev.target.value)}
+                        className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-slate-500">
+              Equipe: <b>{num(pessoasTotal, 0)} pessoas</b> - custo de <b>{moeda(custoHoraEquipe)}</b> por
+              hora trabalhada. Exemplo: peca de 8,5 m leva{" "}
+              <b>{num(minutosDaPeca(8.5), 0)} min</b> e custa{" "}
+              <b>{moeda((minutosDaPeca(8.5) / 60) * custoHoraEquipe)}</b> de mao de obra.
+            </p>
+          </div>
+
           {/* ---------- 5. SIMULADOR ---------- */}
           <div className={cardClasse}>
             <p className="text-sm font-semibold text-slate-700 mb-1">Simulador de custo do pilar</p>
@@ -836,7 +996,8 @@ function EngenhariaPage() {
                       <b className="text-slate-900">{num(sim.comprimento_total_m, 2)} m</b>
                     </p>
                     <p className="text-slate-600">
-                      Volume: <b>{num(sim.volume_m3, 3)} m3</b> - concreto:{" "}
+                      Secao: <b>{num(sim.secao_largura_m, 2)} x {num(sim.secao_altura_m, 2)} m</b> - volume:{" "}
+                      <b>{num(sim.volume_m3, 3)} m3</b> - concreto:{" "}
                       <b>{moeda(sim.custo_concreto)}</b>
                       <span className="text-xs text-slate-400">
                         {" "}({moeda(sim.custo_m3_concreto)}/m3)
@@ -858,10 +1019,23 @@ function EngenhariaPage() {
                         </p>
                       </>
                     )}
-                    <p className="text-base pt-1 border-t border-slate-200 mt-2">
-                      <span className="text-slate-500">Material da peca: </span>
-                      <b className="text-emerald-700">{moeda(sim.custo_material)}</b>
-                      <span className="text-xs text-slate-400"> (falta mao de obra e perdas)</span>
+                    {sim.mao_de_obra && (
+                      <p className="text-xs text-slate-500">
+                        Mao de obra: {num(sim.mao_de_obra.minutos_total, 0)} min x{" "}
+                        {num(sim.mao_de_obra.pessoas, 0)} pessoas = {num(sim.mao_de_obra.horas_homem, 2)} h -{" "}
+                        {moeda(sim.custo_mao_de_obra)}
+                      </p>
+                    )}
+                    <p className="text-slate-600 pt-1 border-t border-slate-200 mt-2">
+                      <span className="text-slate-500">Material: </span>
+                      <b>{moeda(sim.custo_material)}</b>
+                      <span className="text-slate-500"> + mao de obra: </span>
+                      <b>{moeda(sim.custo_mao_de_obra)}</b>
+                    </p>
+                    <p className="text-base">
+                      <span className="text-slate-500">Custo da peca: </span>
+                      <b className="text-emerald-700">{moeda(sim.custo_total)}</b>
+                      <span className="text-xs text-slate-400"> (falta perdas e BDI)</span>
                     </p>
                   </>
                 )}
