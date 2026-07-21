@@ -121,12 +121,14 @@ function BadgeStatus({ status }) {
 // itens cujo papel é PILAR (1 dia de fundação por pilar).
 // Produtividade de montagem por peca (preenchida quando as composicoes carregam)
 let mapaMontagem = {};
+let mapaMontagemPapel = {};
 
 // Diarias de MONTAGEM: soma quantidade / pecas montadas por dia de cada item.
 // Ex: 7 tesouras (4/dia) + 14 pilares (3/dia) + 48 tercas (30/dia) = 8 diarias.
 function recalcularMontagem(listaItens) {
   const dias = listaItens.reduce((soma, i) => {
-    const porDia = Number(mapaMontagem[i.nome]) || 0;
+    const porDia =
+      Number(mapaMontagem[i.nome]) || Number(mapaMontagemPapel[i.papel]) || 0;
     if (!porDia) return soma;
     return soma + (Number(i.quantidade) || 0) / porDia;
   }, 0);
@@ -223,8 +225,11 @@ function OrcamentosGalpaoPageInterno() {
   // Mantem o mapa de produtividade em dia com o catalogo
   useEffect(() => {
     mapaMontagem = {};
+    mapaMontagemPapel = {};
     composicoes.forEach((comp) => {
       if (comp.montagem_por_dia) mapaMontagem[comp.nome] = Number(comp.montagem_por_dia);
+      if (comp.montagem_por_dia && comp.papel && !mapaMontagemPapel[comp.papel])
+        mapaMontagemPapel[comp.papel] = Number(comp.montagem_por_dia);
     });
   }, [composicoes]);
 
