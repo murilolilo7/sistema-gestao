@@ -228,79 +228,6 @@ function OrcamentosGalpaoPageInterno() {
     });
   }, [composicoes]);
 
-  // ---- Pilar calculado: liga/desliga em Engenharia de custos ----
-  const [paramEng, setParamEng] = useState(null);
-
-  useEffect(() => {
-    supabase
-      .from("parametros_engenharia")
-      .select("*")
-      .order("id")
-      .limit(1)
-      .then(({ data }) => setParamEng((data || [])[0] || null));
-  }, []);
-
-  // Gera (ou atualiza) o pilar conforme as medidas do galpao.
-  // A peca sai com a fundacao somada e o preco pelo valor do m3 armado.
-  useEffect(() => {
-    if (modo === "lista") return;
-    if (!paramEng || !paramEng.pilar_automatico) {
-      setItens((atual) =>
-        atual.some((i) => i.chave === "pilar-auto")
-          ? atual.filter((i) => i.chave !== "pilar-auto")
-          : atual
-      );
-      return;
-    }
-    const pe = Number(peDireito) || 0;
-    const v = Number(vao) || 0;
-    if (pe <= 0 || v <= 0) return;
-    let cancelado = false;
-    supabase
-      .rpc("calcular_pilar", {
-        pe_direito_input: pe,
-        vao_input: v,
-        com_laje_input: Number(areaLaje) > 0,
-      })
-      .then(({ data }) => {
-        if (cancelado || !data || data.erro) return;
-        const dedu = decomporComprimentoEmModulos(comprimento);
-        const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
-        if (nV <= 0) return;
-        const qtd = (nV + 1) * totalGalpoes;
-        const nome =
-          "PILAR " +
-          fmtNum(data.secao_largura_m, 2) +
-          "x" +
-          fmtNum(data.secao_altura_m, 2) +
-          " - " +
-          fmtNum(data.comprimento_total_m, 2) +
-          "m (" +
-          fmtNum(pe, 2) +
-          " livre + " +
-          fmtNum(data.fundacao_m, 2) +
-          " fundacao)";
-        setItens((atual) => {
-          const semAuto = atual.filter((i) => i.chave !== "pilar-auto");
-          const anterior = atual.find((i) => i.chave === "pilar-auto");
-          const item = {
-            chave: "pilar-auto",
-            composicao_id: null,
-            nome,
-            unidade: "PÇ",
-            papel: "PILAR",
-            quantidade: anterior && anterior.quantidadeEditada ? anterior.quantidade : qtd,
-            preco_unitario: Number(data.custo_total) || 0,
-            secao: "estrutura",
-          };
-          return recalcularFundacao([item, ...semAuto]);
-        });
-      });
-    return () => {
-      cancelado = true;
-    };
-  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes]);
-
   function buscarComposicoes() {
     return supabase
       .from("composicoes_galpao")
@@ -378,6 +305,79 @@ function OrcamentosGalpaoPageInterno() {
   // larguras diferentes — o galpão 1 usa o campo principal e os demais
   // usam os campos extras (vazio = repete a largura do galpão 1).
   const totalGalpoes = Math.max(0, Number(numeroGalpoesGerminados) || 0) + 1;
+
+  // ---- Pilar calculado: liga/desliga em Engenharia de custos ----
+  const [paramEng, setParamEng] = useState(null);
+
+  useEffect(() => {
+    supabase
+      .from("parametros_engenharia")
+      .select("*")
+      .order("id")
+      .limit(1)
+      .then(({ data }) => setParamEng((data || [])[0] || null));
+  }, []);
+
+  // Gera (ou atualiza) o pilar conforme as medidas do galpao.
+  // A peca sai com a fundacao somada e o preco pelo valor do m3 armado.
+  useEffect(() => {
+    if (modo === "lista") return;
+    if (!paramEng || !paramEng.pilar_automatico) {
+      setItens((atual) =>
+        atual.some((i) => i.chave === "pilar-auto")
+          ? atual.filter((i) => i.chave !== "pilar-auto")
+          : atual
+      );
+      return;
+    }
+    const pe = Number(peDireito) || 0;
+    const v = Number(vao) || 0;
+    if (pe <= 0 || v <= 0) return;
+    let cancelado = false;
+    supabase
+      .rpc("calcular_pilar", {
+        pe_direito_input: pe,
+        vao_input: v,
+        com_laje_input: Number(areaLaje) > 0,
+      })
+      .then(({ data }) => {
+        if (cancelado || !data || data.erro) return;
+        const dedu = decomporComprimentoEmModulos(comprimento);
+        const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
+        if (nV <= 0) return;
+        const qtd = (nV + 1) * totalGalpoes;
+        const nome =
+          "PILAR " +
+          fmtNum(data.secao_largura_m, 2) +
+          "x" +
+          fmtNum(data.secao_altura_m, 2) +
+          " - " +
+          fmtNum(data.comprimento_total_m, 2) +
+          "m (" +
+          fmtNum(pe, 2) +
+          " livre + " +
+          fmtNum(data.fundacao_m, 2) +
+          " fundacao)";
+        setItens((atual) => {
+          const semAuto = atual.filter((i) => i.chave !== "pilar-auto");
+          const anterior = atual.find((i) => i.chave === "pilar-auto");
+          const item = {
+            chave: "pilar-auto",
+            composicao_id: null,
+            nome,
+            unidade: "PÇ",
+            papel: "PILAR",
+            quantidade: anterior && anterior.quantidadeEditada ? anterior.quantidade : qtd,
+            preco_unitario: Number(data.custo_total) || 0,
+            secao: "estrutura",
+          };
+          return recalcularFundacao([item, ...semAuto]);
+        });
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes]);
   const listaLarguras =
     totalGalpoes > 1 && vao
       ? Array.from({ length: totalGalpoes }, (_, i) =>
