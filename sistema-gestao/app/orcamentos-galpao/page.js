@@ -307,6 +307,8 @@ function OrcamentosGalpaoPageInterno() {
   const totalGalpoes = Math.max(0, Number(numeroGalpoesGerminados) || 0) + 1;
 
   // ---- Pilar calculado: liga/desliga em Engenharia de custos ----
+  const doisDec = (n) =>
+    Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [paramEng, setParamEng] = useState(null);
 
   useEffect(() => {
@@ -348,15 +350,15 @@ function OrcamentosGalpaoPageInterno() {
         const qtd = (nV + 1) * totalGalpoes;
         const nome =
           "PILAR " +
-          fmtNum(data.secao_largura_m, 2) +
+          doisDec(data.secao_largura_m, 2) +
           "x" +
-          fmtNum(data.secao_altura_m, 2) +
+          doisDec(data.secao_altura_m, 2) +
           " - " +
-          fmtNum(data.comprimento_total_m, 2) +
+          doisDec(data.comprimento_total_m, 2) +
           "m (" +
-          fmtNum(pe, 2) +
+          doisDec(pe, 2) +
           " livre + " +
-          fmtNum(data.fundacao_m, 2) +
+          doisDec(data.fundacao_m, 2) +
           " fundacao)";
         setItens((atual) => {
           const semAuto = atual.filter((i) => i.chave !== "pilar-auto");
