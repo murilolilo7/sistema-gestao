@@ -184,6 +184,9 @@ function OrcamentosGalpaoPageInterno() {
   const [pilarLajeId, setPilarLajeId] = useState("");
   const [pilarLajeQtd, setPilarLajeQtd] = useState("1");
   const [montagemLajeQtd, setMontagemLajeQtd] = useState("");
+  // Nivel de ferragem do pilar reforçado do germinado (fileira do meio,
+  // que segura 2 tesouras). Padrao PESADO; pode virar ESBELTO etc.
+  const [nivelReforcado, setNivelReforcado] = useState("PESADO");
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
@@ -329,10 +332,11 @@ function OrcamentosGalpaoPageInterno() {
   // A peca sai com a fundacao somada e o preco pelo valor do m3 armado.
   useEffect(() => {
     if (modo === "lista") return;
+    const CHAVES_AUTO = ["pilar-auto-padrao", "pilar-auto-reforcado"];
     if (!paramEng || !paramEng.pilar_automatico) {
       setItens((atual) =>
-        atual.some((i) => i.chave === "pilar-auto")
-          ? atual.filter((i) => i.chave !== "pilar-auto")
+        atual.some((i) => CHAVES_AUTO.includes(i.chave))
+          ? atual.filter((i) => !CHAVES_AUTO.includes(i.chave))
           : atual
       );
       return;
@@ -340,52 +344,82 @@ function OrcamentosGalpaoPageInterno() {
     const pe = Number(peDireito) || 0;
     const v = Number(vao) || 0;
     if (pe <= 0 || v <= 0) return;
+    const dedu = decomporComprimentoEmModulos(comprimento);
+    const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
+    if (nV <= 0) return;
+
+    // Fileiras: 1 galpao = 2 fileiras; cada germinado a mais soma 1.
+    // No germinado, as fileiras do meio (totalGalpoes - 1) sao reforçadas
+    // porque cada pilar do meio segura 2 tesouras.
+    const pilaresPorFileira = nV + 1;
+    const fileirasReforcadas = totalGalpoes > 1 ? totalGalpoes - 1 : 0;
+    const qtdReforcado = pilaresPorFileira * fileirasReforcadas;
+    const qtdPadrao = pilaresPorFileira * (totalGalpoes + 1) - qtdReforcado;
+    const comLaje = Number(areaLaje) > 0;
+
+    const nomePilar = (data, sufixo) =>
+      "PILAR " +
+      doisDec(data.secao_largura_m, 2) + "x" + doisDec(data.secao_altura_m, 2) +
+      " - " + doisDec(data.comprimento_total_m, 2) + "m (" +
+      doisDec(pe, 2) + " livre + " + doisDec(data.fundacao_m, 2) + " fundacao)" +
+      (sufixo ? " — " + sufixo : "");
+
     let cancelado = false;
-    supabase
-      .rpc("calcular_pilar", {
-        pe_direito_input: pe,
-        vao_input: v,
-        com_laje_input: Number(areaLaje) > 0,
-      })
-      .then(({ data }) => {
-        if (cancelado || !data || data.erro) return;
-        const dedu = decomporComprimentoEmModulos(comprimento);
-        const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
-        if (nV <= 0) return;
-        // (linhas de pilar) x (fileiras): 1 galpao = 2 fileiras
-        const qtd = (nV + 1) * (totalGalpoes + 1);
-        const nome =
-          "PILAR " +
-          doisDec(data.secao_largura_m, 2) +
-          "x" +
-          doisDec(data.secao_altura_m, 2) +
-          " - " +
-          doisDec(data.comprimento_total_m, 2) +
-          "m (" +
-          doisDec(pe, 2) +
-          " livre + " +
-          doisDec(data.fundacao_m, 2) +
-          " fundacao)";
-        setItens((atual) => {
-          const semAuto = atual.filter((i) => i.chave !== "pilar-auto");
-          const anterior = atual.find((i) => i.chave === "pilar-auto");
-          const item = {
-            chave: "pilar-auto",
+    (async () => {
+      const [resPadrao, resReforcado] = await Promise.all([
+        supabase.rpc("calcular_pilar", {
+          pe_direito_input: pe, vao_input: v, com_laje_input: comLaje,
+        }),
+        qtdReforcado > 0
+          ? supabase.rpc("calcular_pilar", {
+              pe_direito_input: pe, vao_input: v, com_laje_input: comLaje,
+              nivel_input: nivelReforcado,
+            })
+          : Promise.resolve({ data: null }),
+      ]);
+      if (cancelado) return;
+      const dPadrao = resPadrao?.data;
+      if (!dPadrao || dPadrao.erro) return;
+      const dReforcado = resReforcado?.data;
+
+      setItens((atual) => {
+        const semAuto = atual.filter((i) => !CHAVES_AUTO.includes(i.chave));
+        const antPadrao = atual.find((i) => i.chave === "pilar-auto-padrao");
+        const antReforcado = atual.find((i) => i.chave === "pilar-auto-reforcado");
+        const novos = [];
+        novos.push({
+          chave: "pilar-auto-padrao",
+          composicao_id: null,
+          nome: nomePilar(dPadrao, qtdReforcado > 0 ? "padrao" : ""),
+          unidade: "PÇ",
+          papel: "PILAR",
+          quantidade:
+            antPadrao && antPadrao.quantidadeEditada ? antPadrao.quantidade : qtdPadrao,
+          preco_unitario: Number(dPadrao.custo_total) || 0,
+          secao: "estrutura",
+        });
+        if (qtdReforcado > 0 && dReforcado && !dReforcado.erro) {
+          novos.push({
+            chave: "pilar-auto-reforcado",
             composicao_id: null,
-            nome,
+            nome: nomePilar(dReforcado, "reforçado (2 tesouras)"),
             unidade: "PÇ",
             papel: "PILAR",
-            quantidade: anterior && anterior.quantidadeEditada ? anterior.quantidade : qtd,
-            preco_unitario: Number(data.custo_total) || 0,
+            quantidade:
+              antReforcado && antReforcado.quantidadeEditada
+                ? antReforcado.quantidade
+                : qtdReforcado,
+            preco_unitario: Number(dReforcado.custo_total) || 0,
             secao: "estrutura",
-          };
-          return recalcularFundacao([item, ...semAuto]);
-        });
+          });
+        }
+        return recalcularFundacao([...novos, ...semAuto]);
       });
+    })();
     return () => {
       cancelado = true;
     };
-  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes]);
+  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, nivelReforcado]);
   const listaLarguras =
     totalGalpoes > 1 && vao
       ? Array.from({ length: totalGalpoes }, (_, i) =>
@@ -2484,6 +2518,19 @@ function OrcamentosGalpaoPageInterno() {
                     >
                       <td className="py-1.5 pr-2">
                         {i.nome}
+                        {i.chave === "pilar-auto-reforcado" && (
+                          <select
+                            value={nivelReforcado}
+                            onChange={(e) => setNivelReforcado(e.target.value)}
+                            className="ml-2 rounded border border-slate-300 px-1 py-0.5 text-xs align-middle"
+                          >
+                            <option value="PESADO">Pesado 25×40</option>
+                            <option value="ESBELTO">Esbelto 25×30</option>
+                            <option value="LEVE">Leve 25×40</option>
+                            <option value="MEDIO">Médio 25×40</option>
+                            <option value="COM_LAJE">Com laje 25×40</option>
+                          </select>
+                        )}
                         {i.obrigatorio && (
                           <span className="ml-1 text-xs text-slate-400">(obrigatório)</span>
                         )}
