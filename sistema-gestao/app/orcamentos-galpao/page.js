@@ -2357,6 +2357,25 @@ function OrcamentosGalpaoPageInterno() {
                   </button>
                 </div>
 
+                {(() => {
+                  const s = sugestaoQtdVigasLaje();
+                  if (!s || !(Number(areaLaje) > 0)) return null;
+                  return (
+                    <p className="text-xs text-slate-500 -mt-1 mb-2">
+                      Sugestão pela área: <strong>{s.qtd}</strong> pilar(es) da laje — a laje
+                      cobre {s.vaosCobertos + 1} linha(s) de pilar (profundidade ~
+                      {s.prof.toFixed(1)}m). Ajuste se precisar.
+                      <button
+                        type="button"
+                        onClick={() => setPilarLajeQtd(String(s.qtd))}
+                        className="ml-2 rounded border border-slate-300 px-2 py-0.5 hover:bg-slate-100"
+                      >
+                        usar {s.qtd}
+                      </button>
+                    </p>
+                  );
+                })()}
+
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="montagem-laje">
                   <div className="sm:col-span-2 flex items-center text-xs text-slate-500">
                     Montagem da laje/mezanino (separada da montagem do galpão)
