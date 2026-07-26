@@ -187,6 +187,7 @@ function OrcamentosGalpaoPageInterno() {
   // Nivel de ferragem do pilar reforçado do germinado (fileira do meio,
   // que segura 2 tesouras). Padrao PESADO; pode virar ESBELTO etc.
   const [nivelReforcado, setNivelReforcado] = useState("PESADO");
+  const [nivelComLaje, setNivelComLaje] = useState("COM_LAJE");
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
@@ -332,7 +333,12 @@ function OrcamentosGalpaoPageInterno() {
   // A peca sai com a fundacao somada e o preco pelo valor do m3 armado.
   useEffect(() => {
     if (modo === "lista") return;
-    const CHAVES_AUTO = ["pilar-auto-padrao", "pilar-auto-reforcado"];
+    const CHAVES_AUTO = [
+      "pilar-auto-padrao",
+      "pilar-auto-comlaje",
+      "pilar-auto-reforcado",
+      "pilar-auto-meio",
+    ];
     if (!paramEng || !paramEng.pilar_automatico) {
       setItens((atual) =>
         atual.some((i) => CHAVES_AUTO.includes(i.chave))
@@ -348,14 +354,26 @@ function OrcamentosGalpaoPageInterno() {
     const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
     if (nV <= 0) return;
 
-    // Fileiras: 1 galpao = 2 fileiras; cada germinado a mais soma 1.
-    // No germinado, as fileiras do meio (totalGalpoes - 1) sao reforçadas
+    // Grade de pilares: 1 galpao = 2 fileiras; cada germinado a mais soma 1.
+    // As fileiras do meio (totalGalpoes - 1) sao reforçadas (Pesado),
     // porque cada pilar do meio segura 2 tesouras.
     const pilaresPorFileira = nV + 1;
     const fileirasReforcadas = totalGalpoes > 1 ? totalGalpoes - 1 : 0;
     const qtdReforcado = pilaresPorFileira * fileirasReforcadas;
-    const qtdPadrao = pilaresPorFileira * (totalGalpoes + 1) - qtdReforcado;
+    const qtdExterior = pilaresPorFileira * 2; // as duas fileiras de fora
+
+    // Laje/mezanino: as linhas de pilar cobertas pela laje (pela area) tem
+    // os pilares de fora reforçados como "Com laje" (25x40, mesmo preço do
+    // Pesado). Fora da laje seguem o nivel pela medida (Esbelto/Leve/Medio).
     const comLaje = Number(areaLaje) > 0;
+    const sug = comLaje ? sugestaoQtdVigasLaje() : null;
+    const linhasComLaje = sug ? Math.max(0, Math.min(pilaresPorFileira, sug.qtd)) : 0;
+    const qtdComLaje = linhasComLaje > 0 ? 2 * linhasComLaje : 0;
+    const qtdPadrao = Math.max(0, qtdExterior - qtdComLaje); // exterior fora da laje
+    // Pilar menor no meio do vao: so quando a largura de 1 galpao passa de
+    // 10m (a viga e dividida). Padrao 5m (3,5 livre + 1,5 fundacao), 25x30,
+    // um por linha coberta pela laje. Editavel na quantidade.
+    const qtdMeio = comLaje && v > 10 ? linhasComLaje : 0;
 
     const nomePilar = (data, sufixo) =>
       "PILAR " +
@@ -366,10 +384,16 @@ function OrcamentosGalpaoPageInterno() {
 
     let cancelado = false;
     (async () => {
-      const [resPadrao, resReforcado] = await Promise.all([
+      const [resPadrao, resComLaje, resReforcado] = await Promise.all([
         supabase.rpc("calcular_pilar", {
           pe_direito_input: pe, vao_input: v, com_laje_input: comLaje,
         }),
+        qtdComLaje > 0
+          ? supabase.rpc("calcular_pilar", {
+              pe_direito_input: pe, vao_input: v, com_laje_input: true,
+              nivel_input: nivelComLaje,
+            })
+          : Promise.resolve({ data: null }),
         qtdReforcado > 0
           ? supabase.rpc("calcular_pilar", {
               pe_direito_input: pe, vao_input: v, com_laje_input: comLaje,
@@ -380,24 +404,50 @@ function OrcamentosGalpaoPageInterno() {
       if (cancelado) return;
       const dPadrao = resPadrao?.data;
       if (!dPadrao || dPadrao.erro) return;
+      const dComLaje = resComLaje?.data;
       const dReforcado = resReforcado?.data;
+
+      // R$/m3 armado derivado do proprio pilar padrao (mesmo valor usado em
+      // tudo), para precificar o pilar menor do meio (25x30, 5m).
+      const volPadrao =
+        Number(dPadrao.secao_largura_m) *
+        Number(dPadrao.secao_altura_m) *
+        Number(dPadrao.comprimento_total_m);
+      const valorM3 = volPadrao > 0 ? Number(dPadrao.custo_total) / volPadrao : 0;
+      const precoMeio = Math.round(0.25 * 0.3 * 5.0 * valorM3 * 100) / 100;
 
       setItens((atual) => {
         const semAuto = atual.filter((i) => !CHAVES_AUTO.includes(i.chave));
-        const antPadrao = atual.find((i) => i.chave === "pilar-auto-padrao");
-        const antReforcado = atual.find((i) => i.chave === "pilar-auto-reforcado");
+        const qtdDe = (chave, padrao) => {
+          const a = atual.find((i) => i.chave === chave);
+          return a && a.quantidadeEditada ? a.quantidade : padrao;
+        };
+        const temSufixo = qtdComLaje > 0 || qtdReforcado > 0 || qtdMeio > 0;
         const novos = [];
-        novos.push({
-          chave: "pilar-auto-padrao",
-          composicao_id: null,
-          nome: nomePilar(dPadrao, qtdReforcado > 0 ? "padrao" : ""),
-          unidade: "PÇ",
-          papel: "PILAR",
-          quantidade:
-            antPadrao && antPadrao.quantidadeEditada ? antPadrao.quantidade : qtdPadrao,
-          preco_unitario: Number(dPadrao.custo_total) || 0,
-          secao: "estrutura",
-        });
+        if (qtdPadrao > 0) {
+          novos.push({
+            chave: "pilar-auto-padrao",
+            composicao_id: null,
+            nome: nomePilar(dPadrao, temSufixo ? "padrao" : ""),
+            unidade: "PÇ",
+            papel: "PILAR",
+            quantidade: qtdDe("pilar-auto-padrao", qtdPadrao),
+            preco_unitario: Number(dPadrao.custo_total) || 0,
+            secao: "estrutura",
+          });
+        }
+        if (qtdComLaje > 0 && dComLaje && !dComLaje.erro) {
+          novos.push({
+            chave: "pilar-auto-comlaje",
+            composicao_id: null,
+            nome: nomePilar(dComLaje, "sob a laje"),
+            unidade: "PÇ",
+            papel: "PILAR",
+            quantidade: qtdDe("pilar-auto-comlaje", qtdComLaje),
+            preco_unitario: Number(dComLaje.custo_total) || 0,
+            secao: "estrutura",
+          });
+        }
         if (qtdReforcado > 0 && dReforcado && !dReforcado.erro) {
           novos.push({
             chave: "pilar-auto-reforcado",
@@ -405,12 +455,21 @@ function OrcamentosGalpaoPageInterno() {
             nome: nomePilar(dReforcado, "reforçado (2 tesouras)"),
             unidade: "PÇ",
             papel: "PILAR",
-            quantidade:
-              antReforcado && antReforcado.quantidadeEditada
-                ? antReforcado.quantidade
-                : qtdReforcado,
+            quantidade: qtdDe("pilar-auto-reforcado", qtdReforcado),
             preco_unitario: Number(dReforcado.custo_total) || 0,
             secao: "estrutura",
+          });
+        }
+        if (qtdMeio > 0 && precoMeio > 0) {
+          novos.push({
+            chave: "pilar-auto-meio",
+            composicao_id: null,
+            nome: "PILAR DO MEIO DO VÃO 0,25x0,30 - 5,00m (3,50 livre + 1,50 fundacao) — Médio",
+            unidade: "PÇ",
+            papel: "PILAR",
+            quantidade: qtdDe("pilar-auto-meio", qtdMeio),
+            preco_unitario: precoMeio,
+            secao: "laje",
           });
         }
         return recalcularFundacao([...novos, ...semAuto]);
@@ -419,7 +478,7 @@ function OrcamentosGalpaoPageInterno() {
     return () => {
       cancelado = true;
     };
-  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, nivelReforcado]);
+  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, nivelReforcado, nivelComLaje]);
   const listaLarguras =
     totalGalpoes > 1 && vao
       ? Array.from({ length: totalGalpoes }, (_, i) =>
@@ -2357,25 +2416,6 @@ function OrcamentosGalpaoPageInterno() {
                   </button>
                 </div>
 
-                {(() => {
-                  const s = sugestaoQtdVigasLaje();
-                  if (!s || !(Number(areaLaje) > 0)) return null;
-                  return (
-                    <p className="text-xs text-slate-500 -mt-1 mb-2">
-                      Sugestão pela área: <strong>{s.qtd}</strong> pilar(es) da laje — a laje
-                      cobre {s.vaosCobertos + 1} linha(s) de pilar (profundidade ~
-                      {s.prof.toFixed(1)}m). Ajuste se precisar.
-                      <button
-                        type="button"
-                        onClick={() => setPilarLajeQtd(String(s.qtd))}
-                        className="ml-2 rounded border border-slate-300 px-2 py-0.5 hover:bg-slate-100"
-                      >
-                        usar {s.qtd}
-                      </button>
-                    </p>
-                  );
-                })()}
-
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="montagem-laje">
                   <div className="sm:col-span-2 flex items-center text-xs text-slate-500">
                     Montagem da laje/mezanino (separada da montagem do galpão)
@@ -2548,6 +2588,19 @@ function OrcamentosGalpaoPageInterno() {
                             <option value="LEVE">Leve 25×40</option>
                             <option value="MEDIO">Médio 25×40</option>
                             <option value="COM_LAJE">Com laje 25×40</option>
+                          </select>
+                        )}
+                        {i.chave === "pilar-auto-comlaje" && (
+                          <select
+                            value={nivelComLaje}
+                            onChange={(e) => setNivelComLaje(e.target.value)}
+                            className="ml-2 rounded border border-slate-300 px-1 py-0.5 text-xs align-middle"
+                          >
+                            <option value="COM_LAJE">Com laje 25×40</option>
+                            <option value="PESADO">Pesado 25×40</option>
+                            <option value="LEVE">Leve 25×40</option>
+                            <option value="MEDIO">Médio 25×40</option>
+                            <option value="ESBELTO">Esbelto 25×30</option>
                           </select>
                         )}
                         {i.obrigatorio && (
