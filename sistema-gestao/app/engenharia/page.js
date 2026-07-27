@@ -246,7 +246,7 @@ function EngenhariaPage() {
       return;
     }
     const linhas = vaos.map((v) => {
-      const f = faixasPilar.find((x) => x.vao_min === v);
+      const f = faixasMatriz.find((x) => x.vao_min === v);
       return {
         papel: "PILAR",
         altura_min: min,
@@ -277,7 +277,7 @@ function EngenhariaPage() {
       return;
     }
     const linhas = alturas.map((a) => {
-      const f = faixasPilar.find((x) => x.altura_min === a);
+      const f = faixasMatriz.find((x) => x.altura_min === a);
       return {
         papel: "PILAR",
         altura_min: a,
@@ -356,8 +356,12 @@ function EngenhariaPage() {
 
   const faixasPilar = faixas.filter((f) => f.papel === "PILAR");
   const faixasTesoura = faixas.filter((f) => f.papel === "TESOURA");
-  const alturas = [...new Set(faixasPilar.map((f) => f.altura_min))].sort((a, b) => a - b);
-  const vaos = [...new Set(faixasPilar.map((f) => f.vao_min))].sort((a, b) => a - b);
+  // A matriz altura x vao sao as faixas 25x40 (sem nivel nomeado).
+  // O esbelto/pesado/com laje sao faixas ESPECIAIS, fora da matriz.
+  const faixasMatriz = faixasPilar.filter((f) => !f.nivel);
+  const faixasEspeciais = faixasPilar.filter((f) => f.nivel);
+  const alturas = [...new Set(faixasMatriz.map((f) => f.altura_min))].sort((a, b) => a - b);
+  const vaos = [...new Set(faixasMatriz.map((f) => f.vao_min))].sort((a, b) => a - b);
   return (
     <div>
       <Link
@@ -573,7 +577,7 @@ function EngenhariaPage() {
                   <tr>
                     <th className="text-left px-3 py-2 font-medium">Altura livre</th>
                     {vaos.map((v) => {
-                      const f = faixasPilar.find((x) => x.vao_min === v);
+                      const f = faixasMatriz.find((x) => x.vao_min === v);
                       return (
                         <th key={v} className="text-left px-3 py-2 font-medium">
                           <span className="inline-flex items-center gap-1">
@@ -594,7 +598,7 @@ function EngenhariaPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {alturas.map((a) => {
-                    const linha = faixasPilar.filter((f) => f.altura_min === a);
+                    const linha = faixasMatriz.filter((f) => f.altura_min === a);
                     const amax = linha[0] ? linha[0].altura_max : 0;
                     return (
                       <tr key={a}>
@@ -612,7 +616,7 @@ function EngenhariaPage() {
                           </span>
                         </td>
                         {vaos.map((v) => {
-                          const f = faixasPilar.find((x) => x.altura_min === a && x.vao_min === v);
+                          const f = faixasMatriz.find((x) => x.altura_min === a && x.vao_min === v);
                           if (!f)
                             return (
                               <td key={v} className="px-3 py-2 text-slate-300">
@@ -749,8 +753,15 @@ function EngenhariaPage() {
                     className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4"
                   >
                     <p className="text-sm font-semibold text-slate-700 mb-2">
-                      {f.papel === "PILAR"
-                        ? "Pilar de " +
+                      {f.papel === "TESOURA"
+                        ? "Tesoura - vao " + num(f.vao_min, 0) + " a " + num(f.vao_max, 0) + " m"
+                        : f.nivel === "ESBELTO"
+                        ? "Esbelto 25x30 (vao da tesoura ate 10 m)"
+                        : f.nivel === "PESADO"
+                        ? "Pesado - galpao germinado (25x40)"
+                        : f.nivel === "COM_LAJE"
+                        ? "Com laje / mezanino (25x40)"
+                        : "Pilar de " +
                           num(f.altura_min, 0) +
                           " a " +
                           num(f.altura_max, 0) +
@@ -758,8 +769,7 @@ function EngenhariaPage() {
                           num(f.vao_min, 0) +
                           " a " +
                           num(f.vao_max, 0) +
-                          " m"
-                        : "Tesoura - vao " + num(f.vao_min, 0) + " a " + num(f.vao_max, 0) + " m"}
+                          " m"}
                     </p>
                     {f.papel === "PILAR" && (
                       <div className="flex items-end gap-2 mb-3">
@@ -889,6 +899,49 @@ function EngenhariaPage() {
                     </div>
                   </div>
                 ))}
+          </div>
+
+          {/* ---------- 3b. FAIXAS ESPECIAIS DO PILAR (fora da matriz) ---------- */}
+          <div className={cardClasse}>
+            <p className="text-sm font-semibold text-slate-700 mb-1">Faixas especiais do pilar</p>
+            <p className="text-xs text-slate-500 mb-3">
+              Fora da matriz: o esbelto 25x30 (so ate vao de tesoura de 10 m) e os pilares de
+              galpao germinado (Pesado) e com laje/mezanino (Com laje). Clique para lancar a ferragem.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {faixasEspeciais.map((f) => {
+                const resumo = resumoFaixa(f);
+                const aberta = faixaAberta === f.id;
+                const rotulo =
+                  f.nivel === "ESBELTO"
+                    ? "Esbelto"
+                    : f.nivel === "PESADO"
+                    ? "Pesado (germinado)"
+                    : f.nivel === "COM_LAJE"
+                    ? "Com laje (mezanino)"
+                    : f.nivel;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFaixaAberta(aberta ? null : f.id)}
+                    className={
+                      "rounded-lg px-3 py-2 text-xs transition border text-left " +
+                      (aberta
+                        ? "bg-emerald-600 text-white border-emerald-600"
+                        : resumo
+                        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                        : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100")
+                    }
+                  >
+                    <span className="font-medium block">
+                      {rotulo} ({num(f.secao_largura_m * 100, 0)}x{num(f.secao_altura_m * 100, 0)})
+                    </span>
+                    <span>{resumo || "cadastrar"}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* ---------- 4. TESOURAS ---------- */}
