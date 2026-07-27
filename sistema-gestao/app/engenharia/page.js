@@ -72,7 +72,7 @@ function EngenhariaPage() {
       supabase
         .from("armadura_faixa")
         .select(
-          "id, papel, altura_min, altura_max, vao_min, vao_max, nivel, secao_largura_m, secao_altura_m, observacao, armadura_faixa_item(id, tipo, insumo_id, quantidade, acrescimo_m, espacamento_cm, perimetro_m)"
+          "id, papel, altura_min, altura_max, vao_min, vao_max, nivel, secao_largura_m, secao_altura_m, observacao, armadura_faixa_item(id, tipo, insumo_id, quantidade, acrescimo_m, espacamento_cm, perimetro_m, comprimento_fixo_m, observacao)"
         )
         .eq("ativo", true)
         .order("papel")
@@ -140,9 +140,19 @@ function EngenhariaPage() {
       notificar("Cadastre os acos em Precos antes.", "erro");
       return;
     }
+    const acoFixa = acos.find((a) => Number(a.bitola_mm) === 16) || aco;
     const base =
       tipo === "ESTRIBO"
         ? { faixa_id: faixaId, tipo, insumo_id: aco.id, espacamento_cm: 15, perimetro_m: 1.2 }
+        : tipo === "FIXA"
+        ? {
+            faixa_id: faixaId,
+            tipo,
+            insumo_id: acoFixa.id,
+            quantidade: 2,
+            comprimento_fixo_m: 1.08,
+            observacao: "Puxador",
+          }
         : { faixa_id: faixaId, tipo, insumo_id: aco.id, quantidade: 4, acrescimo_m: 0 };
     const { data, error } = await supabase
       .from("armadura_faixa_item")
@@ -175,7 +185,10 @@ function EngenhariaPage() {
           : f
       )
     );
-    const v = valor === "" ? null : Number(String(valor).replace(",", "."));
+    const v =
+      campo === "observacao"
+        ? valor
+        : valor === "" ? null : Number(String(valor).replace(",", "."));
     await supabase.from("armadura_faixa_item").update({ [campo]: v }).eq("id", itemId);
   }
 
@@ -330,6 +343,8 @@ function EngenhariaPage() {
         const bit = ins && ins.bitola_mm ? String(ins.bitola_mm).replace(".", ",") : "?";
         return i.tipo === "ESTRIBO"
           ? "est " + bit + " c/" + num(i.espacamento_cm, 0)
+          : i.tipo === "FIXA"
+          ? num(i.quantidade, 0) + " x " + bit + " fixa " + num(i.comprimento_fixo_m, 2) + "m"
           : num(i.quantidade, 0) + " x " + bit;
       })
       .join(" + ");
@@ -803,7 +818,7 @@ function EngenhariaPage() {
                           className="flex flex-wrap items-end gap-2 bg-white rounded-lg p-2 border border-slate-200"
                         >
                           <span className="text-xs font-semibold text-slate-500 w-16">
-                            {i.tipo === "ESTRIBO" ? "Estribo" : "Barras"}
+                            {i.tipo === "ESTRIBO" ? "Estribo" : i.tipo === "FIXA" ? "Fixa" : "Barras"}
                           </span>
                           <div>
                             <label className="block text-[10px] text-slate-500">Bitola</label>
@@ -839,6 +854,42 @@ function EngenhariaPage() {
                                   value={txt(i.perimetro_m)}
                                   onChange={(e) =>
                                     atualizarItemFaixa(f.id, i.id, "perimetro_m", e.target.value)
+                                  }
+                                  className={campoClasse}
+                                />
+                              </div>
+                            </>
+                          ) : i.tipo === "FIXA" ? (
+                            <>
+                              <div className="w-20">
+                                <label className="block text-[10px] text-slate-500">Quantas</label>
+                                <input
+                                  type="text"
+                                  value={txt(i.quantidade)}
+                                  onChange={(e) =>
+                                    atualizarItemFaixa(f.id, i.id, "quantidade", e.target.value)
+                                  }
+                                  className={campoClasse}
+                                />
+                              </div>
+                              <div className="w-28">
+                                <label className="block text-[10px] text-slate-500">Comprimento (m)</label>
+                                <input
+                                  type="text"
+                                  value={txt(i.comprimento_fixo_m)}
+                                  onChange={(e) =>
+                                    atualizarItemFaixa(f.id, i.id, "comprimento_fixo_m", e.target.value)
+                                  }
+                                  className={campoClasse}
+                                />
+                              </div>
+                              <div className="w-32">
+                                <label className="block text-[10px] text-slate-500">Rotulo</label>
+                                <input
+                                  type="text"
+                                  value={i.observacao || ""}
+                                  onChange={(e) =>
+                                    atualizarItemFaixa(f.id, i.id, "observacao", e.target.value)
                                   }
                                   className={campoClasse}
                                 />
@@ -895,6 +946,13 @@ function EngenhariaPage() {
                         className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-1.5"
                       >
                         <Plus size={13} /> Estribos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => adicionarItemFaixa(f.id, "FIXA")}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-1.5"
+                      >
+                        <Plus size={13} /> Barra fixa (puxador)
                       </button>
                     </div>
                   </div>
