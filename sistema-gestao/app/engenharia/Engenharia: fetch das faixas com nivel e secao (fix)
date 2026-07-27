@@ -72,7 +72,7 @@ function EngenhariaPage() {
       supabase
         .from("armadura_faixa")
         .select(
-          "id, papel, altura_min, altura_max, vao_min, vao_max, observacao, armadura_faixa_item(id, tipo, insumo_id, quantidade, acrescimo_m, espacamento_cm, perimetro_m)"
+          "id, papel, altura_min, altura_max, vao_min, vao_max, nivel, secao_largura_m, secao_altura_m, observacao, armadura_faixa_item(id, tipo, insumo_id, quantidade, acrescimo_m, espacamento_cm, perimetro_m)"
         )
         .eq("ativo", true)
         .order("papel")
