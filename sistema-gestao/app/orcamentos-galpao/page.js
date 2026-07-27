@@ -1079,6 +1079,57 @@ function OrcamentosGalpaoPageInterno() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tipoSelecionado, vao, comprimento, areaLaje, numeroVaos, itens]);
 
+  // Viga da laje AUTOMÁTICA no orçamento: entra já dividida (vão = metade da
+  // largura) quando a largura passa de 10m — que é quando existe o pilar no
+  // meio pra dividir a viga —, ou inteira até 10m. Altura = vão ÷ 10 (múltiplo
+  // de 5cm). Quantidade = linhas de pilar que a laje cobre. Preço = 0,25 ×
+  // altura × vão × valor do m³ que o usuário informa; enquanto o m³ estiver em
+  // branco a viga aparece com preço 0 (a definir) e não soma no total.
+  useEffect(() => {
+    const ehLaje = tipoSelecionado === "laje" || tipoSelecionado === "mezanino";
+    const comLaje = Number(areaLaje) > 0;
+    const larguraGalpao = Number(vao) || 0;
+    const sug = ehLaje && comLaje ? sugestaoQtdVigasLaje() : null;
+    const qtdViga = sug?.qtd || 0;
+    if (!ehLaje || !comLaje || larguraGalpao <= 0 || !comprimento || qtdViga <= 0) {
+      setItens((atual) =>
+        atual.some((i) => i.chave === "viga-laje-auto")
+          ? atual.filter((i) => i.chave !== "viga-laje-auto")
+          : atual
+      );
+      return;
+    }
+    const pilarNoMeio = larguraGalpao > 10;
+    const vaoViga = pilarNoMeio
+      ? Math.round((larguraGalpao / 2) * 100) / 100
+      : larguraGalpao;
+    const alturaViga = Math.round(Math.ceil(vaoViga / 10 / 0.05) * 0.05 * 100) / 100;
+    const m3 = Number(vigaValorM3) || 0;
+    const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
+    const nome =
+      "VIGA PARA LAJE " +
+      doisDec(0.25, 2) + "X" + doisDec(alturaViga, 2) + "X" + doisDec(vaoViga, 2) + "M" +
+      (pilarNoMeio ? " — dividida (pilar no meio)" : "");
+    setItens((atual) => {
+      const ant = atual.find((i) => i.chave === "viga-laje-auto");
+      const semAuto = atual.filter((i) => i.chave !== "viga-laje-auto");
+      return [
+        ...semAuto,
+        {
+          chave: "viga-laje-auto",
+          composicao_id: null,
+          nome,
+          unidade: "UND",
+          papel: "VIGA_LAJE",
+          quantidade: ant && ant.quantidadeEditada ? ant.quantidade : qtdViga,
+          preco_unitario: preco,
+          secao: "laje",
+        },
+      ];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tipoSelecionado, vao, comprimento, areaLaje, numeroVaos, vigaValorM3, totalGalpoes]);
+
   // Campos decimais que aceitam vírgula: ",25" vira "0.25" na hora.
   const aoDigitarDecimal = (setter) => (e) => {
     let v = e.target.value.replace(",", ".");
@@ -2443,8 +2494,31 @@ function OrcamentosGalpaoPageInterno() {
             {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
                 <p className="text-xs font-medium text-slate-600 mb-2">
-                  Calculadora: Viga para laje — o volume (m³) × valor do m³ dá o preço de CADA viga;
-                  ela entra no orçamento como peça (quantidade × preço por viga)
+                  Viga para laje/mezanino
+                </p>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <label className="text-xs text-slate-600">Valor do m³ da viga:</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="R$/m³"
+                    value={vigaValorM3}
+                    onChange={aoDigitarDecimal(setVigaValorM3)}
+                    className={`${campoClasse} max-w-[140px]`}
+                  />
+                  {!(Number(vigaValorM3) > 0) && (
+                    <span className="text-xs text-amber-700">
+                      informe o m³ para a viga entrar com preço no total
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mb-2">
+                  A viga da laje entra automática no orçamento
+                  {Number(vao) > 10
+                    ? " já dividida (vão = metade da largura, por causa do pilar no meio)"
+                    : ""}
+                  , altura = vão ÷ 10, uma por linha de pilar que a laje cobre. Você edita
+                  quantidade e preço direto na linha da viga, na lista abaixo.
                 </p>
                 {conferenciaVigasLaje && (
                   <div
@@ -2462,6 +2536,10 @@ function OrcamentosGalpaoPageInterno() {
                     (uma viga por linha de pilar que a laje alcança)
                   </div>
                 )}
+                <details className="mt-1">
+                  <summary className="text-xs text-slate-500 cursor-pointer select-none mb-1">
+                    Ajuste avançado — adicionar uma viga manual (casos especiais)
+                  </summary>
                 <p className="text-xs text-slate-400 mb-2">
                   Sugestão automática: largura fixa de 0,25m; vão (comprimento da viga) = largura
                   do galpão{temPilarNoMeioDaLaje ? " ÷ 2 (há pilar de laje no meio)" : ""} — com
@@ -2543,6 +2621,7 @@ function OrcamentosGalpaoPageInterno() {
                     )}
                   </p>
                 )}
+                </details>
               </div>
             )}
 
