@@ -2166,9 +2166,76 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
+          <TituloEtapa numero="3">Tesoura</TituloEtapa>
+            {tesourasComReferencia.length > 0 && (
+              <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
+                <p className="text-xs font-medium text-slate-600 mb-2">
+                  Calculadora: Tesoura de tamanho variado (proporcional a uma peça de referência)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="tesoura">
+                  <select
+                    value={tesouraRefId}
+                    onChange={(e) => {
+                      setTesouraRefId(e.target.value);
+                      // Sugestão automática: tamanho = largura do galpão
+                      // e quantidade = (nº de vãos + 1) x galpões dessa
+                      // largura. Geminados de larguras diferentes vão
+                      // por etapa: depois de adicionar as tesouras do
+                      // galpão 1, sugere as do galpão 2, e assim vai.
+                      if (e.target.value) {
+                        const s = sugestaoTesoura();
+                        if (s) {
+                          setTesouraTamanho(String(s.tamanho));
+                          setTesouraQtd(String(s.qtd));
+                        }
+                      }
+                    }}
+                    className={campoClasse}
+                  >
+                    <option value="">Tesoura de referência</option>
+                    {tesourasComReferencia.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nome} ({formatarMoeda(Number(t.preco) / Number(t.comprimento_referencia))}/m)
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Tamanho desejado (m)"
+                    value={tesouraTamanho}
+                    onChange={(e) => setTesouraTamanho(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Quantidade"
+                    value={tesouraQtd}
+                    onChange={(e) => setTesouraQtd(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarTesouraProporcional}
+                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 transition"
+                  >
+                    Adicionar tesoura
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Ao escolher a referência, o tamanho (largura do galpão) e a quantidade
+                  ((nº de vãos + 1) por galpão) preenchem sozinhos — é só uma sugestão, ajuste à
+                  vontade. Estimativa proporcional (preço da referência ÷ tamanho dela × tamanho
+                  desejado); vale para tamanhos próximos da referência — vãos muito maiores podem
+                  exigir seção estrutural diferente.
+                </p>
+              </div>
+            )}
+
           {(
             <div className="rounded-lg border border-slate-200 p-4 bg-slate-50 mb-4">
-              <TituloEtapa numero="3">Coberta</TituloEtapa>
+              <TituloEtapa numero="4">Coberta</TituloEtapa>
               <p className="text-xs font-medium text-slate-600 mb-2">
                 Tipo de telha — ao escolher, a telha entra na lista sozinha (área × perda ao
                 lado). Calha e capote (fixos, abaixo) também recalculam sozinhos a partir das
@@ -2213,7 +2280,7 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
-          <TituloEtapa numero="4">Estrutura — peças do galpão</TituloEtapa>
+          <TituloEtapa numero="5">Estrutura — peças do galpão</TituloEtapa>
           <div className="lg:hidden">
             <PainelChecklist />
           </div>
@@ -2334,75 +2401,9 @@ function OrcamentosGalpaoPageInterno() {
               (1 dia por pilar) — pode ajustar manualmente depois se precisar.
             </p>
 
-            {tesourasComReferencia.length > 0 && (
-              <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
-                <p className="text-xs font-medium text-slate-600 mb-2">
-                  Calculadora: Tesoura de tamanho variado (proporcional a uma peça de referência)
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="tesoura">
-                  <select
-                    value={tesouraRefId}
-                    onChange={(e) => {
-                      setTesouraRefId(e.target.value);
-                      // Sugestão automática: tamanho = largura do galpão
-                      // e quantidade = (nº de vãos + 1) x galpões dessa
-                      // largura. Geminados de larguras diferentes vão
-                      // por etapa: depois de adicionar as tesouras do
-                      // galpão 1, sugere as do galpão 2, e assim vai.
-                      if (e.target.value) {
-                        const s = sugestaoTesoura();
-                        if (s) {
-                          setTesouraTamanho(String(s.tamanho));
-                          setTesouraQtd(String(s.qtd));
-                        }
-                      }
-                    }}
-                    className={campoClasse}
-                  >
-                    <option value="">Tesoura de referência</option>
-                    {tesourasComReferencia.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.nome} ({formatarMoeda(Number(t.preco) / Number(t.comprimento_referencia))}/m)
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Tamanho desejado (m)"
-                    value={tesouraTamanho}
-                    onChange={(e) => setTesouraTamanho(e.target.value)}
-                    className={campoClasse}
-                  />
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Quantidade"
-                    value={tesouraQtd}
-                    onChange={(e) => setTesouraQtd(e.target.value)}
-                    className={campoClasse}
-                  />
-                  <button
-                    type="button"
-                    onClick={adicionarTesouraProporcional}
-                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 transition"
-                  >
-                    Adicionar tesoura
-                  </button>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Ao escolher a referência, o tamanho (largura do galpão) e a quantidade
-                  ((nº de vãos + 1) por galpão) preenchem sozinhos — é só uma sugestão, ajuste à
-                  vontade. Estimativa proporcional (preço da referência ÷ tamanho dela × tamanho
-                  desejado); vale para tamanhos próximos da referência — vãos muito maiores podem
-                  exigir seção estrutural diferente.
-                </p>
-              </div>
-            )}
-
             {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
               <div className="rounded-lg border border-emerald-300 bg-emerald-50/40 p-3 mb-3">
-                <TituloEtapa numero="5">Laje / Mezanino</TituloEtapa>
+                <TituloEtapa numero="6">Laje / Mezanino</TituloEtapa>
                 <p className="text-xs font-semibold text-emerald-800 mb-2">
                   Estrutura da laje/mezanino — seção separada, com subtotal e valor/m² próprios
                 </p>
@@ -2854,7 +2855,7 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
-          <TituloEtapa numero="6">Condições e finalização</TituloEtapa>
+          <TituloEtapa numero="7">Condições e finalização</TituloEtapa>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
             <div>
               <label className={labelClasse}>Validade da proposta (dias)</label>
