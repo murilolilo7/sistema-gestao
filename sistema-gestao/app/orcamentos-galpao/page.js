@@ -133,7 +133,7 @@ function recalcularMontagem(listaItens) {
     return soma + (Number(i.quantidade) || 0) / porDia;
   }, 0);
   if (dias <= 0) return listaItens;
-  const diarias = Math.ceil(dias * 10) / 10;
+  const diarias = Math.ceil(dias);
   return listaItens.map((i) =>
     i.nome === "MONTAGEM" && i.secao !== "laje" ? { ...i, quantidade: diarias } : i
   );
@@ -188,7 +188,7 @@ function OrcamentosGalpaoPageInterno() {
   // que segura 2 tesouras). Padrao PESADO; pode virar ESBELTO etc.
   const [nivelReforcado, setNivelReforcado] = useState("PESADO");
   const [nivelComLaje, setNivelComLaje] = useState("COM_LAJE");
-  const [diasValidade, setDiasValidade] = useState("");
+  const [diasValidade, setDiasValidade] = useState("10");
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
   const [buscaPeca, setBuscaPeca] = useState("");
@@ -1543,7 +1543,7 @@ function OrcamentosGalpaoPageInterno() {
     setPilarLajeId("");
     setPilarLajeQtd("1");
     setMontagemLajeQtd("");
-    setDiasValidade("");
+    setDiasValidade("10");
     setItens([]);
     setComposicaoParaAdicionar("");
     setQuantidadeParaAdicionar("1");
@@ -1645,12 +1645,12 @@ function OrcamentosGalpaoPageInterno() {
 
   // Duplicar: carrega tudo do orçamento escolhido e salva como um NOVO
   // (serve até para orçamentos aprovados ou vencidos — cria variações
-  // sem redigitar nada). Validade volta para 30 dias.
+  // sem redigitar nada). Validade volta para 10 dias.
   function duplicarOrcamento(orcamento) {
     abrirEdicao(orcamento);
     setEditingId(null);
     setEditingCodigo(null);
-    setDiasValidade("30");
+    setDiasValidade("10");
     setMensagem(
       `Duplicando o orçamento Nº ${orcamento.codigo} — ajuste o que precisar e salve como um novo orçamento.`
     );
@@ -1989,8 +1989,8 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           </div>
 
-          {modeloId && <TituloEtapa numero="2">Medidas do galpão</TituloEtapa>}
-          {modeloId && (
+          <TituloEtapa numero="2">Medidas do galpão</TituloEtapa>
+          {(
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
               <div>
                 <label className={labelClasse}>
@@ -2166,7 +2166,7 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
-          {modeloId && (
+          {(
             <div className="rounded-lg border border-slate-200 p-4 bg-slate-50 mb-4">
               <TituloEtapa numero="3">Coberta</TituloEtapa>
               <p className="text-xs font-medium text-slate-600 mb-2">
