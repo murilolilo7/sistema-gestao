@@ -370,10 +370,14 @@ function OrcamentosGalpaoPageInterno() {
     const linhasComLaje = sug ? Math.max(0, Math.min(pilaresPorFileira, sug.qtd)) : 0;
     const qtdComLaje = linhasComLaje > 0 ? 2 * linhasComLaje : 0;
     const qtdPadrao = Math.max(0, qtdExterior - qtdComLaje); // exterior fora da laje
-    // Pilar menor no meio do vao: so quando a largura de 1 galpao passa de
-    // 10m (a viga e dividida). Padrao 5m (3,5 livre + 1,5 fundacao), 25x30,
-    // um por linha coberta pela laje. Editavel na quantidade.
-    const qtdMeio = comLaje && v > 10 ? linhasComLaje : 0;
+    // Pilar menor no meio do vao: a viga da laje nunca passa de 10m, entao a
+    // largura se divide em trechos = arredonda(largura / 10) pra cima. Cada
+    // trecho a mais precisa de uma fila de pilar no meio (trechos - 1 filas);
+    // cada fila tem um pilar por linha coberta pela laje. 5m (3,5 livre + 1,5
+    // fundacao), 25x30. Editavel na quantidade.
+    const trechosViga = v > 0 ? Math.ceil(v / 10) : 1;
+    const filasMeioLaje = Math.max(0, trechosViga - 1);
+    const qtdMeio = comLaje ? filasMeioLaje * linhasComLaje : 0;
 
     const nomePilar = (data, sufixo) =>
       "PILAR " +
@@ -1019,10 +1023,12 @@ function OrcamentosGalpaoPageInterno() {
     if (!tipoSelecionado || tipoSelecionado === "simples") return null;
     const s = sugestaoQtdVigasLaje();
     if (!s) return null;
+    const larg = Number(vao) || 0;
+    const trechos = larg > 0 ? Math.ceil(larg / 10) : 1;
     const lancadas = itens
       .filter((i) => i.papel === "VIGA_LAJE")
       .reduce((soma, i) => soma + (Number(i.quantidade) || 0), 0);
-    return { ...s, lancadas };
+    return { ...s, qtd: s.qtd * trechos, trechos, lancadas };
   })();
 
   function adicionarItem() {
@@ -1065,17 +1071,15 @@ function OrcamentosGalpaoPageInterno() {
     if (vigaLargura || vigaAltura || vigaVao) return; // não mexe no que foi digitado
     const larguraGalpao1 = Number(vao) || 0;
     if (larguraGalpao1 <= 0) return;
-    const pilarNoMeio = itens.some((i) => i.secao === "laje" && i.papel === "PILAR");
-    const vaoDaViga = pilarNoMeio
-      ? Math.round((larguraGalpao1 / 2) * 100) / 100
-      : larguraGalpao1;
+    const trechos = larguraGalpao1 > 0 ? Math.ceil(larguraGalpao1 / 10) : 1;
+    const vaoDaViga = Math.round((larguraGalpao1 / trechos) * 100) / 100;
     // altura = vão/10, múltiplo de 5cm para cima (10m -> 1,00m; 5m -> 0,50m)
     const alturaViga = Math.round(Math.ceil(vaoDaViga / 10 / 0.05) * 0.05 * 100) / 100;
     setVigaLargura("0.25");
     setVigaAltura(String(alturaViga));
     setVigaVao(String(vaoDaViga));
     const s = sugestaoQtdVigasLaje();
-    if (s?.qtd) setVigaQtd(String(s.qtd));
+    if (s?.qtd) setVigaQtd(String(s.qtd * trechos));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tipoSelecionado, vao, comprimento, areaLaje, numeroVaos, itens]);
 
@@ -1099,17 +1103,15 @@ function OrcamentosGalpaoPageInterno() {
       );
       return;
     }
-    const pilarNoMeio = larguraGalpao > 10;
-    const vaoViga = pilarNoMeio
-      ? Math.round((larguraGalpao / 2) * 100) / 100
-      : larguraGalpao;
+    const trechos = larguraGalpao > 0 ? Math.ceil(larguraGalpao / 10) : 1;
+    const vaoViga = Math.round((larguraGalpao / trechos) * 100) / 100;
     const alturaViga = Math.round(Math.ceil(vaoViga / 10 / 0.05) * 0.05 * 100) / 100;
     const m3 = Number(vigaValorM3) || 0;
     const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
     const nome =
       "VIGA PARA LAJE " +
       doisDec(0.25, 2) + "X" + doisDec(alturaViga, 2) + "X" + doisDec(vaoViga, 2) + "M" +
-      (pilarNoMeio ? " — dividida (pilar no meio)" : "");
+      (trechos > 1 ? " — dividida em " + trechos + " (pilar no meio)" : "");
     setItens((atual) => {
       const ant = atual.find((i) => i.chave === "viga-laje-auto");
       const semAuto = atual.filter((i) => i.chave !== "viga-laje-auto");
@@ -1121,7 +1123,7 @@ function OrcamentosGalpaoPageInterno() {
           nome,
           unidade: "UND",
           papel: "VIGA_LAJE",
-          quantidade: ant && ant.quantidadeEditada ? ant.quantidade : qtdViga,
+          quantidade: ant && ant.quantidadeEditada ? ant.quantidade : qtdViga * trechos,
           preco_unitario: preco,
           secao: "laje",
         },
@@ -1129,6 +1131,73 @@ function OrcamentosGalpaoPageInterno() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tipoSelecionado, vao, comprimento, areaLaje, numeroVaos, vigaValorM3, totalGalpoes]);
+
+  // Laje 100%: ao escolher o tipo "laje" a laje cobre o galpao inteiro, entao
+  // a area ja entra automatica (largura total × comprimento) e o usuario so
+  // escolhe o TIPO de laje. Fica editavel: se digitar outra area (parcial), o
+  // sistema respeita. Mezanino segue manual (normalmente e parcial).
+  useEffect(() => {
+    if (tipoSelecionado !== "laje") return;
+    if (areaLaje !== "") return;
+    const larg = somaLarguras || Number(vao) || 0;
+    const comp = Number(comprimento) || 0;
+    if (larg > 0 && comp > 0) {
+      setAreaLaje(String(Math.round(larg * comp * 100) / 100));
+    }
+  }, [tipoSelecionado, vao, comprimento, somaLarguras, areaLaje]);
+
+  // Terças AUTOMÁTICAS: o sistema já sabe a quantidade pela largura (÷ 1,6,
+  // arredondada pra cima e sempre par) e pelo comprimento (decomposto em vãos
+  // de 5m e 6m). Lança sozinho as terças de cada medida, achando a composição
+  // no catálogo pelo nome (5,00M / 6,00M). Editável: se a quantidade for
+  // alterada à mão, respeita (quantidadeEditada). Some se não der pra calcular
+  // ou faltar a composição no catálogo.
+  useEffect(() => {
+    setItens((atual) => {
+      const semAuto = atual.filter(
+        (i) => i.chave !== "terca-auto-5" && i.chave !== "terca-auto-6"
+      );
+      const decomp = decomporComprimentoEmModulos(comprimento);
+      const larguras = listaLarguras || [Number(vao)];
+      const totalPorVao = larguras.reduce(
+        (s, l) => s + qtdTercasPorLinhaDeVao(l),
+        0
+      );
+      if (!vao || !comprimento || !decomp || totalPorVao <= 0) return semAuto;
+      const tercasCat = composicoes.filter((c) => c.papel === "TERCA");
+      const acharTerca = (medida) =>
+        tercasCat.find((c) => {
+          const m = (c.nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i)?.[1];
+          return m
+            ? Math.round(parseFloat(m.replace(",", "."))) === medida
+            : false;
+        });
+      const qtdDe = (chave, padrao) => {
+        const a = atual.find((i) => i.chave === chave);
+        return a && a.quantidadeEditada ? a.quantidade : padrao;
+      };
+      const novos = [];
+      for (const medida of [5, 6]) {
+        const vaosDaMedida = medida === 5 ? decomp.vaos5 : decomp.vaos6;
+        const qtd = totalPorVao * vaosDaMedida;
+        if (qtd <= 0) continue;
+        const comp = acharTerca(medida);
+        if (!comp) continue;
+        novos.push({
+          chave: `terca-auto-${medida}`,
+          composicao_id: comp.id,
+          nome: comp.nome,
+          unidade: comp.unidade,
+          papel: "TERCA",
+          quantidade: qtdDe(`terca-auto-${medida}`, qtd),
+          preco_unitario: Number(comp.preco) || 0,
+          secao: "estrutura",
+        });
+      }
+      return recalcularMontagem([...novos, ...semAuto]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vao, comprimento, numeroVaos, totalGalpoes, largurasExtras, composicoes]);
 
   // Campos decimais que aceitam vírgula: ",25" vira "0.25" na hora.
   const aoDigitarDecimal = (setter) => (e) => {
@@ -1275,7 +1344,15 @@ function OrcamentosGalpaoPageInterno() {
     setItens((atual) => {
       const itemAlvo = atual.find((i) => i.chave === chave);
       const atualizados = atual.map((i) =>
-        i.chave === chave ? { ...i, [campo]: Math.max(0, Number(valor) || 0) } : i
+        i.chave === chave
+          ? {
+              ...i,
+              [campo]: Math.max(0, Number(valor) || 0),
+              // Editou a quantidade à mão? Marca pra os cálculos automáticos
+              // (pilar, viga, terça) respeitarem e não sobrescreverem.
+              ...(campo === "quantidade" ? { quantidadeEditada: true } : {}),
+            }
+          : i
       );
       // Só recalcula a fundação sozinha quando quem mudou foi um PILAR —
       // editar a fundação diretamente não é sobrescrito (fica manual).
@@ -2550,6 +2627,7 @@ function OrcamentosGalpaoPageInterno() {
                   final confirma). Tudo editável.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-6 gap-2" data-bloco="viga-laje">
+                  <div className="flex flex-col gap-0.5">
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2558,6 +2636,9 @@ function OrcamentosGalpaoPageInterno() {
                     onChange={aoDigitarDecimal(setVigaLargura)}
                     className={campoClasse}
                   />
+                  <span className="text-[10px] text-slate-500 text-center">Largura</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2566,6 +2647,9 @@ function OrcamentosGalpaoPageInterno() {
                     onChange={aoDigitarDecimal(setVigaAltura)}
                     className={campoClasse}
                   />
+                  <span className="text-[10px] text-slate-500 text-center">Altura</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2574,6 +2658,9 @@ function OrcamentosGalpaoPageInterno() {
                     onChange={aoDigitarDecimal(setVigaVao)}
                     className={campoClasse}
                   />
+                  <span className="text-[10px] text-slate-500 text-center">Comprimento</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2582,6 +2669,9 @@ function OrcamentosGalpaoPageInterno() {
                     onChange={aoDigitarDecimal(setVigaValorM3)}
                     className={campoClasse}
                   />
+                  <span className="text-[10px] text-slate-500 text-center">Valor m³</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
                   <input
                     type="number"
                     min="1"
@@ -2590,6 +2680,8 @@ function OrcamentosGalpaoPageInterno() {
                     onChange={(e) => setVigaQtd(e.target.value)}
                     className={campoClasse}
                   />
+                  <span className="text-[10px] text-slate-500 text-center">Qtd. vigas</span>
+                  </div>
                   <button
                     type="button"
                     onClick={adicionarVigaLaje}
