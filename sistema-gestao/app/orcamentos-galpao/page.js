@@ -2835,7 +2835,11 @@ function OrcamentosGalpaoPageInterno() {
           {itens.length > 0 && (
             <div className="sticky bottom-0 z-10 -mx-5 px-5 py-2 bg-white/95 backdrop-blur border-t border-slate-200 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
               <span className="text-slate-500">
-                Total: <b className="text-slate-800 text-base">{formatarMoeda(totalFinal)}</b>
+                Peças (sem BDI): <b className="text-slate-700">{formatarMoeda(subtotal)}</b>
+              </span>
+              <span className="text-slate-500">
+                Total{margemNumerica > 0 ? " (com BDI)" : ""}:{" "}
+                <b className="text-slate-800 text-base">{formatarMoeda(totalFinal)}</b>
               </span>
               {areaCalculada && (
                 <span className="text-slate-500">
