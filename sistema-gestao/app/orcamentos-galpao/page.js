@@ -140,11 +140,50 @@ function recalcularMontagem(listaItens) {
 }
 
 function recalcularFundacao(listaItens) {
-  const totalPilares = listaItens.reduce(
-    (soma, i) => (i.papel === "PILAR" ? soma + Number(i.quantidade || 0) : soma),
+  // Fundação = 1 dia por pilar. Separada por seção: os pilares da estrutura
+  // alimentam a FUNDAÇÃO da estrutura; os pilares do meio da laje (que seguram
+  // as vigas) alimentam a FUNDAÇÃO da seção da laje. Ambas editáveis à mão.
+  const pilaresEstrutura = listaItens.reduce(
+    (soma, i) => (i.papel === "PILAR" && i.secao !== "laje" ? soma + Number(i.quantidade || 0) : soma),
     0
   );
-  return recalcularMontagem(listaItens.map((i) => (i.nome === "FUNDAÇÃO" ? { ...i, quantidade: totalPilares } : i)));
+  const pilaresLaje = listaItens.reduce(
+    (soma, i) => (i.papel === "PILAR" && i.secao === "laje" ? soma + Number(i.quantidade || 0) : soma),
+    0
+  );
+  let lista = listaItens.slice();
+  const fundLaje = lista.find((i) => i.nome === "FUNDAÇÃO" && i.secao === "laje");
+  const fundEstr = lista.find((i) => i.nome === "FUNDAÇÃO" && i.secao !== "laje");
+  // Cria a fundação da laje quando há pilares de laje e ela ainda não existe
+  // (usa a fundação da estrutura como molde pra herdar composição/preço).
+  if (pilaresLaje > 0 && !fundLaje && fundEstr) {
+    lista = [
+      ...lista,
+      {
+        ...fundEstr,
+        chave: "fundacao-laje",
+        secao: "laje",
+        quantidade: pilaresLaje,
+        quantidadeEditada: false,
+        obrigatorio: false,
+      },
+    ];
+  }
+  // Some com a fundação da laje (não editada) quando não há mais pilares de laje.
+  if (pilaresLaje === 0) {
+    lista = lista.filter(
+      (i) => !(i.nome === "FUNDAÇÃO" && i.secao === "laje" && !i.quantidadeEditada)
+    );
+  }
+  return recalcularMontagem(
+    lista.map((i) => {
+      if (i.nome === "FUNDAÇÃO" && i.secao === "laje")
+        return { ...i, quantidade: i.quantidadeEditada ? i.quantidade : pilaresLaje };
+      if (i.nome === "FUNDAÇÃO")
+        return { ...i, quantidade: i.quantidadeEditada ? i.quantidade : pilaresEstrutura };
+      return i;
+    })
+  );
 }
 
 function OrcamentosGalpaoPageInterno() {
@@ -1132,19 +1171,42 @@ function OrcamentosGalpaoPageInterno() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tipoSelecionado, vao, comprimento, areaLaje, numeroVaos, vigaValorM3, totalGalpoes]);
 
+  // Nº de vãos AUTOMÁTICO: vem do comprimento (dividido em módulos de 5m e 6m).
+  // Preenche o campo pra ficar visível junto com a sugestão. Editável: se o
+  // usuário digitar outro número, o sistema para de sobrescrever (compara com o
+  // último valor automático guardado no ref).
+  const ultimoVaoAuto = useRef("");
+  useEffect(() => {
+    const dedu = decomporComprimentoEmModulos(comprimento);
+    const auto = dedu ? String(dedu.vaos5 + dedu.vaos6) : "";
+    if (numeroVaos === "" || numeroVaos === ultimoVaoAuto.current) {
+      if (auto && auto !== numeroVaos) setNumeroVaos(auto);
+      ultimoVaoAuto.current = auto;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comprimento]);
+
   // Laje 100%: ao escolher o tipo "laje" a laje cobre o galpao inteiro, entao
   // a area ja entra automatica (largura total × comprimento) e o usuario so
-  // escolhe o TIPO de laje. Fica editavel: se digitar outra area (parcial), o
-  // sistema respeita. Mezanino segue manual (normalmente e parcial).
+  // escolhe o TIPO de laje. Recalcula quando as medidas mudam. Editavel: se o
+  // usuario digitar outra area (parcial), o sistema para de sobrescrever
+  // (compara com o ultimo valor automatico guardado no ref). Mezanino segue
+  // manual (normalmente e parcial).
+  const ultimaAreaLajeAuto = useRef("");
   useEffect(() => {
     if (tipoSelecionado !== "laje") return;
-    if (areaLaje !== "") return;
     const larg = somaLarguras || Number(vao) || 0;
     const comp = Number(comprimento) || 0;
-    if (larg > 0 && comp > 0) {
-      setAreaLaje(String(Math.round(larg * comp * 100) / 100));
+    const auto =
+      larg > 0 && comp > 0
+        ? String(Math.round(larg * comp * 100) / 100)
+        : "";
+    if (areaLaje === "" || areaLaje === ultimaAreaLajeAuto.current) {
+      if (auto && auto !== areaLaje) setAreaLaje(auto);
+      ultimaAreaLajeAuto.current = auto;
     }
-  }, [tipoSelecionado, vao, comprimento, somaLarguras, areaLaje]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tipoSelecionado, vao, comprimento, somaLarguras]);
 
   // Terças AUTOMÁTICAS: o sistema já sabe a quantidade pela largura (÷ 1,6,
   // arredondada pra cima e sempre par) e pelo comprimento (decomposto em vãos
