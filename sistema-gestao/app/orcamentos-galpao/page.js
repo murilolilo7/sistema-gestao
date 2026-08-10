@@ -1496,6 +1496,32 @@ function OrcamentosGalpaoPageInterno() {
       });
     }
 
+    // Pilares da LAJE: os do meio, que dividem e seguram as vigas.
+    // A viga nunca passa de 10m, entao trechos = largura ÷ 10 (pra cima) e
+    // cada trecho a mais exige uma fila de pilar no meio (trechos - 1).
+    // Ex.: 12m -> 2 trechos -> 1 fila; 21m -> 3 trechos -> 2 filas.
+    if (nV > 0 && Number(areaLaje) > 0) {
+      const largCheck = Number(vao) || 0;
+      const trechosCheck = largCheck > 0 ? Math.ceil(largCheck / 10) : 1;
+      const filasMeio = Math.max(0, trechosCheck - 1);
+      const sugCheck = sugestaoQtdVigasLaje();
+      const linhasLaje = sugCheck
+        ? Math.max(0, Math.min(nV + 1, sugCheck.qtd))
+        : 0;
+      const necMeio = filasMeio * linhasLaje;
+      if (necMeio > 0) {
+        const lanMeio = somaQtd((i) => i.papel === "PILAR" && i.secao === "laje");
+        linhas.push({
+          rotulo: "Pilares da laje",
+          detalhe: `${filasMeio} fila(s) no meio × ${linhasLaje} linhas`,
+          necessario: necMeio,
+          lancado: lanMeio,
+          ok: lanMeio >= necMeio,
+          texto: `${fmtNum(lanMeio)} de ${fmtNum(necMeio)}`,
+        });
+      }
+    }
+
     // Tesouras: (vãos+1) por galpão, separadas por largura quando diferentes
     if (nV > 0) {
       const larguras = listaLarguras || [Number(vao)];
@@ -1621,21 +1647,36 @@ function OrcamentosGalpaoPageInterno() {
         const lan = somaQtd((i) => i.papel === "LAJE");
         linhas.push({
           rotulo: "Laje (m²)",
-          detalhe: `área informada`,
+          detalhe:
+            lan > 0
+              ? `área informada`
+              : `escolha o tipo de laje (área: ${fmtNum(areaLajeNumerica)} m²)`,
           necessario: areaLajeNumerica,
           lancado: lan,
           ok: lan >= areaLajeNumerica - 0.5,
-          texto: `${fmtNum(lan)} de ${fmtNum(areaLajeNumerica)}`,
+          texto:
+            lan > 0
+              ? `${fmtNum(lan)} de ${fmtNum(areaLajeNumerica)}`
+              : `tipo de laje não escolhido`,
         });
       }
       if (conferenciaVigasLaje) {
+        // Só fica verde se, além da quantidade, o valor do concreto (m³)
+        // estiver informado — sem ele a viga entra com preço zerado.
+        const valorM3 = Number(String(vigaValorM3).replace(",", ".")) || 0;
+        const qtdOk =
+          conferenciaVigasLaje.lancadas >= conferenciaVigasLaje.qtd;
         linhas.push({
           rotulo: "Vigas da laje",
-          detalhe: `linhas de pilar na laje`,
+          detalhe: valorM3 > 0 ? `linhas de pilar na laje` : `falta o valor do m³`,
           necessario: conferenciaVigasLaje.qtd,
           lancado: conferenciaVigasLaje.lancadas,
-          ok: conferenciaVigasLaje.lancadas >= conferenciaVigasLaje.qtd,
-          texto: `${fmtNum(conferenciaVigasLaje.lancadas)} de ${fmtNum(conferenciaVigasLaje.qtd)}`,
+          ok: qtdOk && valorM3 > 0,
+          texto: qtdOk
+            ? valorM3 > 0
+              ? `${fmtNum(conferenciaVigasLaje.lancadas)} de ${fmtNum(conferenciaVigasLaje.qtd)}`
+              : `${fmtNum(conferenciaVigasLaje.lancadas)} lançadas — informe o m³`
+            : `${fmtNum(conferenciaVigasLaje.lancadas)} de ${fmtNum(conferenciaVigasLaje.qtd)}`,
         });
       }
       // Montagem da laje/mezanino (em VB): precisa estar lançada
