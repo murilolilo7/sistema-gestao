@@ -978,11 +978,38 @@ function OrcamentosGalpaoPageInterno() {
   function decomporComprimentoEmModulos(comprimentoTotal) {
     const c = Number(comprimentoTotal);
     if (!c || c <= 0) return null;
-    const inteiro = Math.round(c);
-    if (Math.abs(c - inteiro) > 0.001) return null; // comprimento quebrado: sem decomposição
-    for (let vaos6 = 0; vaos6 * 6 <= inteiro; vaos6++) {
-      const resto = inteiro - vaos6 * 6;
-      if (resto % 5 === 0) return { vaos5: resto / 5, vaos6 };
+    const inteiro = Math.floor(c + 0.0001);
+    const sobra = Math.round((c - inteiro) * 100) / 100;
+
+    // Decompoe um numero inteiro em vaos de 5m e 6m.
+    const emModulos = (n) => {
+      if (n < 0) return null;
+      for (let vaos6 = 0; vaos6 * 6 <= n; vaos6++) {
+        const r = n - vaos6 * 6;
+        if (r % 5 === 0) return { vaos5: r / 5, vaos6 };
+      }
+      return null;
+    };
+
+    // Comprimento redondo: divisao exata em modulos.
+    if (sobra < 0.001) {
+      const d = emModulos(inteiro);
+      return d ? { ...d, quebrado: null } : null;
+    }
+
+    // Comprimento quebrado (ex.: 27,4m): a sobra vira UM vao maior, em vez
+    // de o sistema desistir da divisao. 27,4 = 2x5m + 2x6m + 1 vao de 5,40m.
+    // Esse vao quebrado usa TERCA DE 6,00M — ela passa com folga (a sobra
+    // vira margem de desconto na negociacao), por isso conta como vao de 6m.
+    for (const base of [5, 6]) {
+      const d = emModulos(inteiro - base);
+      if (d) {
+        return {
+          vaos5: d.vaos5,
+          vaos6: d.vaos6 + 1,
+          quebrado: Math.round((base + sobra) * 100) / 100,
+        };
+      }
     }
     return null;
   }
@@ -2284,10 +2311,16 @@ function OrcamentosGalpaoPageInterno() {
                   const totalVaos = d.vaos5 + d.vaos6;
                   const partes = [];
                   if (d.vaos5) partes.push(d.vaos5 + " de 5m");
-                  if (d.vaos6) partes.push(d.vaos6 + " de 6m");
+                  if (d.vaos6)
+                    partes.push(
+                      d.quebrado
+                        ? d.vaos6 - 1 + " de 6m + 1 de " + d.quebrado.toFixed(2).replace(".", ",") + "m"
+                        : d.vaos6 + " de 6m"
+                    );
                   return (
                     <p className="text-[11px] text-emerald-700 mt-1">
                       Sugestão: {totalVaos} vão(s) — {partes.join(" + ")}
+                      {d.quebrado ? " (o vão quebrado leva terça de 6m, que passa com folga)" : ""}
                     </p>
                   );
                 })()}
