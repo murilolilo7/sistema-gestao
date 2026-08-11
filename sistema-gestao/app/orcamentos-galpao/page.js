@@ -2315,63 +2315,6 @@ function OrcamentosGalpaoPageInterno() {
                   className={campoClasse}
                 />
               </div>
-              <div className="sm:col-span-2 lg:col-span-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={temPlatibanda}
-                    onChange={(e) => setTemPlatibanda(e.target.checked)}
-                    className="h-4 w-4"
-                  />
-                  <span className="font-medium">Galpão com platibanda</span>
-                </label>
-                {temPlatibanda && (
-                  <>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      <div>
-                        <label className={labelClasse}>Altura da platibanda (m)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={alturaPlatibanda}
-                          onChange={(e) => setAlturaPlatibanda(e.target.value)}
-                          className={campoClasse}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClasse}>Espessura no pilar (m)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={espessuraPlatibanda}
-                          onChange={(e) => setEspessuraPlatibanda(e.target.value)}
-                          className={campoClasse}
-                        />
-                      </div>
-                    </div>
-                    <p className="mt-2 text-xs text-slate-500">
-                      Só essa espessura do pilar sobe; o restante da seção fica de apoio
-                      para a tesoura. Entra em todos os pilares da estrutura.
-                    </p>
-                    {Number(vao) > 17 && (
-                      <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={temDenteGerber}
-                          onChange={(e) => setTemDenteGerber(e.target.checked)}
-                          className="h-4 w-4"
-                        />
-                        <span>
-                          Dente gerber no apoio da tesoura
-                          <span className="text-slate-500"> (largura acima de 17m)</span>
-                        </span>
-                      </label>
-                    )}
-                  </>
-                )}
-              </div>
               <div>
                 <label className={labelClasse}>Germinados a mais</label>
                 <input
@@ -2383,6 +2326,60 @@ function OrcamentosGalpaoPageInterno() {
                   className={campoClasse}
                 />
               </div>
+            </div>
+          )}
+
+          {modeloId && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={temPlatibanda}
+                  onChange={(e) => setTemPlatibanda(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Galpão com platibanda — só parte da seção do pilar sobe; o restante
+                fica de apoio para a tesoura
+              </label>
+              {temPlatibanda && (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+                    <div>
+                      <label className={labelClasse}>Altura da platibanda (m)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={alturaPlatibanda}
+                        onChange={(e) => setAlturaPlatibanda(e.target.value)}
+                        className={campoClasse}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClasse}>Espessura no pilar (m)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={espessuraPlatibanda}
+                        onChange={(e) => setEspessuraPlatibanda(e.target.value)}
+                        className={campoClasse}
+                      />
+                    </div>
+                  </div>
+                  {Number(vao) > 17 && (
+                    <label className="flex items-center gap-2 text-xs font-medium text-slate-600 mt-2">
+                      <input
+                        type="checkbox"
+                        checked={temDenteGerber}
+                        onChange={(e) => setTemDenteGerber(e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      Dente gerber (consolo) no apoio da tesoura — um por pilar
+                    </label>
+                  )}
+                </>
+              )}
             </div>
           )}
 
