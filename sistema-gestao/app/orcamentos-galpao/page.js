@@ -17,6 +17,12 @@ const ORDEM_ESTRUTURA = [
   "TESOURA", "PILAR", "TERCA", "VIGA_TRAVAMENTO",
   "TELHA", "CAPOTE", "CALHA", "MONTAGEM", "FUNDACAO",
 ];
+// Consolo da tesoura ("dente gerber"): valor por peca. Base do levantamento
+// dos projetos: ~0,030 m3 de concreto e ~5,5 kg de aco por consolo, com taxa
+// de armadura de ~180-205 kg/m3 (quase o dobro de um pilar comum), mais a
+// forma, que e trabalhosa para uma peca pequena. Editavel na lista de pecas.
+const PRECO_CONSOLO_TESOURA = 150;
+
 const ORDEM_LAJE = ["PILAR", "VIGA_LAJE", "LAJE", "MONTAGEM"];
 
 // Itens livres (sem peça do catálogo) têm papel deduzido pelo nome.
@@ -212,6 +218,15 @@ function OrcamentosGalpaoPageInterno() {
   const [vao, setVao] = useState("");
   const [comprimento, setComprimento] = useState("");
   const [peDireito, setPeDireito] = useState("");
+  // Platibanda: parte da secao do pilar (ex.: 15 dos 40cm) que sobe acima da
+  // tesoura. O restante da secao fica de apoio para a tesoura encostar.
+  // Nem todo galpao tem, por isso entra desmarcada.
+  const [temPlatibanda, setTemPlatibanda] = useState(false);
+  const [alturaPlatibanda, setAlturaPlatibanda] = useState("1.20");
+  const [espessuraPlatibanda, setEspessuraPlatibanda] = useState("0.15");
+  // Dente gerber: reforco do apoio da tesoura. So faz sentido em galpao com
+  // platibanda e largura acima de 17m.
+  const [temDenteGerber, setTemDenteGerber] = useState(false);
   const [numeroVaos, setNumeroVaos] = useState("");
   const [numeroGalpoesGerminados, setNumeroGalpoesGerminados] = useState("0");
   // Larguras dos galpões 2, 3, ... quando o geminado tem tamanhos
@@ -377,6 +392,7 @@ function OrcamentosGalpaoPageInterno() {
       "pilar-auto-comlaje",
       "pilar-auto-reforcado",
       "pilar-auto-meio",
+      "consolo-tesoura-auto",
     ];
     if (!paramEng || !paramEng.pilar_automatico) {
       setItens((atual) =>
@@ -418,11 +434,25 @@ function OrcamentosGalpaoPageInterno() {
     const filasMeioLaje = Math.max(0, trechosViga - 1);
     const qtdMeio = comLaje ? filasMeioLaje * linhasComLaje : 0;
 
+    // Platibanda: so uma fatia da secao do pilar sobe (ex.: 0,15 dos 0,40),
+    // o resto fica de apoio da tesoura. Por isso o acrescimo e pequeno:
+    // 0,25 x 0,15 x 1,20 = 0,045 m3 (~R$ 135), e nao o pilar inteiro esticado.
+    const platAlt = temPlatibanda ? Number(alturaPlatibanda) || 0 : 0;
+    const platEsp = temPlatibanda ? Number(espessuraPlatibanda) || 0 : 0;
+    const custoPlatibanda = (data) => {
+      if (platAlt <= 0 || platEsp <= 0) return 0;
+      const vol = Number(data.secao_largura_m) * platEsp * platAlt;
+      const vM3 = Number(data.valor_m3_armado) || 0;
+      return Math.round(vol * vM3 * 100) / 100;
+    };
+
     const nomePilar = (data, sufixo) =>
       "PILAR " +
       doisDec(data.secao_largura_m, 2) + "x" + doisDec(data.secao_altura_m, 2) +
       " - " + doisDec(data.comprimento_total_m, 2) + "m (" +
-      doisDec(pe, 2) + " livre + " + doisDec(data.fundacao_m, 2) + " fundacao)" +
+      doisDec(pe, 2) + " livre" +
+      (platAlt > 0 ? " + " + doisDec(platAlt, 2) + " platibanda" : "") +
+      " + " + doisDec(data.fundacao_m, 2) + " fundacao)" +
       (sufixo ? " — " + sufixo : "");
 
     let cancelado = false;
@@ -475,7 +505,7 @@ function OrcamentosGalpaoPageInterno() {
             unidade: "PÇ",
             papel: "PILAR",
             quantidade: qtdDe("pilar-auto-padrao", qtdPadrao),
-            preco_unitario: Number(dPadrao.custo_total) || 0,
+            preco_unitario: (Number(dPadrao.custo_total) || 0) + custoPlatibanda(dPadrao),
             secao: "estrutura",
           });
         }
@@ -487,7 +517,7 @@ function OrcamentosGalpaoPageInterno() {
             unidade: "PÇ",
             papel: "PILAR",
             quantidade: qtdDe("pilar-auto-comlaje", qtdComLaje),
-            preco_unitario: Number(dComLaje.custo_total) || 0,
+            preco_unitario: (Number(dComLaje.custo_total) || 0) + custoPlatibanda(dComLaje),
             secao: "estrutura",
           });
         }
@@ -499,7 +529,7 @@ function OrcamentosGalpaoPageInterno() {
             unidade: "PÇ",
             papel: "PILAR",
             quantidade: qtdDe("pilar-auto-reforcado", qtdReforcado),
-            preco_unitario: Number(dReforcado.custo_total) || 0,
+            preco_unitario: (Number(dReforcado.custo_total) || 0) + custoPlatibanda(dReforcado),
             secao: "estrutura",
           });
         }
@@ -515,13 +545,37 @@ function OrcamentosGalpaoPageInterno() {
             secao: "laje",
           });
         }
+        // Consolo da tesoura (o "dente gerber"): reforco no topo do pilar onde
+        // a tesoura apoia. Nos projetos so aparece quando o galpao tem
+        // platibanda E o vao passa de 17m — por isso as duas condicoes.
+        // Levantamento das pecas confirmadas: ~0,030 m3 e ~5,5 kg de aco,
+        // taxa de armadura ~180-205 kg/m3 (quase o dobro de um pilar), por
+        // isso o valor nao sai do m3 do pilar e sim de um preco proprio.
+        // Um consolo por pilar da estrutura; quantidade e preco editaveis.
+        if (temPlatibanda && temDenteGerber && v > 17) {
+          const qtdConsolo = pilaresPorFileira * (2 + fileirasReforcadas);
+          if (qtdConsolo > 0) {
+            novos.push({
+              chave: "consolo-tesoura-auto",
+              composicao_id: null,
+              nome: "CONSOLO TESOURA (dente gerber) - apoio da tesoura no topo do pilar",
+              unidade: "PÇ",
+              // papel proprio: se fosse PILAR entraria na conferencia de
+              // pilares do checklist e inflaria a contagem.
+              papel: "CONSOLO",
+              quantidade: qtdDe("consolo-tesoura-auto", qtdConsolo),
+              preco_unitario: PRECO_CONSOLO_TESOURA,
+              secao: "estrutura",
+            });
+          }
+        }
         return recalcularFundacao([...novos, ...semAuto]);
       });
     })();
     return () => {
       cancelado = true;
     };
-  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, nivelReforcado, nivelComLaje]);
+  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber]);
   const listaLarguras =
     totalGalpoes > 1 && vao
       ? Array.from({ length: totalGalpoes }, (_, i) =>
@@ -686,6 +740,7 @@ function OrcamentosGalpaoPageInterno() {
             editingId,
             editingCodigo,
             clienteId, modeloId, vao, comprimento, peDireito, numeroVaos,
+            temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber,
             numeroGalpoesGerminados, largurasExtras, telhaId, perdaTelha,
             areaLaje, tipoLajeId, diasValidade, desconto, margemComercial,
             observacao, observacaoInterna, itens,
@@ -695,6 +750,7 @@ function OrcamentosGalpaoPageInterno() {
     }, 800);
     return () => clearTimeout(t);
   }, [modo, clienteId, modeloId, vao, comprimento, peDireito, numeroVaos,
+      temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber,
       numeroGalpoesGerminados, largurasExtras, telhaId, perdaTelha, areaLaje,
       tipoLajeId, diasValidade, desconto, margemComercial, observacao,
       observacaoInterna, itens, editingId, editingCodigo]);
@@ -722,6 +778,10 @@ function OrcamentosGalpaoPageInterno() {
     setVao(r.vao || "");
     setComprimento(r.comprimento || "");
     setPeDireito(r.peDireito || "");
+    setTemPlatibanda(!!r.temPlatibanda);
+    setAlturaPlatibanda(r.alturaPlatibanda || "1.20");
+    setEspessuraPlatibanda(r.espessuraPlatibanda || "0.15");
+    setTemDenteGerber(!!r.temDenteGerber);
     setNumeroVaos(r.numeroVaos || "");
     setNumeroGalpoesGerminados(r.numeroGalpoesGerminados || "0");
     setLargurasExtras(Array.isArray(r.largurasExtras) ? r.largurasExtras : []);
@@ -1713,6 +1773,10 @@ function OrcamentosGalpaoPageInterno() {
     setVao("");
     setComprimento("");
     setPeDireito("");
+    setTemPlatibanda(false);
+    setAlturaPlatibanda("1.20");
+    setEspessuraPlatibanda("0.15");
+    setTemDenteGerber(false);
     setNumeroVaos("");
     setNumeroGalpoesGerminados("0");
     setLargurasExtras([]);
@@ -1762,6 +1826,10 @@ function OrcamentosGalpaoPageInterno() {
     setVao(orcamento.vao ? String(orcamento.vao) : "");
     setComprimento(orcamento.comprimento ? String(orcamento.comprimento) : "");
     setPeDireito(orcamento.pe_direito ? String(orcamento.pe_direito) : "");
+    setTemPlatibanda(!!orcamento.tem_platibanda);
+    setAlturaPlatibanda(orcamento.altura_platibanda ? String(orcamento.altura_platibanda) : "1.20");
+    setEspessuraPlatibanda(orcamento.espessura_platibanda ? String(orcamento.espessura_platibanda) : "0.15");
+    setTemDenteGerber(!!orcamento.tem_dente_gerber);
     setNumeroVaos(orcamento.numero_vaos ? String(orcamento.numero_vaos) : "");
     setNumeroGalpoesGerminados(
       orcamento.numero_galpoes_germinados === null || orcamento.numero_galpoes_germinados === undefined
@@ -1882,7 +1950,7 @@ function OrcamentosGalpaoPageInterno() {
     }));
     const validadeCalculada = calcularDataFutura(diasValidade) || null;
 
-    const { error } = editingId
+    const { data: idRetornado, error } = editingId
       ? await supabase.rpc("atualizar_orcamento_galpao", {
           orcamento_id_input: editingId,
           cliente_id_input: Number(clienteId),
@@ -1928,6 +1996,19 @@ function OrcamentosGalpaoPageInterno() {
       );
       setSalvando(false);
       return;
+    }
+
+    // Platibanda: gravada a parte, por uma funcao propria, para nao mexer nas
+    // funcoes de criar/atualizar que ja funcionam.
+    const idSalvo = editingId || idRetornado;
+    if (idSalvo) {
+      await supabase.rpc("salvar_platibanda_orcamento_galpao", {
+        orcamento_id_input: Number(idSalvo),
+        tem_platibanda_input: temPlatibanda,
+        altura_platibanda_input: temPlatibanda ? Number(alturaPlatibanda) || null : null,
+        espessura_platibanda_input: temPlatibanda ? Number(espessuraPlatibanda) || null : null,
+        tem_dente_gerber_input: temPlatibanda && temDenteGerber,
+      });
     }
 
     setMensagem(
@@ -2233,6 +2314,63 @@ function OrcamentosGalpaoPageInterno() {
                   placeholder="Ex: 6"
                   className={campoClasse}
                 />
+              </div>
+              <div className="sm:col-span-2 lg:col-span-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={temPlatibanda}
+                    onChange={(e) => setTemPlatibanda(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  <span className="font-medium">Galpão com platibanda</span>
+                </label>
+                {temPlatibanda && (
+                  <>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <div>
+                        <label className={labelClasse}>Altura da platibanda (m)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={alturaPlatibanda}
+                          onChange={(e) => setAlturaPlatibanda(e.target.value)}
+                          className={campoClasse}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClasse}>Espessura no pilar (m)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={espessuraPlatibanda}
+                          onChange={(e) => setEspessuraPlatibanda(e.target.value)}
+                          className={campoClasse}
+                        />
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Só essa espessura do pilar sobe; o restante da seção fica de apoio
+                      para a tesoura. Entra em todos os pilares da estrutura.
+                    </p>
+                    {Number(vao) > 17 && (
+                      <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={temDenteGerber}
+                          onChange={(e) => setTemDenteGerber(e.target.checked)}
+                          className="h-4 w-4"
+                        />
+                        <span>
+                          Dente gerber no apoio da tesoura
+                          <span className="text-slate-500"> (largura acima de 17m)</span>
+                        </span>
+                      </label>
+                    )}
+                  </>
+                )}
               </div>
               <div>
                 <label className={labelClasse}>Germinados a mais</label>
