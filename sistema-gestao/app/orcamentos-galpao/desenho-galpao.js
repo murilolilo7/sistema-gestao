@@ -156,8 +156,12 @@ function calcularDesenhoGalpao(dados) {
       linha(T(divisas[v], 0, i * passo), T(divisas[v], H, i * passo), CONCRETO, wPilar * 0.9);
 
   // 4) Coberta: duas águas por galpão, dos mais distantes para os mais
-  // próximos, cada um com a própria largura e a própria cumeeira
-  for (let v = larguras.length - 1; v >= 0; v--) {
+  // próximos, cada um com a própria largura e a própria cumeeira.
+  // SÓ desenha se o orçamento tiver coberta (dados.temCoberta). Em
+  // orçamentos parciais — por exemplo só fundação, pilares e vigas — o
+  // desenho fica fiel: mostra a estrutura aberta, sem telhado.
+  const temCoberta = dados.temCoberta !== false;
+  for (let v = larguras.length - 1; temCoberta && v >= 0; v--) {
     const x0 = divisas[v];
     const x1 = divisas[v + 1];
     const xm = (x0 + x1) / 2;
