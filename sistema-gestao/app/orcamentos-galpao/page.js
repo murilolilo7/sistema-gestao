@@ -195,6 +195,12 @@ function recalcularFundacao(listaItens) {
 function OrcamentosGalpaoPageInterno() {
   const [modo, setModo] = useState("lista"); // 'lista' | 'novo' | 'editar'
   const [clientes, setClientes] = useState([]);
+  // Cadastro rapido de cliente, sem sair do orcamento: so nome e telefone.
+  // O cadastro completo (endereco, CPF/CNPJ) segue na tela de Clientes.
+  const [novoClienteAberto, setNovoClienteAberto] = useState(false);
+  const [novoClienteNome, setNovoClienteNome] = useState("");
+  const [novoClienteTelefone, setNovoClienteTelefone] = useState("");
+  const [salvandoCliente, setSalvandoCliente] = useState(false);
   const [composicoes, setComposicoes] = useState([]);
   const [modelos, setModelos] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
@@ -817,7 +823,10 @@ function OrcamentosGalpaoPageInterno() {
 
   const composicoesSelecionaveis = composicoes.filter((c) => {
     if (PAPEIS_EXCLUIDOS.includes(c.papel)) return false;
-    if (PAPEIS_COM_CAMPO_DEDICADO.includes(c.papel)) return false;
+    // Orçamento parcial: o cliente pode pedir só parte do galpão (ex.:
+    // fundação, pilares e vigas). Por isso o seletor oferece QUALQUER peça,
+    // inclusive as que têm campo dedicado — elas aparecem no fim da lista.
+    // (antes: as 5 categorias com campo próprio ficavam escondidas aqui)
     if (c.papel === "LAJE" && tipoSelecionado === "simples") return false;
     return true;
   });
@@ -1794,6 +1803,31 @@ function OrcamentosGalpaoPageInterno() {
         ? "Adicione peças ao orçamento"
         : null;
 
+  async function salvarNovoCliente() {
+    const nome = novoClienteNome.trim();
+    if (!nome) return;
+    setSalvandoCliente(true);
+    const { data, error } = await supabase
+      .from("clientes")
+      .insert({ nome, telefone: novoClienteTelefone.trim() || null })
+      .select("id, nome")
+      .single();
+    setSalvandoCliente(false);
+    if (error) {
+      setErro("Erro ao cadastrar cliente: " + error.message);
+      return;
+    }
+    // Entra na lista, ja selecionado, sem perder nada do orcamento.
+    setClientes((atual) =>
+      [...atual, data].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""))
+    );
+    setClienteId(String(data.id));
+    setNovoClienteNome("");
+    setNovoClienteTelefone("");
+    setNovoClienteAberto(false);
+    setMensagem("Cliente cadastrado.");
+  }
+
   function limparFormulario() {
     setClienteId("");
     setModeloId("");
@@ -2246,7 +2280,16 @@ function OrcamentosGalpaoPageInterno() {
           <TituloEtapa numero="1">Cliente e tipo de galpão</TituloEtapa>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
-              <label className={labelClasse}>Cliente</label>
+              <div className="flex items-center justify-between">
+                <label className={labelClasse}>Cliente</label>
+                <button
+                  type="button"
+                  onClick={() => setNovoClienteAberto((v) => !v)}
+                  className="text-[11px] font-medium text-emerald-700 hover:underline mb-1"
+                >
+                  {novoClienteAberto ? "cancelar" : "+ novo cliente"}
+                </button>
+              </div>
               <select
                 value={clienteId}
                 onChange={(e) => setClienteId(e.target.value)}
@@ -2259,6 +2302,37 @@ function OrcamentosGalpaoPageInterno() {
                   </option>
                 ))}
               </select>
+              {novoClienteAberto && (
+                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={novoClienteNome}
+                      onChange={(e) => setNovoClienteNome(e.target.value)}
+                      placeholder="Nome do cliente"
+                      className={campoClasse}
+                    />
+                    <input
+                      type="text"
+                      value={novoClienteTelefone}
+                      onChange={(e) => setNovoClienteTelefone(e.target.value)}
+                      placeholder="Telefone"
+                      className={campoClasse}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={salvarNovoCliente}
+                    disabled={!novoClienteNome.trim() || salvandoCliente}
+                    className="mt-2 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                  >
+                    {salvandoCliente ? "Salvando..." : "Cadastrar e usar"}
+                  </button>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Os demais dados podem ser completados depois na tela de Clientes.
+                  </p>
+                </div>
+              )}
             </div>
             <div>
               <label className={labelClasse}>Tipo de galpão</label>
@@ -2503,6 +2577,11 @@ function OrcamentosGalpaoPageInterno() {
                     }
                     temLaje={itens.some((i) => i.papel === "LAJE")}
                     temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
+                    temCoberta={itens.some(
+                      (i) =>
+                        (i.papel === "TELHA" || i.papel === "TESOURA" || i.papel === "TERCA") &&
+                        Number(i.quantidade) > 0
+                    )}
                     areaLaje={areaLaje}
                     largura={280}
                   />
@@ -3347,6 +3426,11 @@ function OrcamentosGalpaoPageInterno() {
                     }
                     temLaje={itens.some((i) => i.papel === "LAJE")}
                     temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
+                    temCoberta={itens.some(
+                      (i) =>
+                        (i.papel === "TELHA" || i.papel === "TESOURA" || i.papel === "TERCA") &&
+                        Number(i.quantidade) > 0
+                    )}
                     areaLaje={areaLaje}
                     largura={300}
                   />
