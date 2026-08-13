@@ -299,6 +299,8 @@ function OrcamentosGalpaoPageInterno() {
   // tambem serve de referencia para a segunda laje (pavimento de cima).
   const [alturaLaje, setAlturaLaje] = useState("3.50");
   // Segunda laje: galpao de dois pavimentos (ex.: uma a 3,5m e outra a 7m).
+  // Vigas sem laje: o cliente pode querer so as vigas (a laje vem depois).
+  const [temVigaLajeAvulsa, setTemVigaLajeAvulsa] = useState(false);
   const [temSegundaLaje, setTemSegundaLaje] = useState(false);
   const [alturaLaje2, setAlturaLaje2] = useState("7.00");
   const [areaLaje2, setAreaLaje2] = useState("");
@@ -1311,7 +1313,9 @@ function OrcamentosGalpaoPageInterno() {
       tipoSelecionado === "laje" ||
       tipoSelecionado === "mezanino" ||
       tipoSelecionado === "editado";
-    const comLaje = Number(areaLaje) > 0;
+    // As vigas entram com a area da laje OU pela caixinha "so as vigas":
+    // a quantidade delas vem do comprimento, nao da area.
+    const comLaje = Number(areaLaje) > 0 || temVigaLajeAvulsa;
     const larguraGalpao = Number(vao) || 0;
     const sug = ehLaje && comLaje ? sugestaoQtdVigasLaje() : null;
     const qtdViga = sug?.qtd || 0;
@@ -1350,7 +1354,7 @@ function OrcamentosGalpaoPageInterno() {
       ];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tipoSelecionado, vao, comprimento, areaLaje, numeroVaos, vigaValorM3, totalGalpoes]);
+  }, [tipoSelecionado, vao, comprimento, areaLaje, temVigaLajeAvulsa, numeroVaos, vigaValorM3, totalGalpoes]);
 
   // SEGUNDA LAJE (galpao de dois pavimentos): lanca a peca da laje de cima e
   // as vigas dela. Mesma regra da primeira: a viga nunca passa de 10m, entao
@@ -1360,14 +1364,16 @@ function OrcamentosGalpaoPageInterno() {
     const CH_VIGA2 = "viga-laje2-auto";
     const area2 = Number(areaLaje2) || 0;
     const larguraGalpao = Number(vao) || 0;
-    const ativo = temSegundaLaje && area2 > 0 && larguraGalpao > 0;
+    // A 2a laje pode entrar so com as vigas: a peca da laje so aparece se o
+    // tipo e a area forem informados.
+    const ativo = temSegundaLaje && larguraGalpao > 0;
     setItens((atual) => {
       const sem = atual.filter((i) => i.chave !== CH_LAJE2 && i.chave !== CH_VIGA2);
       if (!ativo) return sem;
       const novos = [];
       // a) a peca da laje de cima
       const laje2 = composicoes.find((c) => String(c.id) === String(tipoLajeId2));
-      if (laje2) {
+      if (laje2 && area2 > 0) {
         const ant = atual.find((i) => i.chave === CH_LAJE2);
         novos.push({
           chave: CH_LAJE2,
@@ -3267,6 +3273,19 @@ function OrcamentosGalpaoPageInterno() {
                   Escolha o tipo (capacidade em Kg/m² no nome) e a área — a linha entra sozinha na seção
                   da laje. A viga (calculadora abaixo) e o pilar/montagem aqui também entram nessa seção.
                 </p>
+
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-600 mb-2">
+                  <input
+                    type="checkbox"
+                    checked={temVigaLajeAvulsa}
+                    onChange={(e) => setTemVigaLajeAvulsa(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Lançar as vigas mesmo sem a laje
+                  <span className="text-slate-400">
+                    (para quem vai fazer a laje depois)
+                  </span>
+                </label>
 
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
                   <div>
