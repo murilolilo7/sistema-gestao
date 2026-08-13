@@ -295,6 +295,14 @@ function OrcamentosGalpaoPageInterno() {
   const [telhaId, setTelhaId] = useState("");
   const [areaLaje, setAreaLaje] = useState("");
   const [tipoLajeId, setTipoLajeId] = useState("");
+  // Altura da laje: por padrao 3,50m. O desenho usa essa altura, e ela
+  // tambem serve de referencia para a segunda laje (pavimento de cima).
+  const [alturaLaje, setAlturaLaje] = useState("3.50");
+  // Segunda laje: galpao de dois pavimentos (ex.: uma a 3,5m e outra a 7m).
+  const [temSegundaLaje, setTemSegundaLaje] = useState(false);
+  const [alturaLaje2, setAlturaLaje2] = useState("7.00");
+  const [areaLaje2, setAreaLaje2] = useState("");
+  const [tipoLajeId2, setTipoLajeId2] = useState("");
   const [pilarLajeId, setPilarLajeId] = useState("");
   const [pilarLajeQtd, setPilarLajeQtd] = useState("1");
   const [montagemLajeQtd, setMontagemLajeQtd] = useState("");
@@ -743,7 +751,9 @@ function OrcamentosGalpaoPageInterno() {
       // área de referência de cada painel só entra no cálculo de custo
       // por trás) — mesma lógica da telha, sem multiplicador de perda.
       novos = novos.filter(
-        (i) => !(i.papel === "LAJE" && (!tipoLajeId || i.composicao_id !== Number(tipoLajeId)))
+        (i) =>
+          i.chave === "laje2-auto" ||
+          !(i.papel === "LAJE" && (!tipoLajeId || i.composicao_id !== Number(tipoLajeId)))
       );
       if (tipoLajeId && areaLaje) {
         const laje = composicoes.find((c) => String(c.id) === String(tipoLajeId));
@@ -1341,6 +1351,65 @@ function OrcamentosGalpaoPageInterno() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tipoSelecionado, vao, comprimento, areaLaje, numeroVaos, vigaValorM3, totalGalpoes]);
+
+  // SEGUNDA LAJE (galpao de dois pavimentos): lanca a peca da laje de cima e
+  // as vigas dela. Mesma regra da primeira: a viga nunca passa de 10m, entao
+  // acima disso ela se divide e ganha pilar no meio.
+  useEffect(() => {
+    const CH_LAJE2 = "laje2-auto";
+    const CH_VIGA2 = "viga-laje2-auto";
+    const area2 = Number(areaLaje2) || 0;
+    const larguraGalpao = Number(vao) || 0;
+    const ativo = temSegundaLaje && area2 > 0 && larguraGalpao > 0;
+    setItens((atual) => {
+      const sem = atual.filter((i) => i.chave !== CH_LAJE2 && i.chave !== CH_VIGA2);
+      if (!ativo) return sem;
+      const novos = [];
+      // a) a peca da laje de cima
+      const laje2 = composicoes.find((c) => String(c.id) === String(tipoLajeId2));
+      if (laje2) {
+        const ant = atual.find((i) => i.chave === CH_LAJE2);
+        novos.push({
+          chave: CH_LAJE2,
+          composicao_id: laje2.id,
+          nome: laje2.nome + " — 2ª laje (" + doisDec(Number(alturaLaje2) || 0, 2) + "m)",
+          unidade: laje2.unidade,
+          papel: "LAJE",
+          quantidade:
+            ant && ant.quantidadeEditada ? ant.quantidade : Math.round(area2 * 100) / 100,
+          preco_unitario: Number(laje2.preco) || 0,
+          secao: "laje",
+        });
+      }
+      // b) as vigas da laje de cima
+      const sug = sugestaoQtdVigasLaje();
+      const qtdViga = sug?.qtd || 0;
+      if (qtdViga > 0) {
+        const trechos = Math.ceil(larguraGalpao / 10);
+        const vaoViga = Math.round((larguraGalpao / trechos) * 100) / 100;
+        const alturaViga = Math.round(Math.ceil(vaoViga / 10 / 0.05) * 0.05 * 100) / 100;
+        const m3 = Number(vigaValorM3) || 0;
+        const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
+        const antV = atual.find((i) => i.chave === CH_VIGA2);
+        novos.push({
+          chave: CH_VIGA2,
+          composicao_id: null,
+          nome:
+            "VIGA PARA LAJE " + doisDec(0.25, 2) + "X" + doisDec(alturaViga, 2) + "X" +
+            doisDec(vaoViga, 2) + "M — 2ª laje (" + doisDec(Number(alturaLaje2) || 0, 2) + "m)" +
+            (trechos > 1 ? " — dividida em " + trechos : ""),
+          unidade: "UND",
+          papel: "VIGA_LAJE",
+          quantidade:
+            antV && antV.quantidadeEditada ? antV.quantidade : qtdViga * trechos,
+          preco_unitario: preco,
+          secao: "laje",
+        });
+      }
+      return recalcularMontagem([...novos, ...sem]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, composicoes, totalGalpoes]);
 
   // Nº de vãos AUTOMÁTICO: vem do comprimento (dividido em módulos de 5m e 6m).
   // Preenche o campo pra ficar visível junto com a sugestão. Editável: se o
@@ -2904,6 +2973,13 @@ function OrcamentosGalpaoPageInterno() {
                     temVigaLaje={itens.some(
                       (i) => i.papel === "VIGA_LAJE" && Number(i.quantidade) > 0
                     )}
+                    alturaLaje={alturaLaje}
+                    temSegundaLaje={temSegundaLaje}
+                    temLaje2={itens.some(
+                      (i) => i.chave === "laje2-auto" && Number(i.quantidade) > 0
+                    )}
+                    areaLaje2={areaLaje2}
+                    alturaLaje2={alturaLaje2}
                     temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
                     temCoberta={itens.some(
                       (i) =>
@@ -3187,10 +3263,79 @@ function OrcamentosGalpaoPageInterno() {
                     className={campoClasse}
                   />
                 </div>
-                <p className="text-xs text-slate-400 mt-1 mb-3">
+                <p className="text-xs text-slate-400 mt-1 mb-2">
                   Escolha o tipo (capacidade em Kg/m² no nome) e a área — a linha entra sozinha na seção
                   da laje. A viga (calculadora abaixo) e o pilar/montagem aqui também entram nessa seção.
                 </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+                  <div>
+                    <label className={labelClasse}>Altura da laje (m)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={alturaLaje}
+                      onChange={(e) => setAlturaLaje(e.target.value)}
+                      className={campoClasse}
+                    />
+                  </div>
+                </div>
+
+                {/* SEGUNDA LAJE: galpao de dois pavimentos */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={temSegundaLaje}
+                      onChange={(e) => setTemSegundaLaje(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    Segunda laje (galpão de dois pavimentos)
+                  </label>
+                  {temSegundaLaje && (
+                    <>
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <select
+                          value={tipoLajeId2}
+                          onChange={(e) => setTipoLajeId2(e.target.value)}
+                          className={campoClasse}
+                        >
+                          <option value="">Tipo da 2ª laje</option>
+                          {lajesDisponiveis.map((l) => (
+                            <option key={l.id} value={l.id}>
+                              {l.nome} — {formatarMoeda(l.preco)}/m²
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Área da 2ª laje (m²)"
+                          value={areaLaje2}
+                          onChange={(e) => setAreaLaje2(e.target.value)}
+                          className={campoClasse}
+                        />
+                        <div>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="Altura da 2ª laje (m)"
+                            value={alturaLaje2}
+                            onChange={(e) => setAlturaLaje2(e.target.value)}
+                            className={campoClasse}
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        A 2ª laje entra com as próprias vigas. Ex.: uma a 3,50m e outra a
+                        7,00m. Confira se o pé-direito comporta as duas.
+                      </p>
+                    </>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2" data-bloco="pilar-laje">
                   <select
@@ -3787,6 +3932,13 @@ function OrcamentosGalpaoPageInterno() {
                     temVigaLaje={itens.some(
                       (i) => i.papel === "VIGA_LAJE" && Number(i.quantidade) > 0
                     )}
+                    alturaLaje={alturaLaje}
+                    temSegundaLaje={temSegundaLaje}
+                    temLaje2={itens.some(
+                      (i) => i.chave === "laje2-auto" && Number(i.quantidade) > 0
+                    )}
+                    areaLaje2={areaLaje2}
+                    alturaLaje2={alturaLaje2}
                     temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
                     temCoberta={itens.some(
                       (i) =>
