@@ -2901,6 +2901,9 @@ function OrcamentosGalpaoPageInterno() {
                       Number(numeroVaos) > 0 ? Number(comprimento) / Number(numeroVaos) : 5
                     }
                     temLaje={itens.some((i) => i.papel === "LAJE")}
+                    temVigaLaje={itens.some(
+                      (i) => i.papel === "VIGA_LAJE" && Number(i.quantidade) > 0
+                    )}
                     temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
                     temCoberta={itens.some(
                       (i) =>
@@ -3781,6 +3784,9 @@ function OrcamentosGalpaoPageInterno() {
                       Number(numeroVaos) > 0 ? Number(comprimento) / Number(numeroVaos) : 5
                     }
                     temLaje={itens.some((i) => i.papel === "LAJE")}
+                    temVigaLaje={itens.some(
+                      (i) => i.papel === "VIGA_LAJE" && Number(i.quantidade) > 0
+                    )}
                     temTravamento={itens.some((i) => i.papel === "VIGA_TRAVAMENTO")}
                     temCoberta={itens.some(
                       (i) =>
