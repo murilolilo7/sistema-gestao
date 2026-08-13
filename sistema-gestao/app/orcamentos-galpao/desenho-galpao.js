@@ -42,7 +42,9 @@ function calcularDesenhoGalpao(dados) {
   // Altura da laje: vem do orcamento (dados.alturaLaje, em metros). Sem ela,
   // usa o padrao antigo de 45% do pe-direito.
   const peReal = Number(dados.peDireito) || 0;
-  const fracao = (m) => (peReal > 0 && Number(m) > 0 ? Math.min(0.92, Number(m) / peReal) : null);
+  // Sem teto de 0,92: uma laje na altura do pe-direito (ex.: 7m num galpao
+  // de 7m) fica no TOPO dos pilares, que e onde ela realmente apoia.
+  const fracao = (m) => (peReal > 0 && Number(m) > 0 ? Math.min(1, Number(m) / peReal) : null);
   const yLaje = H * (fracao(dados.alturaLaje) || 0.45);
   // Segunda laje (dois pavimentos): so quando informada.
   const yLaje2 = dados.alturaLaje2 ? H * (fracao(dados.alturaLaje2) || 0.8) : null;
