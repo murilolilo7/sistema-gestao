@@ -464,7 +464,9 @@ function OrcamentosGalpaoPageInterno() {
       "pilar-auto-meio",
       "consolo-tesoura-auto",
     ];
-    if (!paramEng || !paramEng.pilar_automatico) {
+    // Galpao editado: nada entra sozinho — o usuario monta a lista peca a
+    // peca, para o orcamento ficar exatamente com o que o cliente pediu.
+    if (tipoSelecionado === "editado" || !paramEng || !paramEng.pilar_automatico) {
       setItens((atual) =>
         atual.some((i) => CHAVES_AUTO.includes(i.chave))
           ? atual.filter((i) => !CHAVES_AUTO.includes(i.chave))
@@ -1369,7 +1371,7 @@ function OrcamentosGalpaoPageInterno() {
     setItens((atual) => {
       const semAuto = atual.filter((i) => !CHAVES.includes(i.chave));
       const d = decomporComprimentoEmModulos(comprimento);
-      if (!temTravamento || !d) return semAuto;
+      if (tipoSelecionado === "editado" || !temTravamento || !d) return semAuto;
       const linhas = totalGalpoes + 1; // 2 fileiras no avulso, +1 por geminado
       const porVao = travamentoDuplo ? 2 : 1;
       const m3 = Number(String(travamentoValorM3).replace(",", ".")) || 0;
@@ -1437,6 +1439,7 @@ function OrcamentosGalpaoPageInterno() {
       const semAuto = atual.filter(
         (i) => i.chave !== "terca-auto-5" && i.chave !== "terca-auto-6"
       );
+      if (tipoSelecionado === "editado") return semAuto;
       const decomp = decomporComprimentoEmModulos(comprimento);
       const larguras = listaLarguras || [Number(vao)];
       const totalPorVao = larguras.reduce(
@@ -1711,7 +1714,39 @@ function OrcamentosGalpaoPageInterno() {
   // ---------- CHECKLIST UNIFICADO DA ESTRUTURA ----------
   // Cada linha compara o que o galpão PRECISA (pelas medidas) com o que
   // já foi LANÇADO. Tolerância de 0,5 para itens por metragem.
+  // No galpao editado nenhuma peca e obrigatoria: o cliente pode querer so
+  // fundacao, pilares e vigas. As pecas que entram por padrao (montagem,
+  // fundacao, calha, capote) deixam de ser exigidas e podem ser removidas.
+  useEffect(() => {
+    if (tipoSelecionado !== "editado") return;
+    setItens((atual) => {
+      if (!atual.some((i) => i.obrigatorio)) return atual;
+      return atual
+        .filter((i) => !(i.obrigatorio && Number(i.quantidade) <= 0))
+        .map((i) => (i.obrigatorio ? { ...i, obrigatorio: false } : i));
+    });
+  }, [tipoSelecionado]);
+
   const checklistEstrutura = (() => {
+    // Galpao editado: o checklist nao cobra o que "deveria" existir — ele
+    // apenas confere o que foi lancado, para o usuario revisar a lista.
+    if (tipoSelecionado === "editado") {
+      const porPapel = {};
+      for (const i of itens) {
+        const q = Number(i.quantidade) || 0;
+        if (q <= 0) continue;
+        const papel = papelDoItem(i) || "OUTROS";
+        porPapel[papel] = (porPapel[papel] || 0) + q;
+      }
+      return Object.entries(porPapel).map(([papel, qtd]) => ({
+        rotulo: papel.replace(/_/g, " "),
+        detalhe: "lançado no orçamento",
+        necessario: qtd,
+        lancado: qtd,
+        ok: true,
+        texto: Number(qtd).toLocaleString("pt-BR", { maximumFractionDigits: 2 }),
+      }));
+    }
     if (!vao || !comprimento) return [];
     const dCheck = decomporComprimentoEmModulos(comprimento);
     const nV = Number(numeroVaos) || (dCheck ? dCheck.vaos5 + dCheck.vaos6 : 0);
@@ -2410,7 +2445,11 @@ function OrcamentosGalpaoPageInterno() {
             checklistCompleto ? "text-emerald-800" : "text-amber-800"
           }`}
         >
-          Checklist da estrutura {checklistCompleto ? "— completo ✓" : "— confira o que falta"}
+          {tipoSelecionado === "editado"
+            ? "Peças do orçamento — confira a lista"
+            : `Checklist da estrutura ${
+                checklistCompleto ? "— completo ✓" : "— confira o que falta"
+              }`}
         </p>
         <div className="space-y-0.5">
           {checklistEstrutura.map((l) => (
