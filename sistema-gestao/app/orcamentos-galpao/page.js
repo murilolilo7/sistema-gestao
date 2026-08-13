@@ -3832,8 +3832,16 @@ function OrcamentosGalpaoPageInterno() {
                   <td className="px-4 py-2 font-medium whitespace-nowrap">
                     {o.clientes?.nome ?? "-"}
                   </td>
-                  <td className="px-4 py-2 max-w-xs truncate" title={o.titulo}>
-                    {o.titulo || "-"}
+                  <td className="px-4 py-2 max-w-xs" title={o.titulo}>
+                    <span className="block truncate">{o.titulo || "-"}</span>
+                    {Number(o.area_m2) > 0 && (
+                      <span className="block text-xs text-slate-400">
+                        {Number(o.area_m2).toLocaleString("pt-BR")} m²
+                        {Number(o.area_laje) > 0
+                          ? ` · laje ${Number(o.area_laje).toLocaleString("pt-BR")} m²`
+                          : ""}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
                     {formatarDataSimples(o.validade)}
