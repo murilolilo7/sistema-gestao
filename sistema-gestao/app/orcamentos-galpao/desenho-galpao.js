@@ -39,7 +39,13 @@ function calcularDesenhoGalpao(dados) {
   // Quando não há laje, o travamento fica a meia altura do pilar.
   // REGRA: pé-direito acima de 12m => viga de travamento DUPLICADA
   // (dois níveis de travamento nas laterais).
-  const yLaje = H * 0.45;
+  // Altura da laje: vem do orcamento (dados.alturaLaje, em metros). Sem ela,
+  // usa o padrao antigo de 45% do pe-direito.
+  const peReal = Number(dados.peDireito) || 0;
+  const fracao = (m) => (peReal > 0 && Number(m) > 0 ? Math.min(0.92, Number(m) / peReal) : null);
+  const yLaje = H * (fracao(dados.alturaLaje) || 0.45);
+  // Segunda laje (dois pavimentos): so quando informada.
+  const yLaje2 = dados.alturaLaje2 ? H * (fracao(dados.alturaLaje2) || 0.8) : null;
   // Laje/mezanino pode ser PARCIAL: a profundidade desenhada é a área
   // da laje ÷ largura total (ex.: 100m² num galpão de 10m de largura
   // = laje até 10m de profundidade, cobrindo só os primeiros vãos).
@@ -153,6 +159,25 @@ function calcularDesenhoGalpao(dados) {
         0.8
       );
     }
+    // Segunda laje (pavimento de cima): mesmo desenho, na altura dela.
+    if (yLaje2 && dados.temSegundaLaje) {
+      const zLaje2 = dados.areaLaje2 && W > 0
+        ? Math.min(C, Math.max(0, Number(dados.areaLaje2) / W))
+        : zLaje;
+      if (dados.temLaje2) {
+        poligono(
+          [T(0, yLaje2, 0), T(W, yLaje2, 0), T(W, yLaje2, zLaje2), T(0, yLaje2, zLaje2)],
+          "rgba(214, 221, 228, 0.5)",
+          CONCRETO_CLARO,
+          0.8
+        );
+      }
+      const nMod2 = Math.max(1, Math.round(zLaje2 / passo));
+      for (let i = 0; i <= nMod2; i++) {
+        const z = Math.min(i * passo, zLaje2);
+        linha(T(0, yLaje2, z), T(W, yLaje2, z), CONCRETO, wViga * 1.1);
+      }
+    }
     // As VIGAS DE LAJE atravessam o galpao na LARGURA (de um lado ao outro),
     // como traves apoiadas nos pilares — direcao oposta a das vigas de
     // travamento, que correm ao longo do comprimento. Uma viga em cada
@@ -264,6 +289,11 @@ export default function DesenhoGalpao({
   temTravamento = false,
   temCoberta = true,
   temVigaLaje = false,
+  alturaLaje = null,
+  temSegundaLaje = false,
+  temLaje2 = false,
+  areaLaje2 = null,
+  alturaLaje2 = null,
   areaLaje = null,
   largura = 300,
 }) {
@@ -289,6 +319,11 @@ export default function DesenhoGalpao({
     temTravamento,
     temCoberta,
     temVigaLaje,
+    alturaLaje,
+    temSegundaLaje,
+    temLaje2,
+    areaLaje2,
+    alturaLaje2,
     areaLaje,
     textoLargura: larguraTotal > 0 ? `${fmt(larguraTotal)}M` : null,
     textoComprimento: comprimento ? `${fmt(comprimento)}M` : null,
