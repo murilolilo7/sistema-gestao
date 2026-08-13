@@ -189,6 +189,9 @@ function recalcularMontagem(listaItens) {
   const diariasLaje = diariasDeMontagem(listaItens, "laje");
   return listaItens.map((i) => {
     if (i.nome !== "MONTAGEM") return i;
+    // Se o usuario mudou as diarias na mao (ex.: a obra vai levar 10 dias e
+    // nao os 9 da tabela), o valor dele MANDA — igual as demais pecas.
+    if (i.quantidadeEditada) return i;
     if (i.secao === "laje") {
       return diariasLaje > 0 ? { ...i, quantidade: diariasLaje } : i;
     }
@@ -1631,12 +1634,27 @@ function OrcamentosGalpaoPageInterno() {
             }
           : i
       );
+      // Mexeu numa peça que entra na montagem? Entao a montagem volta a ser
+      // calculada — a menos que o usuario tenha editado a PROPRIA montagem,
+      // que sempre manda.
+      const papelAlvo = papelDoItem(itemAlvo || {});
+      const afetaMontagem =
+        campo === "quantidade" &&
+        papelAlvo !== "MONTAGEM" &&
+        ["TESOURA", "PILAR", "TERCA", "VIGA_TRAVAMENTO", "VIGA_LAJE", "LAJE"].includes(
+          papelAlvo
+        );
+      const lista = afetaMontagem
+        ? atualizados.map((i) =>
+            i.nome === "MONTAGEM" ? { ...i, quantidadeEditada: false } : i
+          )
+        : atualizados;
       // Só recalcula a fundação sozinha quando quem mudou foi um PILAR —
       // editar a fundação diretamente não é sobrescrito (fica manual).
       if (campo === "quantidade" && itemAlvo?.papel === "PILAR") {
-        return recalcularFundacao(atualizados);
+        return recalcularFundacao(lista);
       }
-      return atualizados;
+      return afetaMontagem ? recalcularMontagem(lista) : lista;
     });
   }
 
@@ -2086,9 +2104,13 @@ function OrcamentosGalpaoPageInterno() {
         item.composicoes_galpao?.nome || item.descricao_livre || "Item removido";
       const secaoItem = item.secao === "laje" ? "laje" : "estrutura";
       const chaveAuto = chaveAutomatica(nomeItem, secaoItem);
+      // A MONTAGEM salva tambem e respeitada: se o usuario ajustou as
+      // diarias na mao (ex.: 10 no lugar das 9 da tabela), o valor dele
+      // permanece ao reabrir o orcamento.
+      const ehMontagem = nomeItem.toUpperCase() === "MONTAGEM";
       return {
       // Peca automatica volta com a chave original; as demais, chave nova.
-      ...(chaveAuto ? { quantidadeEditada: true } : {}),
+      ...(chaveAuto || ehMontagem ? { quantidadeEditada: true } : {}),
       chave: chaveAuto || proximaChave.current++,
       composicao_id: item.composicao_id,
       nome: item.composicoes_galpao?.nome || item.descricao_livre || "Item removido",
