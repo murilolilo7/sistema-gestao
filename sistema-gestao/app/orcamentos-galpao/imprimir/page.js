@@ -34,6 +34,97 @@ function formatarMoeda(valor) {
   });
 }
 
+// Valor por extenso, para a proposta impressa.
+// Ex.: 399371.43 -> "trezentos e noventa e nove mil, trezentos e setenta e
+// um reais e quarenta e tres centavos".
+function valorPorExtenso(valor) {
+  const n = Number(valor);
+  if (!isFinite(n) || n < 0) return "";
+  const unidades = [
+    "", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove",
+    "dez", "onze", "doze", "treze", "quatorze", "quinze", "dezesseis",
+    "dezessete", "dezoito", "dezenove",
+  ];
+  const dezenas = [
+    "", "", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta",
+    "oitenta", "noventa",
+  ];
+  const centenas = [
+    "", "cento", "duzentos", "trezentos", "quatrocentos", "quinhentos",
+    "seiscentos", "setecentos", "oitocentos", "novecentos",
+  ];
+
+  // Escreve um numero de 0 a 999.
+  const ate999 = (num) => {
+    if (num === 0) return "";
+    if (num === 100) return "cem";
+    const partes = [];
+    const c = Math.floor(num / 100);
+    const resto = num % 100;
+    if (c > 0) partes.push(centenas[c]);
+    if (resto > 0) {
+      if (resto < 20) partes.push(unidades[resto]);
+      else {
+        const d = Math.floor(resto / 10);
+        const u = resto % 10;
+        partes.push(u > 0 ? dezenas[d] + " e " + unidades[u] : dezenas[d]);
+      }
+    }
+    return partes.join(" e ");
+  };
+
+  const inteiro = Math.floor(n);
+  const centavos = Math.round((n - inteiro) * 100);
+
+  const escreverInteiro = (num) => {
+    if (num === 0) return "zero";
+    const grupos = [
+      { valor: 1000000000, sing: "bilhão", plur: "bilhões" },
+      { valor: 1000000, sing: "milhão", plur: "milhões" },
+      { valor: 1000, sing: "mil", plur: "mil" },
+    ];
+    let resto = num;
+    const partes = [];
+    for (const g of grupos) {
+      const qtd = Math.floor(resto / g.valor);
+      if (qtd > 0) {
+        const nome = qtd === 1 ? g.sing : g.plur;
+        partes.push(
+          g.valor === 1000 && qtd === 1 ? "mil" : ate999(qtd) + " " + nome
+        );
+        resto = resto % g.valor;
+      }
+    }
+    if (resto > 0) partes.push(ate999(resto));
+    // "e" antes da ultima parte quando ela e menor que 100 ou centena redonda
+    if (partes.length > 1) {
+      const ultima = partes[partes.length - 1];
+      const ligaComE = resto > 0 && (resto < 100 || resto % 100 === 0);
+      return partes.slice(0, -1).join(", ") + (ligaComE ? " e " : ", ") + ultima;
+    }
+    return partes[0] || "zero";
+  };
+
+  // "um milhao DE reais" (e nao "um milhao reais"): milhao/bilhao redondos
+  // pedem a preposicao. Mil nao pede: "mil reais".
+  const terminaEmMilhaoRedondo =
+    inteiro >= 1000000 && inteiro % 1000000 === 0;
+  const textoInteiro =
+    inteiro === 0
+      ? ""
+      : escreverInteiro(inteiro) +
+        (inteiro === 1 ? " real" : terminaEmMilhaoRedondo ? " de reais" : " reais");
+  const textoCentavos =
+    centavos === 0
+      ? ""
+      : escreverInteiro(centavos) + (centavos === 1 ? " centavo" : " centavos");
+
+  if (!textoInteiro && !textoCentavos) return "zero real";
+  if (!textoCentavos) return textoInteiro;
+  if (!textoInteiro) return textoCentavos;
+  return textoInteiro + " e " + textoCentavos;
+}
+
 function formatarDataHora(valor) {
   if (!valor) return "-";
   return new Date(valor).toLocaleDateString("pt-BR");
@@ -380,8 +471,22 @@ function ConteudoImpressao() {
   useEffect(() => {
     if (orcamento) {
       const nomeCliente = orcamento.clientes?.nome || "Consumidor Final";
+      // Medidas no nome do arquivo (ex.: 10X18X4) para diferenciar dois
+      // orcamentos do mesmo cliente.
+      const num = (v) => {
+        const x = Number(v);
+        return isFinite(x) && x > 0
+          ? String(x).replace(/\.0+$/, "").replace(".", ",")
+          : null;
+      };
+      const medidas = [
+        num(orcamento.vao),
+        num(orcamento.comprimento),
+        num(orcamento.pe_direito),
+      ].filter(Boolean);
+      const sufixo = medidas.length ? ` ${medidas.join("X")}` : "";
       document.title = nomeArquivoSeguro(
-        `Orcamento Galpao ${orcamento.codigo} - ${nomeCliente}`
+        `Orcamento Galpao ${orcamento.codigo} - ${nomeCliente}${sufixo}`
       );
     }
   }, [orcamento]);
@@ -628,6 +733,14 @@ function ConteudoImpressao() {
             </td>
             <td className="border border-slate-300 px-2 py-1.5 text-right font-bold">
               {formatarMoeda(orcamento.total)}
+            </td>
+          </tr>
+          <tr>
+            <td
+              colSpan={4}
+              className="border border-slate-300 px-2 py-1.5 text-xs italic text-slate-600"
+            >
+              Valor por extenso: {valorPorExtenso(orcamento.total)}.
             </td>
           </tr>
         </tbody>
