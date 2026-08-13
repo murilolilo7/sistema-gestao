@@ -60,7 +60,24 @@ function calcularDesenhoGalpao(dados) {
   const temVigaLaje = dados.temVigaLaje === true || dados.temLaje === true;
   let niveisTravamento = [];
   if (dados.temTravamento) {
-    if (H > 12) {
+    // A viga de travamento fica ACIMA da laje, para nao se confundir com as
+    // vigas dela: no minimo 5m de altura (ou 1,5m acima da laje, o que for
+    // maior), sempre abaixo do topo do pilar. Sem pe-direito conhecido,
+    // volta para as fracoes antigas.
+    const alturaBase = Number(dados.alturaLaje) || 0;
+    const nivelEmMetros = (m) => H * Math.min(0.9, m / peReal);
+    if (peReal > 0) {
+      const base = Math.max(5, alturaBase > 0 ? alturaBase + 1.5 : 0);
+      if (base < peReal) {
+        niveisTravamento =
+          peReal > 12
+            ? [nivelEmMetros(base), nivelEmMetros(Math.min(peReal - 1, base + 3.5))]
+            : [nivelEmMetros(base)];
+      } else {
+        // pe-direito baixo: mantem o travamento a meia altura
+        niveisTravamento = [H * 0.5];
+      }
+    } else if (H > 12) {
       niveisTravamento = dados.temLaje ? [H * 0.62, H * 0.84] : [H * 0.38, H * 0.7];
     } else {
       niveisTravamento = [dados.temLaje ? H * 0.72 : H * 0.5];
