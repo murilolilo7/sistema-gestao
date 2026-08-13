@@ -1604,6 +1604,13 @@ function OrcamentosGalpaoPageInterno() {
     itensLaje.length > 0 && areaLajeNumerica > 0
       ? (subtotalLaje * fatorMargem) / areaLajeNumerica
       : null;
+  // Valor/m2 FINAL: o que o cliente paga por m2 depois do desconto. Os
+  // valores por secao acima continuam sem desconto, porque servem para
+  // conferir a composicao; este aqui e o numero da negociacao.
+  const areaTotalOrcamento =
+    (areaCalculada || 0) > 0 ? areaCalculada : areaLajeNumerica;
+  const valorPorM2Final =
+    areaTotalOrcamento > 0 ? totalFinal / areaTotalOrcamento : null;
 
   // ---------- Validação de coerência: nº de vãos x comprimento ----------
   const avisoVaos = (() => {
@@ -3485,6 +3492,16 @@ function OrcamentosGalpaoPageInterno() {
                 <span className="text-slate-500">Total do orçamento: </span>
                 <span className="font-semibold text-lg">{formatarMoeda(totalFinal)}</span>
               </p>
+              {valorPorM2Final !== null && (
+                <p className="text-slate-500">
+                  {descontoNumerico > 0 ? "Valor/m² com desconto: " : "Valor/m²: "}
+                  <b className="text-slate-700">{formatarMoeda(valorPorM2Final)}</b>
+                  <span className="text-xs text-slate-400">
+                    {" "}
+                    (÷ {areaTotalOrcamento.toLocaleString("pt-BR")} m²)
+                  </span>
+                </p>
+              )}
               <p className="text-xs text-slate-400">Vendedor: {nomeUsuario}</p>
             </div>
             <div className="flex gap-2">
