@@ -49,6 +49,9 @@ function calcularDesenhoGalpao(dados) {
   // A viga de topo (que liga os pilares no alto) faz parte da estrutura da
   // coberta: sem coberta lancada, o galpao fica so com os pilares em pe.
   const temCoberta = dados.temCoberta !== false;
+  // As VIGAS de laje aparecem assim que sao lancadas no orcamento, mesmo que
+  // a peca da laje ainda nao esteja: e nelas que a laje vai se apoiar.
+  const temVigaLaje = dados.temVigaLaje === true || dados.temLaje === true;
   let niveisTravamento = [];
   if (dados.temTravamento) {
     if (H > 12) {
@@ -135,18 +138,22 @@ function calcularDesenhoGalpao(dados) {
   if (temCoberta) linha(T(W, H, 0), T(W, H, C), CONCRETO_CLARO, wViga);
   for (const yT of niveisTravamento)
     linha(T(W, yT, 0), T(W, yT, C), CONCRETO_CLARO, wViga * 0.9);
-  if (dados.temLaje) linha(T(W, yLaje, 0), T(W, yLaje, zLaje), CONCRETO_CLARO, wViga);
-  linha(T(0, H, C), T(W, H, C), CONCRETO_CLARO, wViga);
+  if (temVigaLaje) linha(T(W, yLaje, 0), T(W, yLaje, zLaje), CONCRETO_CLARO, wViga);
+  if (temCoberta) linha(T(0, H, C), T(W, H, C), CONCRETO_CLARO, wViga);
 
   // 2) Laje pré-moldada: o plano da laje apoiado nas VIGAS DE LAJE
   // (uma viga por linha de pilares, no nível da laje)
-  if (dados.temLaje) {
-    poligono(
-      [T(0, yLaje, 0), T(W, yLaje, 0), T(W, yLaje, zLaje), T(0, yLaje, zLaje)],
-      "rgba(214, 221, 228, 0.5)",
-      CONCRETO_CLARO,
-      0.8
-    );
+  if (temVigaLaje) {
+    // O plano cinza e a LAJE em si — so quando ela esta no orcamento.
+    if (dados.temLaje) {
+      poligono(
+        [T(0, yLaje, 0), T(W, yLaje, 0), T(W, yLaje, zLaje), T(0, yLaje, zLaje)],
+        "rgba(214, 221, 228, 0.5)",
+        CONCRETO_CLARO,
+        0.8
+      );
+    }
+    // As vigas aparecem em TODAS as linhas de pilar assim que sao lancadas.
     for (const x of linhasX) linha(T(x, yLaje, 0), T(x, yLaje, zLaje), CONCRETO, wViga * 1.1);
     linha(T(0, yLaje, 0), T(W, yLaje, 0), CONCRETO, wViga * 1.1);
     // viga de fechamento no fim da laje (quando parcial)
@@ -250,6 +257,7 @@ export default function DesenhoGalpao({
   temLaje = false,
   temTravamento = false,
   temCoberta = true,
+  temVigaLaje = false,
   areaLaje = null,
   largura = 300,
 }) {
@@ -274,6 +282,7 @@ export default function DesenhoGalpao({
     temLaje,
     temTravamento,
     temCoberta,
+    temVigaLaje,
     areaLaje,
     textoLargura: larguraTotal > 0 ? `${fmt(larguraTotal)}M` : null,
     textoComprimento: comprimento ? `${fmt(comprimento)}M` : null,
