@@ -2060,6 +2060,13 @@ function OrcamentosGalpaoPageInterno() {
       const n = (nome || "").toUpperCase();
       if (n.startsWith("CONSOLO TESOURA")) return "consolo-tesoura-auto";
       if (n.startsWith("VIGA PARA LAJE")) return "viga-laje-auto";
+      // Viga de travamento: a de 5m e a de 6m (ou o vao quebrado, ex. 5,40M,
+      // que conta como vao de 6m). Sem isso ela DUPLICAVA ao editar/duplicar.
+      if (n.startsWith("VIGA DE TRAVAMENTO")) {
+        const m = n.match(/X(\d+(?:[,.]\d+)?)M/);
+        const comp = m ? parseFloat(m[1].replace(",", ".")) : 0;
+        return comp > 5 ? "travamento-auto-6" : "travamento-auto-5";
+      }
       if (n.startsWith("FUNDAÇÃO") && secao === "laje") return "fundacao-laje";
       if (n.startsWith("TERÇA") || n.startsWith("TERCA")) {
         if (/6[,.]00\s*M/.test(n)) return "terca-auto-6";
