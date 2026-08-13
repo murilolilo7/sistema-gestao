@@ -3281,9 +3281,9 @@ function OrcamentosGalpaoPageInterno() {
                     onChange={(e) => setTemVigaLajeAvulsa(e.target.checked)}
                     className="h-4 w-4"
                   />
-                  Lançar as vigas mesmo sem a laje
+                  Vigas do 1º nível — lançar mesmo sem a laje
                   <span className="text-slate-400">
-                    (para quem vai fazer a laje depois)
+                    (a laje acima é opcional; informe o tipo e a área só se ela entrar)
                   </span>
                 </label>
 
@@ -3310,7 +3310,10 @@ function OrcamentosGalpaoPageInterno() {
                       onChange={(e) => setTemSegundaLaje(e.target.checked)}
                       className="h-4 w-4"
                     />
-                    Segunda laje (galpão de dois pavimentos)
+                    Vigas do 2º nível (topo dos pilares) — dois pavimentos
+                    <span className="text-slate-400">
+                      {" "}(a 2ª laje é opcional)
+                    </span>
                   </label>
                   {temSegundaLaje && (
                     <>
