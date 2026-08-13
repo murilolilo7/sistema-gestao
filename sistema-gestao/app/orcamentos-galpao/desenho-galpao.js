@@ -161,7 +161,8 @@ function calcularDesenhoGalpao(dados) {
   if (temCoberta) linha(T(W, H, 0), T(W, H, C), CONCRETO_CLARO, wViga);
   for (const yT of niveisTravamento)
     linha(T(W, yT, 0), T(W, yT, C), CONCRETO_CLARO, wViga * 0.9);
-  if (temVigaLaje) linha(T(W, yLaje, 0), T(W, yLaje, zLaje), CONCRETO_CLARO, wViga);
+  // (nao ha viga longitudinal na altura da laje: as vigas de laje sao
+  // transversais, desenhadas mais abaixo)
   if (temCoberta) linha(T(0, H, C), T(W, H, C), CONCRETO_CLARO, wViga);
 
   // 2) Laje pré-moldada: o plano da laje apoiado nas VIGAS DE LAJE
@@ -176,25 +177,6 @@ function calcularDesenhoGalpao(dados) {
         0.8
       );
     }
-    // Segunda laje (pavimento de cima): mesmo desenho, na altura dela.
-    if (yLaje2 && dados.temSegundaLaje) {
-      const zLaje2 = dados.areaLaje2 && W > 0
-        ? Math.min(C, Math.max(0, Number(dados.areaLaje2) / W))
-        : zLaje;
-      if (dados.temLaje2) {
-        poligono(
-          [T(0, yLaje2, 0), T(W, yLaje2, 0), T(W, yLaje2, zLaje2), T(0, yLaje2, zLaje2)],
-          "rgba(214, 221, 228, 0.5)",
-          CONCRETO_CLARO,
-          0.8
-        );
-      }
-      const nMod2 = Math.max(1, Math.round(zLaje2 / passo));
-      for (let i = 0; i <= nMod2; i++) {
-        const z = Math.min(i * passo, zLaje2);
-        linha(T(0, yLaje2, z), T(W, yLaje2, z), CONCRETO, wViga * 1.1);
-      }
-    }
     // As VIGAS DE LAJE atravessam o galpao na LARGURA (de um lado ao outro),
     // como traves apoiadas nos pilares — direcao oposta a das vigas de
     // travamento, que correm ao longo do comprimento. Uma viga em cada
@@ -206,6 +188,28 @@ function calcularDesenhoGalpao(dados) {
     }
     // viga de fechamento no fim da laje (quando parcial)
     if (zLaje < C - 0.01) linha(T(0, yLaje, zLaje), T(W, yLaje, zLaje), CONCRETO, wViga * 1.1);
+  }
+
+  // SEGUNDA LAJE (pavimento de cima): bloco proprio, para aparecer mesmo
+  // quando so as vigas de cima foram lancadas.
+  if (yLaje2 && dados.temSegundaLaje) {
+    const zLaje2 =
+      Number(dados.areaLaje2) > 0 && W > 0
+        ? Math.max(1, Math.min(C, Number(dados.areaLaje2) / W))
+        : C;
+    if (dados.temLaje2) {
+      poligono(
+        [T(0, yLaje2, 0), T(W, yLaje2, 0), T(W, yLaje2, zLaje2), T(0, yLaje2, zLaje2)],
+        "rgba(214, 221, 228, 0.5)",
+        CONCRETO_CLARO,
+        0.8
+      );
+    }
+    const nMod2 = Math.max(1, Math.round(zLaje2 / passo));
+    for (let i = 0; i <= nMod2; i++) {
+      const z = Math.min(i * passo, zLaje2);
+      linha(T(0, yLaje2, z), T(W, yLaje2, z), CONCRETO, wViga * 1.1);
+    }
   }
 
   // 3) Pilares internos (divisas entre galpões geminados)
