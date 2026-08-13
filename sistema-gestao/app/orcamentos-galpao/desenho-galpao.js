@@ -153,9 +153,15 @@ function calcularDesenhoGalpao(dados) {
         0.8
       );
     }
-    // As vigas aparecem em TODAS as linhas de pilar assim que sao lancadas.
-    for (const x of linhasX) linha(T(x, yLaje, 0), T(x, yLaje, zLaje), CONCRETO, wViga * 1.1);
-    linha(T(0, yLaje, 0), T(W, yLaje, 0), CONCRETO, wViga * 1.1);
+    // As VIGAS DE LAJE atravessam o galpao na LARGURA (de um lado ao outro),
+    // como traves apoiadas nos pilares — direcao oposta a das vigas de
+    // travamento, que correm ao longo do comprimento. Uma viga em cada
+    // linha de pilar (a cada modulo de 5m), dentro do trecho da laje.
+    const nModLaje = Math.max(1, Math.round(zLaje / passo));
+    for (let i = 0; i <= nModLaje; i++) {
+      const z = Math.min(i * passo, zLaje);
+      linha(T(0, yLaje, z), T(W, yLaje, z), CONCRETO, wViga * 1.1);
+    }
     // viga de fechamento no fim da laje (quando parcial)
     if (zLaje < C - 0.01) linha(T(0, yLaje, zLaje), T(W, yLaje, zLaje), CONCRETO, wViga * 1.1);
   }
