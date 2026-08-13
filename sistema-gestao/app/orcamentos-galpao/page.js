@@ -132,7 +132,8 @@ let mapaMontagemPapel = {};
 // Producao por dia das pecas que entram no calculo de montagem. As demais
 // (telha, calha, capote, fundacao) NAO entram, por definicao do Murilo.
 const MONTAGEM_POR_DIA = {
-  TESOURA: 4,
+  // TESOURA nao entra aqui: a producao cai conforme o vao cresce.
+  // Ver montagemDaTesoura() logo abaixo.
   PILAR: 3,
   TERCA: 30,
   VIGA_TRAVAMENTO: 10,
@@ -142,6 +143,18 @@ const MONTAGEM_POR_DIA = {
 // Area de uma peca de laje, em m2. A laje entra no orcamento em m2, mas a
 // montagem e por PECA: 160 m2 / 7 = 22,85 -> 23 pecas.
 const M2_POR_PECA_LAJE = 7;
+
+// Tesoura: quanto maior o vao, menos pecas por dia. Vale tanto para as
+// cadastradas quanto para as calculadas por proporcao (que nao estao no
+// catalogo) — o tamanho sai do proprio nome da peca.
+function montagemDaTesoura(nome) {
+  const m = (nome || "").match(/(\d+(?:[.,]\d+)?)\s*M/i);
+  const tam = m ? parseFloat(m[1].replace(",", ".")) : 0;
+  if (!tam) return 4;
+  if (tam >= 20) return 2;
+  if (tam >= 16) return 3;
+  return 4;
+}
 
 // Diarias de MONTAGEM. Estrutura e laje sao contadas SEPARADAMENTE, porque
 // cada uma tem a sua linha de montagem no orcamento.
@@ -155,6 +168,7 @@ function diariasDeMontagem(listaItens, secaoAlvo) {
     if (papel === "MONTAGEM") return soma;
     // A tabela manda; o cadastro da peca serve de reserva.
     const porDia =
+      (papel === "TESOURA" ? montagemDaTesoura(i.nome) : 0) ||
       Number(MONTAGEM_POR_DIA[papel]) ||
       Number(mapaMontagem[i.nome]) ||
       Number(mapaMontagemPapel[papel]) ||
