@@ -246,6 +246,10 @@ function OrcamentosGalpaoPageInterno() {
   const [montagemLajeQtd, setMontagemLajeQtd] = useState("");
   // Nivel de ferragem do pilar reforçado do germinado (fileira do meio,
   // que segura 2 tesouras). Padrao PESADO; pode virar ESBELTO etc.
+  // Nivel do pilar padrao: "AUTO" deixa a tabela de engenharia escolher
+  // (comportamento de sempre). Serve para reforcar o pilar quando o galpao
+  // vai receber laje no futuro e o cliente ja quer deixar as esperas.
+  const [nivelPadrao, setNivelPadrao] = useState("AUTO");
   const [nivelReforcado, setNivelReforcado] = useState("PESADO");
   const [nivelComLaje, setNivelComLaje] = useState("COM_LAJE");
   const [diasValidade, setDiasValidade] = useState("10");
@@ -466,6 +470,7 @@ function OrcamentosGalpaoPageInterno() {
       const [resPadrao, resComLaje, resReforcado] = await Promise.all([
         supabase.rpc("calcular_pilar", {
           pe_direito_input: pe, vao_input: v, com_laje_input: comLaje,
+          ...(nivelPadrao !== "AUTO" ? { nivel_input: nivelPadrao } : {}),
         }),
         qtdComLaje > 0
           ? supabase.rpc("calcular_pilar", {
@@ -581,7 +586,7 @@ function OrcamentosGalpaoPageInterno() {
     return () => {
       cancelado = true;
     };
-  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber]);
+  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, nivelPadrao, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber]);
   const listaLarguras =
     totalGalpoes > 1 && vao
       ? Array.from({ length: totalGalpoes }, (_, i) =>
@@ -3131,6 +3136,20 @@ function OrcamentosGalpaoPageInterno() {
                     >
                       <td className="py-1.5 pr-2">
                         {i.nome}
+                        {i.chave === "pilar-auto-padrao" && (
+                          <select
+                            value={nivelPadrao}
+                            onChange={(e) => setNivelPadrao(e.target.value)}
+                            className="ml-2 rounded border border-slate-300 px-1 py-0.5 text-xs align-middle"
+                          >
+                            <option value="AUTO">Automático</option>
+                            <option value="ESBELTO">Esbelto 25×30</option>
+                            <option value="LEVE">Leve 25×40</option>
+                            <option value="MEDIO">Médio 25×40</option>
+                            <option value="PESADO">Pesado 25×40</option>
+                            <option value="COM_LAJE">Com laje 25×40</option>
+                          </select>
+                        )}
                         {i.chave === "pilar-auto-reforcado" && (
                           <select
                             value={nivelReforcado}
