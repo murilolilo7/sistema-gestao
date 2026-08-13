@@ -3389,8 +3389,11 @@ function OrcamentosGalpaoPageInterno() {
                 Peças (sem BDI): <b className="text-slate-700">{formatarMoeda(subtotal)}</b>
               </span>
               <span className="text-slate-500">
+                {/* Barra da lista de pecas: mostra o valor DAS PECAS com BDI.
+                    O desconto NAO entra aqui — ele so aparece no resumo do
+                    orcamento, abaixo das observacoes. */}
                 Total{margemNumerica > 0 ? " (com BDI)" : ""}:{" "}
-                <b className="text-slate-800 text-base">{formatarMoeda(totalFinal)}</b>
+                <b className="text-slate-800 text-base">{formatarMoeda(totalComMargem)}</b>
               </span>
               {areaCalculada && (
                 <span className="text-slate-500">
