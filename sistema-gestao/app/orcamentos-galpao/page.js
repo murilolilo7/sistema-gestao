@@ -2013,6 +2013,21 @@ function OrcamentosGalpaoPageInterno() {
     setVao(orcamento.vao ? String(orcamento.vao) : "");
     setComprimento(orcamento.comprimento ? String(orcamento.comprimento) : "");
     setPeDireito(orcamento.pe_direito ? String(orcamento.pe_direito) : "");
+    // Escolhas salvas do orcamento. Restaurar ANTES dos itens, para os
+    // efeitos automaticos recalcularem com as mesmas opcoes de quando foi
+    // salvo — e nao trocarem as pecas por outras.
+    if (orcamento.nivel_padrao) setNivelPadrao(orcamento.nivel_padrao);
+    if (orcamento.nivel_reforcado) setNivelReforcado(orcamento.nivel_reforcado);
+    if (orcamento.nivel_com_laje) setNivelComLaje(orcamento.nivel_com_laje);
+    if (orcamento.tem_travamento !== null && orcamento.tem_travamento !== undefined) {
+      setTemTravamento(!!orcamento.tem_travamento);
+      // ja veio do banco: o efeito da largura nao deve sobrescrever
+      larguraTravamentoAuto.current = !!orcamento.tem_travamento;
+    }
+    setTravamentoDuplo(!!orcamento.travamento_duplo);
+    if (orcamento.travamento_valor_m3)
+      setTravamentoValorM3(String(orcamento.travamento_valor_m3));
+    if (orcamento.viga_valor_m3) setVigaValorM3(String(orcamento.viga_valor_m3));
     setTemPlatibanda(!!orcamento.tem_platibanda);
     setAlturaPlatibanda(orcamento.altura_platibanda ? String(orcamento.altura_platibanda) : "1.20");
     setEspessuraPlatibanda(orcamento.espessura_platibanda ? String(orcamento.espessura_platibanda) : "0.15");
@@ -2227,6 +2242,19 @@ function OrcamentosGalpaoPageInterno() {
         altura_platibanda_input: temPlatibanda ? Number(alturaPlatibanda) || null : null,
         espessura_platibanda_input: temPlatibanda ? Number(espessuraPlatibanda) || null : null,
         tem_dente_gerber_input: temPlatibanda && temDenteGerber,
+      });
+      // Escolhas da tela (nivel do pilar, travamento, valores do m3). Sem
+      // guardar isso, ao reabrir o orcamento o sistema recalculava tudo no
+      // modo automatico e TROCAVA as pecas — mudando o valor do orcamento.
+      await supabase.rpc("salvar_opcoes_orcamento_galpao", {
+        orcamento_id_input: Number(idSalvo),
+        nivel_padrao_input: nivelPadrao,
+        nivel_reforcado_input: nivelReforcado,
+        nivel_com_laje_input: nivelComLaje,
+        tem_travamento_input: temTravamento,
+        travamento_duplo_input: travamentoDuplo,
+        travamento_valor_m3_input: Number(travamentoValorM3) || null,
+        viga_valor_m3_input: Number(vigaValorM3) || null,
       });
     }
 
