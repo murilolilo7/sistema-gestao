@@ -303,6 +303,9 @@ function OrcamentosGalpaoPageInterno() {
   // Nivel do pilar padrao: "AUTO" deixa a tabela de engenharia escolher
   // (comportamento de sempre). Serve para reforcar o pilar quando o galpao
   // vai receber laje no futuro e o cliente ja quer deixar as esperas.
+  // Pilar automatico: normalmente sim, mas o cliente pode ja ter a estrutura
+  // pronta e querer so a coberta. Ai o usuario desmarca e os pilares saem.
+  const [comPilares, setComPilares] = useState(true);
   const [nivelPadrao, setNivelPadrao] = useState("AUTO");
   const [nivelReforcado, setNivelReforcado] = useState("PESADO");
   const [nivelComLaje, setNivelComLaje] = useState("COM_LAJE");
@@ -464,9 +467,9 @@ function OrcamentosGalpaoPageInterno() {
       "pilar-auto-meio",
       "consolo-tesoura-auto",
     ];
-    // Galpao editado: nada entra sozinho — o usuario monta a lista peca a
-    // peca, para o orcamento ficar exatamente com o que o cliente pediu.
-    if (tipoSelecionado === "editado" || !paramEng || !paramEng.pilar_automatico) {
+    // Sem pilares (cliente ja tem a estrutura pronta e quer so a coberta),
+    // ou pilar automatico desligado nos parametros: nenhum pilar e lancado.
+    if (!comPilares || !paramEng || !paramEng.pilar_automatico) {
       setItens((atual) =>
         atual.some((i) => CHAVES_AUTO.includes(i.chave))
           ? atual.filter((i) => !CHAVES_AUTO.includes(i.chave))
@@ -648,7 +651,7 @@ function OrcamentosGalpaoPageInterno() {
     return () => {
       cancelado = true;
     };
-  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, nivelPadrao, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber]);
+  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, comPilares, nivelPadrao, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber]);
   const listaLarguras =
     totalGalpoes > 1 && vao
       ? Array.from({ length: totalGalpoes }, (_, i) =>
@@ -2693,6 +2696,18 @@ function OrcamentosGalpaoPageInterno() {
           {modeloId && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
               <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={comPilares}
+                  onChange={(e) => setComPilares(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Lançar pilares e fundação
+                <span className="text-slate-400">
+                  (desmarque se o cliente já tem a estrutura pronta e quer só a coberta)
+                </span>
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-xs font-medium text-slate-600">
                 <input
                   type="checkbox"
                   checked={temTravamento}
