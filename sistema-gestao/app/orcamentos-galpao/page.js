@@ -1379,7 +1379,9 @@ function OrcamentosGalpaoPageInterno() {
     setItens((atual) => {
       const semAuto = atual.filter((i) => !CHAVES.includes(i.chave));
       const d = decomporComprimentoEmModulos(comprimento);
-      if (tipoSelecionado === "editado" || !temTravamento || !d) return semAuto;
+      // No editado a viga de travamento tambem entra: e o usuario quem marca
+      // a caixinha, entao ela reflete o que o cliente pediu.
+      if (!temTravamento || !d) return semAuto;
       const linhas = totalGalpoes + 1; // 2 fileiras no avulso, +1 por geminado
       const porVao = travamentoDuplo ? 2 : 1;
       const m3 = Number(String(travamentoValorM3).replace(",", ".")) || 0;
@@ -1723,15 +1725,14 @@ function OrcamentosGalpaoPageInterno() {
   // Cada linha compara o que o galpão PRECISA (pelas medidas) com o que
   // já foi LANÇADO. Tolerância de 0,5 para itens por metragem.
   // No galpao editado nenhuma peca e obrigatoria: o cliente pode querer so
-  // fundacao, pilares e vigas. As pecas que entram por padrao (montagem,
-  // fundacao, calha, capote) deixam de ser exigidas e podem ser removidas.
+  // fundacao, pilares e vigas. As pecas continuam NA LISTA (a FUNDAÇÃO
+  // precisa existir para o calculo automatico dela funcionar), mas deixam de
+  // ser exigidas — o usuario zera ou remove o que nao for do orcamento.
   useEffect(() => {
     if (tipoSelecionado !== "editado") return;
     setItens((atual) => {
       if (!atual.some((i) => i.obrigatorio)) return atual;
-      return atual
-        .filter((i) => !(i.obrigatorio && Number(i.quantidade) <= 0))
-        .map((i) => (i.obrigatorio ? { ...i, obrigatorio: false } : i));
+      return atual.map((i) => (i.obrigatorio ? { ...i, obrigatorio: false } : i));
     });
   }, [tipoSelecionado]);
 
