@@ -1295,7 +1295,12 @@ function OrcamentosGalpaoPageInterno() {
   // altura × vão × valor do m³ que o usuário informa; enquanto o m³ estiver em
   // branco a viga aparece com preço 0 (a definir) e não soma no total.
   useEffect(() => {
-    const ehLaje = tipoSelecionado === "laje" || tipoSelecionado === "mezanino";
+    // No galpao editado a viga da laje tambem e calculada: basta informar a
+    // area no campo da laje. Assim da pra orcar so fundacao, pilares e vigas.
+    const ehLaje =
+      tipoSelecionado === "laje" ||
+      tipoSelecionado === "mezanino" ||
+      tipoSelecionado === "editado";
     const comLaje = Number(areaLaje) > 0;
     const larguraGalpao = Number(vao) || 0;
     const sug = ehLaje && comLaje ? sugestaoQtdVigasLaje() : null;
@@ -1741,13 +1746,22 @@ function OrcamentosGalpaoPageInterno() {
         const papel = papelDoItem(i) || "OUTROS";
         porPapel[papel] = (porPapel[papel] || 0) + q;
       }
+      // FUNDACAO e MONTAGEM sempre aparecem, mesmo zeradas: o pilar ja traz a
+      // fundacao no comprimento, mas a fundacao (o servico) e a montagem
+      // precisam ser lembradas — se ficarem em zero, o checklist avisa.
+      for (const obrig of ["FUNDACAO", "MONTAGEM"]) {
+        if (!(obrig in porPapel)) porPapel[obrig] = 0;
+      }
       return Object.entries(porPapel).map(([papel, qtd]) => ({
         rotulo: papel.replace(/_/g, " "),
-        detalhe: "lançado no orçamento",
+        detalhe: qtd > 0 ? "lançado no orçamento" : "não lançado — confira se precisa",
         necessario: qtd,
         lancado: qtd,
-        ok: true,
-        texto: Number(qtd).toLocaleString("pt-BR", { maximumFractionDigits: 2 }),
+        ok: qtd > 0,
+        texto:
+          qtd > 0
+            ? Number(qtd).toLocaleString("pt-BR", { maximumFractionDigits: 2 })
+            : "não lançado",
       }));
     }
     if (!vao || !comprimento) return [];
@@ -3110,7 +3124,7 @@ function OrcamentosGalpaoPageInterno() {
                 Sugestão automática (terças): {sugestaoTercaAtiva.texto} — ajuste se precisar.
               </p>
             )}
-            {conferenciaTercas && (
+            {conferenciaTercas && tipoSelecionado !== "editado" && (
               <div
                 className={`text-xs rounded px-2 py-1.5 mb-2 border ${
                   conferenciaTercas.linhas.every((l) => l.lancadas >= l.necessarias)
@@ -3138,7 +3152,9 @@ function OrcamentosGalpaoPageInterno() {
               (1 dia por pilar) — pode ajustar manualmente depois se precisar.
             </p>
 
-            {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
+            {(tipoSelecionado === "laje" ||
+              tipoSelecionado === "mezanino" ||
+              tipoSelecionado === "editado") && (
               <div className="rounded-lg border border-emerald-300 bg-emerald-50/40 p-3 mb-3">
                 <TituloEtapa numero="6">Laje / Mezanino</TituloEtapa>
                 <p className="text-xs font-semibold text-emerald-800 mb-2">
@@ -3229,7 +3245,9 @@ function OrcamentosGalpaoPageInterno() {
               </div>
             )}
 
-            {(tipoSelecionado === "laje" || tipoSelecionado === "mezanino") && (
+            {(tipoSelecionado === "laje" ||
+              tipoSelecionado === "mezanino" ||
+              tipoSelecionado === "editado") && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
                 <p className="text-xs font-medium text-slate-600 mb-2">
                   Viga para laje/mezanino
