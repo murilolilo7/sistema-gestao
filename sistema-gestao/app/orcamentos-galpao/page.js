@@ -320,6 +320,12 @@ function OrcamentosGalpaoPageInterno() {
   const [vigaAltura, setVigaAltura] = useState("");
   const [vigaVao, setVigaVao] = useState("");
   const [vigaValorM3, setVigaValorM3] = useState("");
+  // Viga de travamento: uma por vao em cada linha de pilar. Vem marcada a
+  // partir de 12m de largura (padrao da obra), mas o usuario decide sempre.
+  const [temTravamento, setTemTravamento] = useState(false);
+  const [travamentoDuplo, setTravamentoDuplo] = useState(false);
+  const [travamentoValorM3, setTravamentoValorM3] = useState("1300");
+  const larguraTravamentoAuto = useRef(null);
   const [vigaQtd, setVigaQtd] = useState("1");
 
   const [tesouraRefId, setTesouraRefId] = useState("");
@@ -1337,6 +1343,63 @@ function OrcamentosGalpaoPageInterno() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comprimento]);
+
+  // Viga de travamento: a caixinha acompanha a largura — marcada a partir de
+  // 12m, desmarcada abaixo. So muda quando a largura CRUZA esse limite, para
+  // nao desfazer a escolha do usuario enquanto ele trabalha no orcamento.
+  useEffect(() => {
+    const larg = somaLarguras || Number(vao) || 0;
+    if (larg <= 0) return;
+    const deveMarcar = larg >= 12;
+    if (larguraTravamentoAuto.current !== deveMarcar) {
+      larguraTravamentoAuto.current = deveMarcar;
+      setTemTravamento(deveMarcar);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vao, somaLarguras]);
+
+  // Lanca as vigas de travamento acompanhando os vaos: uma viga por vao em
+  // cada linha de pilar (2 linhas no galpao avulso, +1 por geminado).
+  // Preco pelo m3: 0,15 x 0,30 x comprimento do vao x valor do concreto.
+  useEffect(() => {
+    const CHAVES = ["travamento-auto-5", "travamento-auto-6"];
+    setItens((atual) => {
+      const semAuto = atual.filter((i) => !CHAVES.includes(i.chave));
+      const d = decomporComprimentoEmModulos(comprimento);
+      if (!temTravamento || !d) return semAuto;
+      const linhas = totalGalpoes + 1; // 2 fileiras no avulso, +1 por geminado
+      const porVao = travamentoDuplo ? 2 : 1;
+      const m3 = Number(String(travamentoValorM3).replace(",", ".")) || 0;
+      const qtdDe = (chave, padrao) => {
+        const a = atual.find((i) => i.chave === chave);
+        return a && a.quantidadeEditada ? a.quantidade : padrao;
+      };
+      const novos = [];
+      for (const medida of [5, 6]) {
+        // O vao quebrado (ex.: 5,40m) conta como vao de 6m, igual as tercas.
+        const vaosDaMedida = medida === 5 ? d.vaos5 : d.vaos6;
+        const qtd = vaosDaMedida * linhas * porVao;
+        if (qtd <= 0) continue;
+        const comp = medida === 6 && d.quebrado ? d.quebrado : medida;
+        const preco =
+          m3 > 0 ? Math.round(0.15 * 0.3 * comp * m3 * 100) / 100 : 0;
+        novos.push({
+          chave: `travamento-auto-${medida}`,
+          composicao_id: null,
+          nome:
+            "VIGA DE TRAVAMENTO 0,15X0,30X" + doisDec(comp, 2) + "M" +
+            (travamentoDuplo ? " — 2 por vão" : ""),
+          unidade: "UND",
+          papel: "VIGA_TRAVAMENTO",
+          quantidade: qtdDe(`travamento-auto-${medida}`, qtd),
+          preco_unitario: preco,
+          secao: "estrutura",
+        });
+      }
+      return recalcularMontagem([...novos, ...semAuto]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [temTravamento, travamentoDuplo, travamentoValorM3, comprimento, numeroVaos, totalGalpoes]);
 
   // Laje 100%: ao escolher o tipo "laje" a laje cobre o galpao inteiro, entao
   // a area ja entra automatica (largura total × comprimento) e o usuario so
@@ -2528,6 +2591,47 @@ function OrcamentosGalpaoPageInterno() {
                   className={campoClasse}
                 />
               </div>
+            </div>
+          )}
+
+          {modeloId && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={temTravamento}
+                  onChange={(e) => setTemTravamento(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Viga de travamento — uma por vão em cada linha de pilar
+                <span className="text-slate-400">
+                  (vem marcada a partir de 12m de largura)
+                </span>
+              </label>
+              {temTravamento && (
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={travamentoDuplo}
+                      onChange={(e) => setTravamentoDuplo(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    Duas vigas por vão (galpão alto)
+                  </label>
+                  <div>
+                    <label className={labelClasse}>Valor do m³ do concreto (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={travamentoValorM3}
+                      onChange={(e) => setTravamentoValorM3(e.target.value)}
+                      className={campoClasse}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
