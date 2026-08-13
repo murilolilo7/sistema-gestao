@@ -245,6 +245,7 @@ export default function DesenhoGalpao({
   modulacao = 5,
   temLaje = false,
   temTravamento = false,
+  temCoberta = true,
   areaLaje = null,
   largura = 300,
 }) {
@@ -268,6 +269,7 @@ export default function DesenhoGalpao({
     modulacao,
     temLaje,
     temTravamento,
+    temCoberta,
     areaLaje,
     textoLargura: larguraTotal > 0 ? `${fmt(larguraTotal)}M` : null,
     textoComprimento: comprimento ? `${fmt(comprimento)}M` : null,
