@@ -1909,8 +1909,39 @@ function OrcamentosGalpaoPageInterno() {
     );
     setObservacao(orcamento.observacao || "");
     setObservacaoInterna(orcamento.observacao_interna || "");
-    const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => ({
-      chave: proximaChave.current++,
+    // BUG DE DUPLICACAO: as pecas automaticas (pilar, terca, viga da laje,
+    // consolo, fundacao da laje) sao identificadas por uma CHAVE FIXA que
+    // NAO vai para o banco. Ao reabrir para editar, cada item voltava com
+    // chave numerica nova, os efeitos automaticos nao reconheciam a peca
+    // salva e lancavam OUTRA por cima — pilar e terca apareciam repetidos.
+    // Aqui a chave original e devolvida pelo NOME da peca.
+    const chaveAutomatica = (nome, secao) => {
+      const n = (nome || "").toUpperCase();
+      if (n.startsWith("CONSOLO TESOURA")) return "consolo-tesoura-auto";
+      if (n.startsWith("VIGA PARA LAJE")) return "viga-laje-auto";
+      if (n.startsWith("FUNDAÇÃO") && secao === "laje") return "fundacao-laje";
+      if (n.startsWith("TERÇA") || n.startsWith("TERCA")) {
+        if (/6[,.]00\s*M/.test(n)) return "terca-auto-6";
+        if (/5[,.]00\s*M/.test(n)) return "terca-auto-5";
+        return null;
+      }
+      if (n.startsWith("PILAR")) {
+        if (secao === "laje") return "pilar-auto-meio";
+        if (n.includes("REFORÇADO") || n.includes("PESADO")) return "pilar-auto-reforcado";
+        if (n.includes("SOB A LAJE")) return "pilar-auto-comlaje";
+        return "pilar-auto-padrao";
+      }
+      return null;
+    };
+    const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => {
+      const nomeItem =
+        item.composicoes_galpao?.nome || item.descricao_livre || "Item removido";
+      const secaoItem = item.secao === "laje" ? "laje" : "estrutura";
+      const chaveAuto = chaveAutomatica(nomeItem, secaoItem);
+      return {
+      // Peca automatica volta com a chave original; as demais, chave nova.
+      ...(chaveAuto ? { quantidadeEditada: true } : {}),
+      chave: chaveAuto || proximaChave.current++,
       composicao_id: item.composicao_id,
       nome: item.composicoes_galpao?.nome || item.descricao_livre || "Item removido",
       unidade: item.composicoes_galpao?.unidade || item.unidade_livre,
@@ -1931,7 +1962,8 @@ function OrcamentosGalpaoPageInterno() {
         ["MONTAGEM", "FUNDAÇÃO", "CALHA FIBRA", "CAPOTE"].includes(
           item.composicoes_galpao?.nome
         ),
-    }));
+      };
+    });
     // IMPORTANTE: preencher os seletores de telha e laje a partir dos
     // itens salvos — sem isso, o recálculo ao vivo (que confia nesses
     // seletores) removeria as linhas de telha/laje ao editar.
