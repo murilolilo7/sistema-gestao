@@ -46,6 +46,9 @@ function calcularDesenhoGalpao(dados) {
   // Sem área informada, desenha a laje no galpão inteiro.
   const areaLajeNum = Number(dados.areaLaje) || 0;
   const zLaje = areaLajeNum > 0 ? Math.max(1, Math.min(C, areaLajeNum / W)) : C;
+  // A viga de topo (que liga os pilares no alto) faz parte da estrutura da
+  // coberta: sem coberta lancada, o galpao fica so com os pilares em pe.
+  const temCoberta = dados.temCoberta !== false;
   let niveisTravamento = [];
   if (dados.temTravamento) {
     if (H > 12) {
@@ -129,7 +132,7 @@ function calcularDesenhoGalpao(dados) {
   for (const x of linhasX) linha(T(x, 0, C), T(x, H, C), CONCRETO_CLARO, wPilar * 0.8);
   for (let i = 1; i < nMod; i++)
     linha(T(W, 0, i * passo), T(W, H, i * passo), CONCRETO_CLARO, wPilar * 0.8);
-  linha(T(W, H, 0), T(W, H, C), CONCRETO_CLARO, wViga);
+  if (temCoberta) linha(T(W, H, 0), T(W, H, C), CONCRETO_CLARO, wViga);
   for (const yT of niveisTravamento)
     linha(T(W, yT, 0), T(W, yT, C), CONCRETO_CLARO, wViga * 0.9);
   if (dados.temLaje) linha(T(W, yLaje, 0), T(W, yLaje, zLaje), CONCRETO_CLARO, wViga);
@@ -160,7 +163,6 @@ function calcularDesenhoGalpao(dados) {
   // SÓ desenha se o orçamento tiver coberta (dados.temCoberta). Em
   // orçamentos parciais — por exemplo só fundação, pilares e vigas — o
   // desenho fica fiel: mostra a estrutura aberta, sem telhado.
-  const temCoberta = dados.temCoberta !== false;
   for (let v = larguras.length - 1; temCoberta && v >= 0; v--) {
     const x0 = divisas[v];
     const x1 = divisas[v + 1];
@@ -193,8 +195,10 @@ function calcularDesenhoGalpao(dados) {
   // 5) Frente: viga de topo e pilares próximos por último. A viga de
   // travamento existe SÓ nas laterais (nunca na frente/empena) e é
   // desenhada em todos os seus níveis (duplicada acima de 12m).
-  linha(T(0, H, 0), T(W, H, 0), CONCRETO, wViga);
-  linha(T(0, H, 0), T(0, H, C), CONCRETO, wViga);
+  if (temCoberta) {
+    linha(T(0, H, 0), T(W, H, 0), CONCRETO, wViga);
+    linha(T(0, H, 0), T(0, H, C), CONCRETO, wViga);
+  }
   for (const yT of niveisTravamento) linha(T(0, yT, 0), T(0, yT, C), CONCRETO, wViga * 0.9);
   for (let i = nMod; i >= 1; i--) linha(T(0, 0, i * passo), T(0, H, i * passo), CONCRETO, wPilar);
   for (const x of linhasX) linha(T(x, 0, 0), T(x, H, 0), CONCRETO, wPilar);
