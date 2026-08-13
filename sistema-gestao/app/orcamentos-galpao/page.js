@@ -129,20 +129,57 @@ function BadgeStatus({ status }) {
 let mapaMontagem = {};
 let mapaMontagemPapel = {};
 
-// Diarias de MONTAGEM: soma quantidade / pecas montadas por dia de cada item.
-// Ex: 7 tesouras (4/dia) + 14 pilares (3/dia) + 48 tercas (30/dia) = 8 diarias.
-function recalcularMontagem(listaItens) {
+// Producao por dia das pecas que entram no calculo de montagem. As demais
+// (telha, calha, capote, fundacao) NAO entram, por definicao do Murilo.
+const MONTAGEM_POR_DIA = {
+  TESOURA: 4,
+  PILAR: 3,
+  TERCA: 30,
+  VIGA_TRAVAMENTO: 10,
+  VIGA_LAJE: 3,
+  LAJE: 10,
+};
+// Area de uma peca de laje, em m2. A laje entra no orcamento em m2, mas a
+// montagem e por PECA: 160 m2 / 7 = 22,85 -> 23 pecas.
+const M2_POR_PECA_LAJE = 7;
+
+// Diarias de MONTAGEM. Estrutura e laje sao contadas SEPARADAMENTE, porque
+// cada uma tem a sua linha de montagem no orcamento.
+// Ex. estrutura: 7 tesouras (4/dia) + 14 pilares (3/dia) + 48 tercas (30/dia).
+// Ex. laje: pilares do meio (3/dia) + vigas de laje (3/dia) + lajes (10/dia).
+function diariasDeMontagem(listaItens, secaoAlvo) {
   const dias = listaItens.reduce((soma, i) => {
+    const ehLaje = i.secao === "laje";
+    if (secaoAlvo === "laje" ? !ehLaje : ehLaje) return soma;
+    const papel = papelDoItem(i);
+    if (papel === "MONTAGEM") return soma;
+    // A tabela manda; o cadastro da peca serve de reserva.
     const porDia =
-      Number(mapaMontagem[i.nome]) || Number(mapaMontagemPapel[i.papel]) || 0;
+      Number(MONTAGEM_POR_DIA[papel]) ||
+      Number(mapaMontagem[i.nome]) ||
+      Number(mapaMontagemPapel[papel]) ||
+      0;
     if (!porDia) return soma;
-    return soma + (Number(i.quantidade) || 0) / porDia;
+    // Laje: a quantidade esta em m2, mas monta-se por peca.
+    const qtd =
+      papel === "LAJE"
+        ? Math.ceil((Number(i.quantidade) || 0) / M2_POR_PECA_LAJE)
+        : Number(i.quantidade) || 0;
+    return soma + qtd / porDia;
   }, 0);
-  if (dias <= 0) return listaItens;
-  const diarias = Math.ceil(dias);
-  return listaItens.map((i) =>
-    i.nome === "MONTAGEM" && i.secao !== "laje" ? { ...i, quantidade: diarias } : i
-  );
+  return dias > 0 ? Math.ceil(dias) : 0;
+}
+
+function recalcularMontagem(listaItens) {
+  const diariasEstrutura = diariasDeMontagem(listaItens, "estrutura");
+  const diariasLaje = diariasDeMontagem(listaItens, "laje");
+  return listaItens.map((i) => {
+    if (i.nome !== "MONTAGEM") return i;
+    if (i.secao === "laje") {
+      return diariasLaje > 0 ? { ...i, quantidade: diariasLaje } : i;
+    }
+    return diariasEstrutura > 0 ? { ...i, quantidade: diariasEstrutura } : i;
+  });
 }
 
 function recalcularFundacao(listaItens) {
