@@ -10,7 +10,10 @@
 // uma cumeeira para cada galpão, inclusive com LARGURAS DIFERENTES
 // (lista em dados.larguras). As proporções são reais (metros projetados)
 // e o enquadramento é automático, então nunca distorce.
-function calcularDesenhoGalpao(dados) {
+// Exportada para a impressão usar EXATAMENTE o mesmo desenho da tela.
+// Antes a impressão tinha uma cópia própria, que ficou desatualizada e não
+// acompanhava as peças do orçamento.
+export function calcularDesenhoGalpao(dados) {
   const qtdGalpoes = Math.max(1, (Number(dados.galpoesGerminados) || 0) + 1);
   // Larguras: aceita uma lista (galpões geminados de tamanhos diferentes)
   // ou repete a largura única informada para todos os galpões.
