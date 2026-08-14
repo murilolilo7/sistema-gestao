@@ -1499,7 +1499,6 @@ function OrcamentosGalpaoPageInterno() {
     setVigaLargura("");
     setVigaAltura("");
     setVigaVao("");
-    setVigaValorM3("");
     setVigaQtd("1");
     setErro("");
   }
@@ -1995,16 +1994,73 @@ function OrcamentosGalpaoPageInterno() {
     setMensagem("Cliente cadastrado.");
   }
 
+  // ---------------------------------------------------------------------
+  // OPÇÕES DO ORÇAMENTO — lista única
+  //
+  // Salvar, restaurar e limpar são gerados A PARTIR DESTA LISTA. Para
+  // acrescentar uma opção nova, some UMA linha aqui (e a coluna no banco).
+  // Antes, cada campo novo exigia lembrar de quatro lugares diferentes — e
+  // foi assim que orçamentos salvos reabriram com peças e valores trocados.
+  // ---------------------------------------------------------------------
+  const OPCOES = [
+    // coluna no banco       valor              setter                padrão   tipo
+    ["nivel_padrao",         nivelPadrao,       setNivelPadrao,       "AUTO",  "texto"],
+    ["nivel_reforcado",      nivelReforcado,    setNivelReforcado,    "PESADO","texto"],
+    ["nivel_com_laje",       nivelComLaje,      setNivelComLaje,      "COM_LAJE","texto"],
+    ["com_pilares",          comPilares,        setComPilares,        true,    "bool"],
+    ["tem_travamento",       temTravamento,     setTemTravamento,     false,   "bool"],
+    ["travamento_duplo",     travamentoDuplo,   setTravamentoDuplo,   false,   "bool"],
+    ["travamento_valor_m3",  travamentoValorM3, setTravamentoValorM3, "1300",  "num"],
+    ["viga_valor_m3",        vigaValorM3,       setVigaValorM3,       "",      "num"],
+    ["viga_laje_avulsa",     temVigaLajeAvulsa, setTemVigaLajeAvulsa, false,   "bool"],
+    ["altura_laje",          alturaLaje,        setAlturaLaje,        "3.50",  "num"],
+    ["tem_segunda_laje",     temSegundaLaje,    setTemSegundaLaje,    false,   "bool"],
+    ["altura_laje2",         alturaLaje2,       setAlturaLaje2,       "7.00",  "num"],
+    ["area_laje2",           areaLaje2,         setAreaLaje2,         "",      "num"],
+    ["tipo_laje2_id",        tipoLajeId2,       setTipoLajeId2,       "",      "num"],
+    ["tem_platibanda",       temPlatibanda,     setTemPlatibanda,     false,   "bool"],
+    ["altura_platibanda",    alturaPlatibanda,  setAlturaPlatibanda,  "1.20",  "num"],
+    ["espessura_platibanda", espessuraPlatibanda, setEspessuraPlatibanda, "0.15", "num"],
+    ["tem_dente_gerber",     temDenteGerber,    setTemDenteGerber,    false,   "bool"],
+  ];
+
+  // O que vai para o banco.
+  function opcoesParaSalvar(orcamentoId) {
+    const dados = { orcamento_id_input: Number(orcamentoId) };
+    for (const [coluna, valor, , , tipo] of OPCOES) {
+      dados[coluna + "_input"] =
+        tipo === "bool"
+          ? !!valor
+          : tipo === "num"
+            ? Number(String(valor).replace(",", ".")) || null
+            : valor || null;
+    }
+    return dados;
+  }
+
+  // O que volta do banco ao abrir um orçamento salvo.
+  function restaurarOpcoes(orcamento) {
+    for (const [coluna, , aplicar, padrao, tipo] of OPCOES) {
+      const salvo = orcamento[coluna];
+      if (tipo === "bool") aplicar(!!salvo);
+      else if (salvo === null || salvo === undefined || salvo === "") aplicar(padrao);
+      else aplicar(String(salvo));
+    }
+  }
+
+  // Volta tudo ao padrão, num orçamento novo.
+  function limparOpcoes() {
+    for (const [, , aplicar, padrao] of OPCOES) aplicar(padrao);
+  }
+
   function limparFormulario() {
     setClienteId("");
     setModeloId("");
     setVao("");
     setComprimento("");
     setPeDireito("");
-    setTemPlatibanda(false);
-    setAlturaPlatibanda("1.20");
-    setEspessuraPlatibanda("0.15");
-    setTemDenteGerber(false);
+    // todas as opções voltam ao padrão pela lista OPCOES
+    limparOpcoes();
     setNumeroVaos("");
     setNumeroGalpoesGerminados("0");
     setLargurasExtras([]);
@@ -2026,7 +2082,6 @@ function OrcamentosGalpaoPageInterno() {
     setVigaLargura("");
     setVigaAltura("");
     setVigaVao("");
-    setVigaValorM3("");
     setVigaQtd("1");
     setTesouraRefId("");
     setTesouraTamanho("");
@@ -2054,31 +2109,11 @@ function OrcamentosGalpaoPageInterno() {
     setVao(orcamento.vao ? String(orcamento.vao) : "");
     setComprimento(orcamento.comprimento ? String(orcamento.comprimento) : "");
     setPeDireito(orcamento.pe_direito ? String(orcamento.pe_direito) : "");
-    // Escolhas salvas do orcamento. Restaurar ANTES dos itens, para os
-    // efeitos automaticos recalcularem com as mesmas opcoes de quando foi
-    // salvo — e nao trocarem as pecas por outras.
-    if (orcamento.nivel_padrao) setNivelPadrao(orcamento.nivel_padrao);
-    if (orcamento.nivel_reforcado) setNivelReforcado(orcamento.nivel_reforcado);
-    if (orcamento.nivel_com_laje) setNivelComLaje(orcamento.nivel_com_laje);
-    if (orcamento.tem_travamento !== null && orcamento.tem_travamento !== undefined) {
-      setTemTravamento(!!orcamento.tem_travamento);
-      // ja veio do banco: o efeito da largura nao deve sobrescrever
-      larguraTravamentoAuto.current = !!orcamento.tem_travamento;
-    }
-    setTravamentoDuplo(!!orcamento.travamento_duplo);
-    if (orcamento.travamento_valor_m3)
-      setTravamentoValorM3(String(orcamento.travamento_valor_m3));
-    if (orcamento.viga_valor_m3) setVigaValorM3(String(orcamento.viga_valor_m3));
-    setTemVigaLajeAvulsa(!!orcamento.viga_laje_avulsa);
-    if (orcamento.altura_laje) setAlturaLaje(String(orcamento.altura_laje));
-    setTemSegundaLaje(!!orcamento.tem_segunda_laje);
-    if (orcamento.altura_laje2) setAlturaLaje2(String(orcamento.altura_laje2));
-    setAreaLaje2(orcamento.area_laje2 ? String(orcamento.area_laje2) : "");
-    setTipoLajeId2(orcamento.tipo_laje2_id ? String(orcamento.tipo_laje2_id) : "");
-    setTemPlatibanda(!!orcamento.tem_platibanda);
-    setAlturaPlatibanda(orcamento.altura_platibanda ? String(orcamento.altura_platibanda) : "1.20");
-    setEspessuraPlatibanda(orcamento.espessura_platibanda ? String(orcamento.espessura_platibanda) : "0.15");
-    setTemDenteGerber(!!orcamento.tem_dente_gerber);
+    // Escolhas salvas: restauradas ANTES dos itens, para os cálculos
+    // automáticos rodarem com as mesmas opções de quando foi salvo.
+    restaurarOpcoes(orcamento);
+    // o efeito da largura não deve sobrescrever o que veio do banco
+    larguraTravamentoAuto.current = !!orcamento.tem_travamento;
     setNumeroVaos(orcamento.numero_vaos ? String(orcamento.numero_vaos) : "");
     setNumeroGalpoesGerminados(
       orcamento.numero_galpoes_germinados === null || orcamento.numero_galpoes_germinados === undefined
@@ -2263,32 +2298,8 @@ function OrcamentosGalpaoPageInterno() {
     // funcoes de criar/atualizar que ja funcionam.
     const idSalvo = editingId || idRetornado;
     if (idSalvo) {
-      await supabase.rpc("salvar_platibanda_orcamento_galpao", {
-        orcamento_id_input: Number(idSalvo),
-        tem_platibanda_input: temPlatibanda,
-        altura_platibanda_input: temPlatibanda ? Number(alturaPlatibanda) || null : null,
-        espessura_platibanda_input: temPlatibanda ? Number(espessuraPlatibanda) || null : null,
-        tem_dente_gerber_input: temPlatibanda && temDenteGerber,
-      });
-      // Escolhas da tela (nivel do pilar, travamento, valores do m3). Sem
-      // guardar isso, ao reabrir o orcamento o sistema recalculava tudo no
-      // modo automatico e TROCAVA as pecas — mudando o valor do orcamento.
-      await supabase.rpc("salvar_opcoes_orcamento_galpao", {
-        orcamento_id_input: Number(idSalvo),
-        nivel_padrao_input: nivelPadrao,
-        nivel_reforcado_input: nivelReforcado,
-        nivel_com_laje_input: nivelComLaje,
-        tem_travamento_input: temTravamento,
-        travamento_duplo_input: travamentoDuplo,
-        travamento_valor_m3_input: Number(travamentoValorM3) || null,
-        viga_valor_m3_input: Number(vigaValorM3) || null,
-        viga_laje_avulsa_input: temVigaLajeAvulsa,
-        altura_laje_input: Number(alturaLaje) || null,
-        tem_segunda_laje_input: temSegundaLaje,
-        altura_laje2_input: Number(alturaLaje2) || null,
-        area_laje2_input: Number(areaLaje2) || null,
-        tipo_laje2_id_input: tipoLajeId2 ? Number(tipoLajeId2) : null,
-      });
+      // Uma chamada só, montada pela lista OPCOES acima.
+      await supabase.rpc("salvar_opcoes_orcamento_galpao", opcoesParaSalvar(idSalvo));
     }
 
     setMensagem(
