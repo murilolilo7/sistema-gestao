@@ -7,6 +7,15 @@ import { Copy, Eye, EyeOff, Pencil, Printer, ShoppingCart, MessageCircle, XCircl
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
 import DesenhoGalpao from "./desenho-galpao";
+// Regras de cálculo (testadas em calculos.test.js). Ficam num arquivo à parte
+// para que os testes protejam EXATAMENTE o que o sistema usa.
+import {
+  papelDoItem,
+  diariasDeMontagem,
+  qtdTercasPorLinhaDeVao,
+  decomporComprimentoEmModulos,
+  chaveAutomatica,
+} from "./calculos";
 
 const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
 
@@ -26,14 +35,6 @@ const PRECO_CONSOLO_TESOURA = 150;
 const ORDEM_LAJE = ["PILAR", "VIGA_LAJE", "LAJE", "MONTAGEM"];
 
 // Itens livres (sem peça do catálogo) têm papel deduzido pelo nome.
-function papelDoItem(item) {
-  if (item.papel) return item.papel;
-  const nome = (item.nome || "").toUpperCase();
-  if (nome.startsWith("VIGA PARA LAJE")) return "VIGA_LAJE";
-  if (nome.startsWith("TESOURA")) return "TESOURA";
-  return null;
-}
-
 function ordenarItensPorPapel(lista, ordem) {
   const posicaoMontagem = ordem.indexOf("MONTAGEM");
   const posicao = (item) => {
@@ -128,61 +129,6 @@ function BadgeStatus({ status }) {
 // Produtividade de montagem por peca (preenchida quando as composicoes carregam)
 let mapaMontagem = {};
 let mapaMontagemPapel = {};
-
-// Producao por dia das pecas que entram no calculo de montagem. As demais
-// (telha, calha, capote, fundacao) NAO entram, por definicao do Murilo.
-const MONTAGEM_POR_DIA = {
-  // TESOURA nao entra aqui: a producao cai conforme o vao cresce.
-  // Ver montagemDaTesoura() logo abaixo.
-  PILAR: 3,
-  TERCA: 30,
-  VIGA_TRAVAMENTO: 10,
-  VIGA_LAJE: 3,
-  LAJE: 10,
-};
-// Area de uma peca de laje, em m2. A laje entra no orcamento em m2, mas a
-// montagem e por PECA: 160 m2 / 7 = 22,85 -> 23 pecas.
-const M2_POR_PECA_LAJE = 7;
-
-// Tesoura: quanto maior o vao, menos pecas por dia. Vale tanto para as
-// cadastradas quanto para as calculadas por proporcao (que nao estao no
-// catalogo) — o tamanho sai do proprio nome da peca.
-function montagemDaTesoura(nome) {
-  const m = (nome || "").match(/(\d+(?:[.,]\d+)?)\s*M/i);
-  const tam = m ? parseFloat(m[1].replace(",", ".")) : 0;
-  if (!tam) return 4;
-  if (tam >= 20) return 2;
-  if (tam >= 16) return 3;
-  return 4;
-}
-
-// Diarias de MONTAGEM. Estrutura e laje sao contadas SEPARADAMENTE, porque
-// cada uma tem a sua linha de montagem no orcamento.
-// Ex. estrutura: 7 tesouras (4/dia) + 14 pilares (3/dia) + 48 tercas (30/dia).
-// Ex. laje: pilares do meio (3/dia) + vigas de laje (3/dia) + lajes (10/dia).
-function diariasDeMontagem(listaItens, secaoAlvo) {
-  const dias = listaItens.reduce((soma, i) => {
-    const ehLaje = i.secao === "laje";
-    if (secaoAlvo === "laje" ? !ehLaje : ehLaje) return soma;
-    const papel = papelDoItem(i);
-    if (papel === "MONTAGEM") return soma;
-    // A tabela manda; o cadastro da peca serve de reserva.
-    const porDia =
-      (papel === "TESOURA" ? montagemDaTesoura(i.nome) : 0) ||
-      Number(MONTAGEM_POR_DIA[papel]) ||
-      Number(mapaMontagem[i.nome]) ||
-      Number(mapaMontagemPapel[papel]) ||
-      0;
-    if (!porDia) return soma;
-    // Laje: a quantidade esta em m2, mas monta-se por peca.
-    const qtd =
-      papel === "LAJE"
-        ? Math.ceil((Number(i.quantidade) || 0) / M2_POR_PECA_LAJE)
-        : Number(i.quantidade) || 0;
-    return soma + qtd / porDia;
-  }, 0);
-  return dias > 0 ? Math.ceil(dias) : 0;
-}
 
 function recalcularMontagem(listaItens) {
   const diariasEstrutura = diariasDeMontagem(listaItens, "estrutura");
@@ -1052,57 +998,6 @@ function OrcamentosGalpaoPageInterno() {
       fileiras: totalGalpoes + 1,
       qtd: (numVaos + 1) * (totalGalpoes + 1),
     };
-  }
-
-  // Terças por linha de vão: largura do galpão ÷ 1,6, arredondando para
-  // cima e SEMPRE para número PAR (não existe terça aos pedaços nem
-  // quantidade ímpar). Ex.: 10m ÷ 1,6 = 6,25 → 7 → 8.
-  function qtdTercasPorLinhaDeVao(larguraGalpao) {
-    const bruto = Math.ceil((Number(larguraGalpao) || 0) / 1.6);
-    if (bruto <= 0) return 0;
-    return bruto % 2 === 0 ? bruto : bruto + 1;
-  }
-
-  // Decompõe o comprimento em módulos de 5m e 6m (o galpão pode misturar
-  // os dois). Usa o mínimo de vãos de 6m para fechar a metragem — ex.:
-  // 31m = 5 vãos de 5m + 1 vão de 6m; 30m = 6 vãos de 5m; 32m = 4x5 + 2x6.
-  function decomporComprimentoEmModulos(comprimentoTotal) {
-    const c = Number(comprimentoTotal);
-    if (!c || c <= 0) return null;
-    const inteiro = Math.floor(c + 0.0001);
-    const sobra = Math.round((c - inteiro) * 100) / 100;
-
-    // Decompoe um numero inteiro em vaos de 5m e 6m.
-    const emModulos = (n) => {
-      if (n < 0) return null;
-      for (let vaos6 = 0; vaos6 * 6 <= n; vaos6++) {
-        const r = n - vaos6 * 6;
-        if (r % 5 === 0) return { vaos5: r / 5, vaos6 };
-      }
-      return null;
-    };
-
-    // Comprimento redondo: divisao exata em modulos.
-    if (sobra < 0.001) {
-      const d = emModulos(inteiro);
-      return d ? { ...d, quebrado: null } : null;
-    }
-
-    // Comprimento quebrado (ex.: 27,4m): a sobra vira UM vao maior, em vez
-    // de o sistema desistir da divisao. 27,4 = 2x5m + 2x6m + 1 vao de 5,40m.
-    // Esse vao quebrado usa TERCA DE 6,00M — ela passa com folga (a sobra
-    // vira margem de desconto na negociacao), por isso conta como vao de 6m.
-    for (const base of [5, 6]) {
-      const d = emModulos(inteiro - base);
-      if (d) {
-        return {
-          vaos5: d.vaos5,
-          vaos6: d.vaos6 + 1,
-          quebrado: Math.round((base + sobra) * 100) / 100,
-        };
-      }
-    }
-    return null;
   }
 
   // Sugestão de terças para a peça selecionada: identifica a medida da
@@ -2202,37 +2097,6 @@ function OrcamentosGalpaoPageInterno() {
     );
     setObservacao(orcamento.observacao || "");
     setObservacaoInterna(orcamento.observacao_interna || "");
-    // BUG DE DUPLICACAO: as pecas automaticas (pilar, terca, viga da laje,
-    // consolo, fundacao da laje) sao identificadas por uma CHAVE FIXA que
-    // NAO vai para o banco. Ao reabrir para editar, cada item voltava com
-    // chave numerica nova, os efeitos automaticos nao reconheciam a peca
-    // salva e lancavam OUTRA por cima — pilar e terca apareciam repetidos.
-    // Aqui a chave original e devolvida pelo NOME da peca.
-    const chaveAutomatica = (nome, secao) => {
-      const n = (nome || "").toUpperCase();
-      if (n.startsWith("CONSOLO TESOURA")) return "consolo-tesoura-auto";
-      if (n.startsWith("VIGA PARA LAJE")) return "viga-laje-auto";
-      // Viga de travamento: a de 5m e a de 6m (ou o vao quebrado, ex. 5,40M,
-      // que conta como vao de 6m). Sem isso ela DUPLICAVA ao editar/duplicar.
-      if (n.startsWith("VIGA DE TRAVAMENTO")) {
-        const m = n.match(/X(\d+(?:[,.]\d+)?)M/);
-        const comp = m ? parseFloat(m[1].replace(",", ".")) : 0;
-        return comp > 5 ? "travamento-auto-6" : "travamento-auto-5";
-      }
-      if (n.startsWith("FUNDAÇÃO") && secao === "laje") return "fundacao-laje";
-      if (n.startsWith("TERÇA") || n.startsWith("TERCA")) {
-        if (/6[,.]00\s*M/.test(n)) return "terca-auto-6";
-        if (/5[,.]00\s*M/.test(n)) return "terca-auto-5";
-        return null;
-      }
-      if (n.startsWith("PILAR")) {
-        if (secao === "laje") return "pilar-auto-meio";
-        if (n.includes("REFORÇADO") || n.includes("PESADO")) return "pilar-auto-reforcado";
-        if (n.includes("SOB A LAJE")) return "pilar-auto-comlaje";
-        return "pilar-auto-padrao";
-      }
-      return null;
-    };
     const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => {
       const nomeItem =
         item.composicoes_galpao?.nome || item.descricao_livre || "Item removido";
