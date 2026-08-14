@@ -2174,6 +2174,12 @@ function OrcamentosGalpaoPageInterno() {
     if (orcamento.travamento_valor_m3)
       setTravamentoValorM3(String(orcamento.travamento_valor_m3));
     if (orcamento.viga_valor_m3) setVigaValorM3(String(orcamento.viga_valor_m3));
+    setTemVigaLajeAvulsa(!!orcamento.viga_laje_avulsa);
+    if (orcamento.altura_laje) setAlturaLaje(String(orcamento.altura_laje));
+    setTemSegundaLaje(!!orcamento.tem_segunda_laje);
+    if (orcamento.altura_laje2) setAlturaLaje2(String(orcamento.altura_laje2));
+    setAreaLaje2(orcamento.area_laje2 ? String(orcamento.area_laje2) : "");
+    setTipoLajeId2(orcamento.tipo_laje2_id ? String(orcamento.tipo_laje2_id) : "");
     setTemPlatibanda(!!orcamento.tem_platibanda);
     setAlturaPlatibanda(orcamento.altura_platibanda ? String(orcamento.altura_platibanda) : "1.20");
     setEspessuraPlatibanda(orcamento.espessura_platibanda ? String(orcamento.espessura_platibanda) : "0.15");
@@ -2412,6 +2418,12 @@ function OrcamentosGalpaoPageInterno() {
         travamento_duplo_input: travamentoDuplo,
         travamento_valor_m3_input: Number(travamentoValorM3) || null,
         viga_valor_m3_input: Number(vigaValorM3) || null,
+        viga_laje_avulsa_input: temVigaLajeAvulsa,
+        altura_laje_input: Number(alturaLaje) || null,
+        tem_segunda_laje_input: temSegundaLaje,
+        altura_laje2_input: Number(alturaLaje2) || null,
+        area_laje2_input: Number(areaLaje2) || null,
+        tipo_laje2_id_input: tipoLajeId2 ? Number(tipoLajeId2) : null,
       });
     }
 
