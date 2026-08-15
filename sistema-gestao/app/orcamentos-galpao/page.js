@@ -288,21 +288,19 @@ function OrcamentosGalpaoPageInterno() {
   const [travamentoDuplo, setTravamentoDuplo] = useState(false);
   const [travamentoValorM3, setTravamentoValorM3] = useState("1300");
   const larguraTravamentoAuto = useRef(null);
-  // Chaves automáticas que NÃO estavam no orçamento salvo: o usuário as
-  // removeu de propósito, então os cálculos não devem recriá-las. Some
-  // quando ele mexe nas medidas (aí o recálculo é legítimo).
-  const chavesRemovidas = useRef(new Set());
-  const chaveFoiRemovida = (chave) => chavesRemovidas.current.has(chave);
-  // Peça que o usuário editou (mudou altura, preço ou quantidade) fica como
-  // está: o cálculo automático NÃO a refaz. Antes, ao reabrir o orçamento, a
-  // peça editada era substituída pela versão calculada e a edição sumia.
-  const manterOEditado = (novos, atual) =>
-    novos
-      .map((novo) => {
-        const jaExiste = atual.find((a) => a.chave === novo.chave);
-        return jaExiste && jaExiste.quantidadeEditada ? jaExiste : novo;
-      })
-      .filter((i) => !chaveFoiRemovida(i.chave));
+  // ---------------------------------------------------------------------
+  // LISTA CONGELADA
+  //
+  // Ao ABRIR um orçamento salvo, a lista de peças é a verdade: o cálculo
+  // automático não acrescenta, não remove e não refaz nada. Assim o que foi
+  // salvo é exatamente o que reaparece.
+  // O congelamento cai quando o usuário mexe numa MEDIDA ou numa OPÇÃO —
+  // aí o recálculo é o que ele está pedindo.
+  // ---------------------------------------------------------------------
+  const listaCongelada = useRef(false);
+  function descongelarLista() {
+    listaCongelada.current = false;
+  }
   const [vigaQtd, setVigaQtd] = useState("1");
 
   const [tesouraRefId, setTesouraRefId] = useState("");
@@ -430,6 +428,8 @@ function OrcamentosGalpaoPageInterno() {
   // Gera (ou atualiza) o pilar conforme as medidas do galpao.
   // A peca sai com a fundacao somada e o preco pelo valor do m3 armado.
   useEffect(() => {
+    // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
+    if (listaCongelada.current) return;
     if (modo === "lista") return;
     const CHAVES_AUTO = [
       "pilar-auto-padrao",
@@ -616,7 +616,7 @@ function OrcamentosGalpaoPageInterno() {
             });
           }
         }
-        return recalcularFundacao([...manterOEditado(novos, atual), ...semAuto]);
+        return recalcularFundacao([...novos, ...semAuto]);
       });
     })();
     return () => {
@@ -637,6 +637,8 @@ function OrcamentosGalpaoPageInterno() {
   // Recalcula telha/calha/capote automaticamente, ao vivo, sempre que as
   // medidas, o nº de galpões germinados ou o tipo de telha mudam.
   useEffect(() => {
+    // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
+    if (listaCongelada.current) return;
     if (!vao || !comprimento) return;
     // O campo é "quantos galpões germinados A MAIS" (0 = avulso, sem
     // germinação). +1 converte pro total de unidades físicas coladas.
@@ -1217,6 +1219,8 @@ function OrcamentosGalpaoPageInterno() {
   // altura × vão × valor do m³ que o usuário informa; enquanto o m³ estiver em
   // branco a viga aparece com preço 0 (a definir) e não soma no total.
   useEffect(() => {
+    // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
+    if (listaCongelada.current) return;
     // No galpao editado a viga da laje tambem e calculada: basta informar a
     // area no campo da laje. Assim da pra orcar so fundacao, pilares e vigas.
     const ehLaje =
@@ -1270,6 +1274,8 @@ function OrcamentosGalpaoPageInterno() {
   // as vigas dela. Mesma regra da primeira: a viga nunca passa de 10m, entao
   // acima disso ela se divide e ganha pilar no meio.
   useEffect(() => {
+    // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
+    if (listaCongelada.current) return;
     const CH_LAJE2 = "laje2-auto";
     const CH_VIGA2 = "viga-laje2-auto";
     const area2 = Number(areaLaje2) || 0;
@@ -1322,7 +1328,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "laje",
         });
       }
-      return recalcularMontagem([...manterOEditado(novos, atual), ...sem]);
+      return recalcularMontagem([...novos, ...sem]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, composicoes, totalGalpoes]);
@@ -1346,8 +1352,6 @@ function OrcamentosGalpaoPageInterno() {
   // 12m, desmarcada abaixo. So muda quando a largura CRUZA esse limite, para
   // nao desfazer a escolha do usuario enquanto ele trabalha no orcamento.
   useEffect(() => {
-    // Mudou a medida? O recálculo volta a valer para todas as peças.
-    chavesRemovidas.current = new Set();
     const larg = somaLarguras || Number(vao) || 0;
     if (larg <= 0) return;
     const deveMarcar = larg >= 12;
@@ -1362,6 +1366,8 @@ function OrcamentosGalpaoPageInterno() {
   // cada linha de pilar (2 linhas no galpao avulso, +1 por geminado).
   // Preco pelo m3: 0,15 x 0,30 x comprimento do vao x valor do concreto.
   useEffect(() => {
+    // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
+    if (listaCongelada.current) return;
     const CHAVES = ["travamento-auto-5", "travamento-auto-6"];
     setItens((atual) => {
       const semAuto = atual.filter((i) => !CHAVES.includes(i.chave));
@@ -1398,7 +1404,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         });
       }
-      return recalcularMontagem([...manterOEditado(novos, atual), ...semAuto]);
+      return recalcularMontagem([...novos, ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temTravamento, travamentoDuplo, travamentoValorM3, comprimento, numeroVaos, totalGalpoes]);
@@ -1432,6 +1438,8 @@ function OrcamentosGalpaoPageInterno() {
   // alterada à mão, respeita (quantidadeEditada). Some se não der pra calcular
   // ou faltar a composição no catálogo.
   useEffect(() => {
+    // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
+    if (listaCongelada.current) return;
     setItens((atual) => {
       const semAuto = atual.filter(
         (i) => i.chave !== "terca-auto-5" && i.chave !== "terca-auto-6"
@@ -1474,7 +1482,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         });
       }
-      return recalcularMontagem([...manterOEditado(novos, atual), ...semAuto]);
+      return recalcularMontagem([...novos, ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vao, comprimento, numeroVaos, totalGalpoes, largurasExtras, composicoes]);
@@ -2133,10 +2141,7 @@ function OrcamentosGalpaoPageInterno() {
     // automáticos rodarem com as mesmas opções de quando foi salvo.
     restaurarOpcoes(orcamento);
     // o efeito da largura não deve sobrescrever o que veio do banco
-    // Guarda o que a LARGURA decidiria, não o que veio do banco: assim o
-    // efeito da largura não "cruza o limite" e não desmarca o travamento de
-    // um galpão estreito que o usuário marcou à mão.
-    larguraTravamentoAuto.current = (Number(orcamento.vao) || 0) >= 12;
+    larguraTravamentoAuto.current = !!orcamento.tem_travamento;
     setNumeroVaos(orcamento.numero_vaos ? String(orcamento.numero_vaos) : "");
     setNumeroGalpoesGerminados(
       orcamento.numero_galpoes_germinados === null || orcamento.numero_galpoes_germinados === undefined
@@ -2155,16 +2160,11 @@ function OrcamentosGalpaoPageInterno() {
     );
     setObservacao(orcamento.observacao || "");
     setObservacaoInterna(orcamento.observacao_interna || "");
-    const chavesUsadas = new Set();
     const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => {
       const nomeItem =
         item.composicoes_galpao?.nome || item.descricao_livre || "Item removido";
       const secaoItem = item.secao === "laje" ? "laje" : "estrutura";
-      let chaveAuto = chaveAutomatica(nomeItem, secaoItem);
-      // Duas peças com o mesmo nome (ex.: duas vigas de laje que o usuário
-      // ajustou) não podem dividir a mesma chave — senão viram uma só.
-      if (chaveAuto && chavesUsadas.has(chaveAuto)) chaveAuto = null;
-      if (chaveAuto) chavesUsadas.add(chaveAuto);
+      const chaveAuto = chaveAutomatica(nomeItem, secaoItem);
       // A MONTAGEM salva tambem e respeitada: se o usuario ajustou as
       // diarias na mao (ex.: 10 no lugar das 9 da tabela), o valor dele
       // permanece ao reabrir o orcamento.
@@ -2209,17 +2209,8 @@ function OrcamentosGalpaoPageInterno() {
           ? String(itemLaje.quantidade)
           : ""
     );
-    // Registra o que o usuário removeu: chave automática que não veio no
-    // orçamento salvo não deve ser recriada pelos cálculos.
-    const presentes = new Set(itensCarregados.map((i) => i.chave));
-    chavesRemovidas.current = new Set(
-      [
-        "pilar-auto-padrao", "pilar-auto-comlaje", "pilar-auto-reforcado",
-        "pilar-auto-meio", "terca-auto-5", "terca-auto-6", "viga-laje-auto",
-        "viga-laje2-auto", "laje2-auto", "travamento-auto-5",
-        "travamento-auto-6", "consolo-tesoura-auto",
-      ].filter((c) => !presentes.has(c))
-    );
+    // A lista salva manda: nada de recálculo até o usuário mexer.
+    listaCongelada.current = true;
     setItens(itensCarregados);
     setErro("");
     setMensagem("");
@@ -2636,7 +2627,7 @@ function OrcamentosGalpaoPageInterno() {
                   step="0.01"
                   min="0"
                   value={vao}
-                  onChange={(e) => setVao(e.target.value)}
+                  onChange={(e) => { descongelarLista(); setVao(e.target.value); }}
                   placeholder="Ex: 10"
                   className={campoClasse}
                 />
@@ -2648,7 +2639,7 @@ function OrcamentosGalpaoPageInterno() {
                   step="0.01"
                   min="0"
                   value={comprimento}
-                  onChange={(e) => setComprimento(e.target.value)}
+                  onChange={(e) => { descongelarLista(); setComprimento(e.target.value); }}
                   placeholder="Ex: 20"
                   className={campoClasse}
                 />
@@ -2679,7 +2670,7 @@ function OrcamentosGalpaoPageInterno() {
                   step="0.01"
                   min="0"
                   value={peDireito}
-                  onChange={(e) => setPeDireito(e.target.value)}
+                  onChange={(e) => { descongelarLista(); setPeDireito(e.target.value); }}
                   placeholder="Ex: 7,5"
                   className={campoClasse}
                 />
@@ -2690,7 +2681,7 @@ function OrcamentosGalpaoPageInterno() {
                   type="number"
                   min="0"
                   value={numeroVaos}
-                  onChange={(e) => setNumeroVaos(e.target.value)}
+                  onChange={(e) => { descongelarLista(); setNumeroVaos(e.target.value); }}
                   placeholder="Ex: 6"
                   className={campoClasse}
                 />
@@ -2701,7 +2692,7 @@ function OrcamentosGalpaoPageInterno() {
                   type="number"
                   min="0"
                   value={numeroGalpoesGerminados}
-                  onChange={(e) => setNumeroGalpoesGerminados(e.target.value)}
+                  onChange={(e) => { descongelarLista(); setNumeroGalpoesGerminados(e.target.value); }}
                   placeholder="0 = avulso"
                   className={campoClasse}
                 />
@@ -2715,7 +2706,7 @@ function OrcamentosGalpaoPageInterno() {
                 <input
                   type="checkbox"
                   checked={comPilares}
-                  onChange={(e) => setComPilares(e.target.checked)}
+                  onChange={(e) => { descongelarLista(); setComPilares(e.target.checked); }}
                   className="h-4 w-4"
                 />
                 Lançar pilares e fundação
@@ -2727,7 +2718,7 @@ function OrcamentosGalpaoPageInterno() {
                 <input
                   type="checkbox"
                   checked={temTravamento}
-                  onChange={(e) => setTemTravamento(e.target.checked)}
+                  onChange={(e) => { descongelarLista(); setTemTravamento(e.target.checked); }}
                   className="h-4 w-4"
                 />
                 Viga de travamento — uma por vão em cada linha de pilar
@@ -2741,7 +2732,7 @@ function OrcamentosGalpaoPageInterno() {
                     <input
                       type="checkbox"
                       checked={travamentoDuplo}
-                      onChange={(e) => setTravamentoDuplo(e.target.checked)}
+                      onChange={(e) => { descongelarLista(); setTravamentoDuplo(e.target.checked); }}
                       className="h-4 w-4"
                     />
                     Duas vigas por vão (galpão alto)
@@ -2753,7 +2744,7 @@ function OrcamentosGalpaoPageInterno() {
                       step="0.01"
                       min="0"
                       value={travamentoValorM3}
-                      onChange={(e) => setTravamentoValorM3(e.target.value)}
+                      onChange={(e) => { descongelarLista(); setTravamentoValorM3(e.target.value); }}
                       className={campoClasse}
                     />
                   </div>
@@ -2768,7 +2759,7 @@ function OrcamentosGalpaoPageInterno() {
                 <input
                   type="checkbox"
                   checked={temPlatibanda}
-                  onChange={(e) => setTemPlatibanda(e.target.checked)}
+                  onChange={(e) => { descongelarLista(); setTemPlatibanda(e.target.checked); }}
                   className="h-4 w-4"
                 />
                 Galpão com platibanda — só parte da seção do pilar sobe; o restante
@@ -2784,7 +2775,7 @@ function OrcamentosGalpaoPageInterno() {
                         step="0.01"
                         min="0"
                         value={alturaPlatibanda}
-                        onChange={(e) => setAlturaPlatibanda(e.target.value)}
+                        onChange={(e) => { descongelarLista(); setAlturaPlatibanda(e.target.value); }}
                         className={campoClasse}
                       />
                     </div>
@@ -2795,7 +2786,7 @@ function OrcamentosGalpaoPageInterno() {
                         step="0.01"
                         min="0"
                         value={espessuraPlatibanda}
-                        onChange={(e) => setEspessuraPlatibanda(e.target.value)}
+                        onChange={(e) => { descongelarLista(); setEspessuraPlatibanda(e.target.value); }}
                         className={campoClasse}
                       />
                     </div>
@@ -2805,7 +2796,7 @@ function OrcamentosGalpaoPageInterno() {
                       <input
                         type="checkbox"
                         checked={temDenteGerber}
-                        onChange={(e) => setTemDenteGerber(e.target.checked)}
+                        onChange={(e) => { descongelarLista(); setTemDenteGerber(e.target.checked); }}
                         className="h-4 w-4"
                       />
                       Dente gerber (consolo) no apoio da tesoura — um por pilar
@@ -3175,7 +3166,7 @@ function OrcamentosGalpaoPageInterno() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <select
                     value={tipoLajeId}
-                    onChange={(e) => setTipoLajeId(e.target.value)}
+                    onChange={(e) => { descongelarLista(); setTipoLajeId(e.target.value); }}
                     className={campoClasse}
                   >
                     <option value="">Selecione o tipo de laje</option>
@@ -3191,7 +3182,7 @@ function OrcamentosGalpaoPageInterno() {
                     min="0"
                     placeholder="Área da laje (m²)"
                     value={areaLaje}
-                    onChange={(e) => setAreaLaje(e.target.value)}
+                    onChange={(e) => { descongelarLista(); setAreaLaje(e.target.value); }}
                     className={campoClasse}
                   />
                 </div>
@@ -3204,7 +3195,7 @@ function OrcamentosGalpaoPageInterno() {
                   <input
                     type="checkbox"
                     checked={temVigaLajeAvulsa}
-                    onChange={(e) => setTemVigaLajeAvulsa(e.target.checked)}
+                    onChange={(e) => { descongelarLista(); setTemVigaLajeAvulsa(e.target.checked); }}
                     className="h-4 w-4"
                   />
                   Vigas do 1º nível — lançar mesmo sem a laje
@@ -3221,7 +3212,7 @@ function OrcamentosGalpaoPageInterno() {
                       step="0.01"
                       min="0"
                       value={alturaLaje}
-                      onChange={(e) => setAlturaLaje(e.target.value)}
+                      onChange={(e) => { descongelarLista(); setAlturaLaje(e.target.value); }}
                       className={campoClasse}
                     />
                   </div>
@@ -3233,7 +3224,7 @@ function OrcamentosGalpaoPageInterno() {
                     <input
                       type="checkbox"
                       checked={temSegundaLaje}
-                      onChange={(e) => setTemSegundaLaje(e.target.checked)}
+                      onChange={(e) => { descongelarLista(); setTemSegundaLaje(e.target.checked); }}
                       className="h-4 w-4"
                     />
                     Vigas do 2º nível (topo dos pilares) — dois pavimentos
@@ -3246,7 +3237,7 @@ function OrcamentosGalpaoPageInterno() {
                       <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <select
                           value={tipoLajeId2}
-                          onChange={(e) => setTipoLajeId2(e.target.value)}
+                          onChange={(e) => { descongelarLista(); setTipoLajeId2(e.target.value); }}
                           className={campoClasse}
                         >
                           <option value="">Tipo da 2ª laje</option>
@@ -3262,7 +3253,7 @@ function OrcamentosGalpaoPageInterno() {
                           min="0"
                           placeholder="Área da 2ª laje (m²)"
                           value={areaLaje2}
-                          onChange={(e) => setAreaLaje2(e.target.value)}
+                          onChange={(e) => { descongelarLista(); setAreaLaje2(e.target.value); }}
                           className={campoClasse}
                         />
                         <div>
@@ -3272,7 +3263,7 @@ function OrcamentosGalpaoPageInterno() {
                             min="0"
                             placeholder="Altura da 2ª laje (m)"
                             value={alturaLaje2}
-                            onChange={(e) => setAlturaLaje2(e.target.value)}
+                            onChange={(e) => { descongelarLista(); setAlturaLaje2(e.target.value); }}
                             className={campoClasse}
                           />
                         </div>
@@ -3527,7 +3518,7 @@ function OrcamentosGalpaoPageInterno() {
                         {i.chave === "pilar-auto-padrao" && (
                           <select
                             value={nivelPadrao}
-                            onChange={(e) => setNivelPadrao(e.target.value)}
+                            onChange={(e) => { descongelarLista(); setNivelPadrao(e.target.value); }}
                             className="ml-2 rounded border border-slate-300 px-1 py-0.5 text-xs align-middle"
                           >
                             <option value="AUTO">Automático</option>
@@ -3541,7 +3532,7 @@ function OrcamentosGalpaoPageInterno() {
                         {i.chave === "pilar-auto-reforcado" && (
                           <select
                             value={nivelReforcado}
-                            onChange={(e) => setNivelReforcado(e.target.value)}
+                            onChange={(e) => { descongelarLista(); setNivelReforcado(e.target.value); }}
                             className="ml-2 rounded border border-slate-300 px-1 py-0.5 text-xs align-middle"
                           >
                             <option value="PESADO">Pesado 25×40</option>
@@ -3554,7 +3545,7 @@ function OrcamentosGalpaoPageInterno() {
                         {i.chave === "pilar-auto-comlaje" && (
                           <select
                             value={nivelComLaje}
-                            onChange={(e) => setNivelComLaje(e.target.value)}
+                            onChange={(e) => { descongelarLista(); setNivelComLaje(e.target.value); }}
                             className="ml-2 rounded border border-slate-300 px-1 py-0.5 text-xs align-middle"
                           >
                             <option value="COM_LAJE">Com laje 25×40</option>
