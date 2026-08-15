@@ -41,8 +41,11 @@ export function montagemDaTesoura(nome) {
 export function papelDoItem(item) {
   if (item.papel) return item.papel;
   const nome = (item.nome || "").toUpperCase();
+  // A ordem importa: "VIGA DE TRAVAMENTO" e "VIGA PARA LAJE" começam igual.
+  if (nome.startsWith("VIGA DE TRAVAMENTO")) return "VIGA_TRAVAMENTO";
   if (nome.startsWith("VIGA PARA LAJE")) return "VIGA_LAJE";
-  if (nome.startsWith("TESOURA")) return "TESOURA";
+  if (nome.startsWith("CONSOLO TESOURA")) return "CONSOLO";
+  if (nome.startsWith("TESOURA") || nome.includes("DE VÃO LIVRE")) return "TESOURA";
   return null;
 }
 
