@@ -9,6 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  papelDoItem,
   montagemDaTesoura,
   diariasDeMontagem,
   qtdTercasPorLinhaDeVao,
@@ -181,6 +182,16 @@ test("peças que NÃO são automáticas devolvem null", () => {
   assert.equal(chaveAutomatica("MONTAGEM", "estrutura"), null);
   // fundação da ESTRUTURA não é a da laje
   assert.equal(chaveAutomatica("FUNDAÇÃO", "estrutura"), null);
+});
+
+test("papel deduzido pelo nome: peças calculadas não têm papel do catálogo", () => {
+  // Sem isso a viga de travamento reabria sem papel e sumia do desenho.
+  assert.equal(papelDoItem({ nome: "VIGA DE TRAVAMENTO 0,15X0,30X5,00M" }), "VIGA_TRAVAMENTO");
+  assert.equal(papelDoItem({ nome: "VIGA PARA LAJE 0,25X0,90X9,00M" }), "VIGA_LAJE");
+  assert.equal(papelDoItem({ nome: "CONSOLO TESOURA (dente gerber)" }), "CONSOLO");
+  assert.equal(papelDoItem({ nome: "Tesoura 15M de vão livre (calculada)" }), "TESOURA");
+  // o papel do catálogo, quando existe, manda
+  assert.equal(papelDoItem({ papel: "PILAR", nome: "VIGA PARA LAJE" }), "PILAR");
 });
 
 // ---------------------------------------------------------------------------
