@@ -165,7 +165,7 @@ function calcularModulacao(itensOrcamento) {
   if (tercas.length === 0) return "-";
   const medidas = [
     ...new Set(
-      tercas.map((t) => extrairMedidaDoNome(t.composicoes_galpao?.nome)).filter(Boolean)
+      tercas.map((t) => extrairMedidaDoNome(nomeDaPeca(t))).filter(Boolean)
     ),
   ].sort((a, b) => parseFloat(a.replace(",", ".")) - parseFloat(b.replace(",", ".")));
   if (medidas.length === 0) return "-";
@@ -178,14 +178,37 @@ function simplificarNome(nome, prefixo) {
   return nome.replace(new RegExp(`^${prefixo}S?\\s+`, "i"), "").trim();
 }
 
+// Papel da peça. As peças CALCULADAS (viga de travamento, viga de laje,
+// tesoura proporcional, consolo) não vêm do catálogo — entram com nome
+// livre e sem papel. Por isso o papel também é deduzido pelo nome, senão
+// o desenho impresso não reconhece essas peças.
+function nomeDaPeca(item) {
+  return item.composicoes_galpao?.nome || item.descricao_livre || "";
+}
+
+function papelDaPeca(item) {
+  const doCatalogo = item.composicoes_galpao?.papel;
+  if (doCatalogo) return doCatalogo;
+  const nome = (item.composicoes_galpao?.nome || item.descricao_livre || "").toUpperCase();
+  if (nome.startsWith("VIGA DE TRAVAMENTO")) return "VIGA_TRAVAMENTO";
+  if (nome.startsWith("VIGA PARA LAJE")) return "VIGA_LAJE";
+  if (nome.startsWith("TESOURA") || nome.includes("DE VÃO LIVRE")) return "TESOURA";
+  if (nome.startsWith("TERÇA") || nome.startsWith("TERCA")) return "TERCA";
+  if (nome.startsWith("PILAR")) return "PILAR";
+  if (nome.startsWith("TELHA")) return "TELHA";
+  if (nome.startsWith("CALHA")) return "CALHA";
+  if (nome.startsWith("LAJE")) return "LAJE";
+  return null;
+}
+
 function possuiPapel(itens, papel) {
   return (itens || []).some(
-    (item) => item.composicoes_galpao?.papel === papel && Number(item.quantidade) > 0
+    (item) => papelDaPeca(item) === papel && Number(item.quantidade) > 0
   );
 }
 
 function primeiraComPapel(itens, papel) {
-  return (itens || []).find((item) => item.composicoes_galpao?.papel === papel);
+  return (itens || []).find((item) => papelDaPeca(item) === papel);
 }
 
 // Modulação em número (maior terça do orçamento) — usada só para
@@ -195,7 +218,7 @@ function modulacaoNumerica(itensOrcamento) {
     (item) => item.composicoes_galpao?.papel === "TERCA" && Number(item.quantidade) > 0
   );
   const medidas = tercas
-    .map((t) => extrairMedidaDoNome(t.composicoes_galpao?.nome))
+    .map((t) => extrairMedidaDoNome(nomeDaPeca(t)))
     .filter(Boolean)
     .map((m) => parseFloat(m.replace(",", ".")));
   if (medidas.length === 0) return 5;
@@ -369,7 +392,7 @@ function ConteudoImpressao() {
     {
       rotulo: "Telhas",
       valor: itemTelha
-        ? simplificarNome(itemTelha.composicoes_galpao?.nome, "TELHA")
+        ? simplificarNome(nomeDaPeca(itemTelha), "TELHA")
         : "NÃO CONTEMPLA",
     },
     {
@@ -385,7 +408,7 @@ function ConteudoImpressao() {
     {
       rotulo: "Calha",
       valor: itemCalha
-        ? simplificarNome(itemCalha.composicoes_galpao?.nome, "CALHA")
+        ? simplificarNome(nomeDaPeca(itemCalha), "CALHA")
         : "NÃO CONTEMPLA",
     },
     {
