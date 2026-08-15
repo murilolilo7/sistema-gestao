@@ -2042,8 +2042,11 @@ function OrcamentosGalpaoPageInterno() {
   function restaurarOpcoes(orcamento) {
     for (const [coluna, , aplicar, padrao, tipo] of OPCOES) {
       const salvo = orcamento[coluna];
-      if (tipo === "bool") aplicar(!!salvo);
-      else if (salvo === null || salvo === undefined || salvo === "") aplicar(padrao);
+      // Vazio no banco = orçamento salvo antes de a coluna existir. Nesse
+      // caso vale o PADRÃO, e não "não" — senão um orçamento antigo reabria
+      // sem pilares (com_pilares vazio virava false) e o valor despencava.
+      if (salvo === null || salvo === undefined || salvo === "") aplicar(padrao);
+      else if (tipo === "bool") aplicar(!!salvo);
       else aplicar(String(salvo));
     }
   }
