@@ -293,6 +293,16 @@ function OrcamentosGalpaoPageInterno() {
   // quando ele mexe nas medidas (aí o recálculo é legítimo).
   const chavesRemovidas = useRef(new Set());
   const chaveFoiRemovida = (chave) => chavesRemovidas.current.has(chave);
+  // Peça que o usuário editou (mudou altura, preço ou quantidade) fica como
+  // está: o cálculo automático NÃO a refaz. Antes, ao reabrir o orçamento, a
+  // peça editada era substituída pela versão calculada e a edição sumia.
+  const manterOEditado = (novos, atual) =>
+    novos
+      .map((novo) => {
+        const jaExiste = atual.find((a) => a.chave === novo.chave);
+        return jaExiste && jaExiste.quantidadeEditada ? jaExiste : novo;
+      })
+      .filter((i) => !chaveFoiRemovida(i.chave));
   const [vigaQtd, setVigaQtd] = useState("1");
 
   const [tesouraRefId, setTesouraRefId] = useState("");
@@ -606,7 +616,7 @@ function OrcamentosGalpaoPageInterno() {
             });
           }
         }
-        return recalcularFundacao([...novos.filter((i) => !chaveFoiRemovida(i.chave)), ...semAuto]);
+        return recalcularFundacao([...manterOEditado(novos, atual), ...semAuto]);
       });
     })();
     return () => {
@@ -1312,7 +1322,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "laje",
         });
       }
-      return recalcularMontagem([...novos.filter((i) => !chaveFoiRemovida(i.chave)), ...sem]);
+      return recalcularMontagem([...manterOEditado(novos, atual), ...sem]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, composicoes, totalGalpoes]);
@@ -1388,7 +1398,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         });
       }
-      return recalcularMontagem([...novos.filter((i) => !chaveFoiRemovida(i.chave)), ...semAuto]);
+      return recalcularMontagem([...manterOEditado(novos, atual), ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temTravamento, travamentoDuplo, travamentoValorM3, comprimento, numeroVaos, totalGalpoes]);
@@ -1464,7 +1474,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         });
       }
-      return recalcularMontagem([...novos.filter((i) => !chaveFoiRemovida(i.chave)), ...semAuto]);
+      return recalcularMontagem([...manterOEditado(novos, atual), ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vao, comprimento, numeroVaos, totalGalpoes, largurasExtras, composicoes]);
