@@ -288,6 +288,11 @@ function OrcamentosGalpaoPageInterno() {
   const [travamentoDuplo, setTravamentoDuplo] = useState(false);
   const [travamentoValorM3, setTravamentoValorM3] = useState("1300");
   const larguraTravamentoAuto = useRef(null);
+  // Chaves automáticas que NÃO estavam no orçamento salvo: o usuário as
+  // removeu de propósito, então os cálculos não devem recriá-las. Some
+  // quando ele mexe nas medidas (aí o recálculo é legítimo).
+  const chavesRemovidas = useRef(new Set());
+  const chaveFoiRemovida = (chave) => chavesRemovidas.current.has(chave);
   const [vigaQtd, setVigaQtd] = useState("1");
 
   const [tesouraRefId, setTesouraRefId] = useState("");
@@ -601,7 +606,7 @@ function OrcamentosGalpaoPageInterno() {
             });
           }
         }
-        return recalcularFundacao([...novos, ...semAuto]);
+        return recalcularFundacao([...novos.filter((i) => !chaveFoiRemovida(i.chave)), ...semAuto]);
       });
     })();
     return () => {
@@ -1307,7 +1312,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "laje",
         });
       }
-      return recalcularMontagem([...novos, ...sem]);
+      return recalcularMontagem([...novos.filter((i) => !chaveFoiRemovida(i.chave)), ...sem]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, composicoes, totalGalpoes]);
@@ -1331,6 +1336,8 @@ function OrcamentosGalpaoPageInterno() {
   // 12m, desmarcada abaixo. So muda quando a largura CRUZA esse limite, para
   // nao desfazer a escolha do usuario enquanto ele trabalha no orcamento.
   useEffect(() => {
+    // Mudou a medida? O recálculo volta a valer para todas as peças.
+    chavesRemovidas.current = new Set();
     const larg = somaLarguras || Number(vao) || 0;
     if (larg <= 0) return;
     const deveMarcar = larg >= 12;
@@ -1381,7 +1388,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         });
       }
-      return recalcularMontagem([...novos, ...semAuto]);
+      return recalcularMontagem([...novos.filter((i) => !chaveFoiRemovida(i.chave)), ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temTravamento, travamentoDuplo, travamentoValorM3, comprimento, numeroVaos, totalGalpoes]);
@@ -1457,7 +1464,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         });
       }
-      return recalcularMontagem([...novos, ...semAuto]);
+      return recalcularMontagem([...novos.filter((i) => !chaveFoiRemovida(i.chave)), ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vao, comprimento, numeroVaos, totalGalpoes, largurasExtras, composicoes]);
@@ -2116,7 +2123,10 @@ function OrcamentosGalpaoPageInterno() {
     // automáticos rodarem com as mesmas opções de quando foi salvo.
     restaurarOpcoes(orcamento);
     // o efeito da largura não deve sobrescrever o que veio do banco
-    larguraTravamentoAuto.current = !!orcamento.tem_travamento;
+    // Guarda o que a LARGURA decidiria, não o que veio do banco: assim o
+    // efeito da largura não "cruza o limite" e não desmarca o travamento de
+    // um galpão estreito que o usuário marcou à mão.
+    larguraTravamentoAuto.current = (Number(orcamento.vao) || 0) >= 12;
     setNumeroVaos(orcamento.numero_vaos ? String(orcamento.numero_vaos) : "");
     setNumeroGalpoesGerminados(
       orcamento.numero_galpoes_germinados === null || orcamento.numero_galpoes_germinados === undefined
@@ -2135,11 +2145,16 @@ function OrcamentosGalpaoPageInterno() {
     );
     setObservacao(orcamento.observacao || "");
     setObservacaoInterna(orcamento.observacao_interna || "");
+    const chavesUsadas = new Set();
     const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => {
       const nomeItem =
         item.composicoes_galpao?.nome || item.descricao_livre || "Item removido";
       const secaoItem = item.secao === "laje" ? "laje" : "estrutura";
-      const chaveAuto = chaveAutomatica(nomeItem, secaoItem);
+      let chaveAuto = chaveAutomatica(nomeItem, secaoItem);
+      // Duas peças com o mesmo nome (ex.: duas vigas de laje que o usuário
+      // ajustou) não podem dividir a mesma chave — senão viram uma só.
+      if (chaveAuto && chavesUsadas.has(chaveAuto)) chaveAuto = null;
+      if (chaveAuto) chavesUsadas.add(chaveAuto);
       // A MONTAGEM salva tambem e respeitada: se o usuario ajustou as
       // diarias na mao (ex.: 10 no lugar das 9 da tabela), o valor dele
       // permanece ao reabrir o orcamento.
@@ -2183,6 +2198,17 @@ function OrcamentosGalpaoPageInterno() {
         : itemLaje
           ? String(itemLaje.quantidade)
           : ""
+    );
+    // Registra o que o usuário removeu: chave automática que não veio no
+    // orçamento salvo não deve ser recriada pelos cálculos.
+    const presentes = new Set(itensCarregados.map((i) => i.chave));
+    chavesRemovidas.current = new Set(
+      [
+        "pilar-auto-padrao", "pilar-auto-comlaje", "pilar-auto-reforcado",
+        "pilar-auto-meio", "terca-auto-5", "terca-auto-6", "viga-laje-auto",
+        "viga-laje2-auto", "laje2-auto", "travamento-auto-5",
+        "travamento-auto-6", "consolo-tesoura-auto",
+      ].filter((c) => !presentes.has(c))
     );
     setItens(itensCarregados);
     setErro("");
