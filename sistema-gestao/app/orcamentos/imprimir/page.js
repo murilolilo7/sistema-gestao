@@ -216,9 +216,6 @@ function ConteudoImpressao() {
       {/* Quadro de desenho das peças (só aparece se algum produto tiver molde) */}
       <QuadroImpresso itens={itens} />
 
-      {/* Entrega e frete (só aparece se o orçamento tiver) */}
-      <EntregaImpresso orcamento={orcamento} />
-
       {/* Itens */}
       <p className="font-semibold text-xs text-slate-500 mb-1">
         ITENS DO ORÇAMENTO
@@ -387,27 +384,3 @@ function QuadroImpresso({ itens }) {
   );
 }
 
-// Bloco "Entrega": endereço, distância e valor do frete (já somado no total).
-function EntregaImpresso({ orcamento }) {
-  const temFrete = Number(orcamento.valor_frete || 0) > 0;
-  if (!orcamento.endereco_entrega && !temFrete) return null;
-  const moeda = (v) =>
-    Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  return (
-    <div className="border border-slate-200 rounded-lg px-3 py-2 mb-4 text-xs text-slate-700">
-      <span className="font-semibold text-[10px] text-slate-500 uppercase tracking-wide mr-2">
-        Entrega
-      </span>
-      {orcamento.endereco_entrega && <span>{orcamento.endereco_entrega}</span>}
-      {orcamento.distancia_km != null && (
-        <span className="text-slate-500"> · {Number(orcamento.distancia_km).toLocaleString("pt-BR")} km</span>
-      )}
-      {Number(orcamento.viagens || 1) > 1 && (
-        <span className="text-slate-500"> · {orcamento.viagens} viagens</span>
-      )}
-      {temFrete && (
-        <span className="text-slate-500"> · Frete: <b className="text-slate-700">{moeda(orcamento.valor_frete)}</b> (incluso no total)</span>
-      )}
-    </div>
-  );
-}
