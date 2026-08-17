@@ -1,6 +1,9 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+// Valor por extenso: mesma função usada no orçamento de galpão
+// (testada em orcamentos-galpao/calculos.test.js).
+import { valorPorExtenso } from "../../orcamentos-galpao/calculos";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { QuadroPecas } from "@/components/DesenhoPecas";
@@ -301,6 +304,12 @@ function ConteudoImpressao() {
               <td className="px-2 py-1 font-bold">Total do orçamento</td>
               <td className="px-2 py-1 text-right font-bold">
                 {formatarMoeda(orcamento.total)}
+              </td>
+            </tr>
+            <tr>
+              <td />
+              <td className="px-2 pb-1 text-right text-[10px] italic text-slate-600">
+                {valorPorExtenso(orcamento.total)}.
               </td>
             </tr>
           </tbody>
