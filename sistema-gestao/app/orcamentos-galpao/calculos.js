@@ -41,11 +41,23 @@ export function montagemDaTesoura(nome) {
 export function papelDoItem(item) {
   if (item.papel) return item.papel;
   const nome = (item.nome || "").toUpperCase();
-  // A ordem importa: "VIGA DE TRAVAMENTO" e "VIGA PARA LAJE" começam igual.
+  // A ordem importa: "VIGA DE TRAVAMENTO" e "VIGA PARA LAJE" começam igual,
+  // e "CONSOLO TESOURA" começa igual a "TESOURA".
   if (nome.startsWith("VIGA DE TRAVAMENTO")) return "VIGA_TRAVAMENTO";
   if (nome.startsWith("VIGA PARA LAJE")) return "VIGA_LAJE";
   if (nome.startsWith("CONSOLO TESOURA")) return "CONSOLO";
   if (nome.startsWith("TESOURA") || nome.includes("DE VÃO LIVRE")) return "TESOURA";
+  // O PILAR calculado também entra sem papel: sem esta linha ele sumia do
+  // checklist, levava a fundação junto (que é contada pelos pilares) e
+  // aparecia fora de ordem na lista.
+  if (nome.startsWith("PILAR")) return "PILAR";
+  if (nome.startsWith("TERÇA") || nome.startsWith("TERCA")) return "TERCA";
+  if (nome.startsWith("TELHA")) return "TELHA";
+  if (nome.startsWith("CALHA")) return "CALHA";
+  if (nome.startsWith("CAPOTE")) return "CAPOTE";
+  if (nome.startsWith("FUNDAÇÃO") || nome.startsWith("FUNDACAO")) return "FUNDACAO";
+  if (nome.startsWith("MONTAGEM")) return "MONTAGEM";
+  if (nome.startsWith("LAJE")) return "LAJE";
   return null;
 }
 
