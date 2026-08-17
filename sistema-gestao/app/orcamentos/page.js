@@ -127,6 +127,12 @@ function OrcamentosPageInterno() {
   const [nomeUsuario, setNomeUsuario] = useState("");
 
   const [clienteId, setClienteId] = useState("");
+  // Cadastro rapido de cliente, sem sair do orcamento: so nome e telefone.
+  // O cadastro completo (endereco, CPF/CNPJ) segue na tela de Clientes.
+  const [novoClienteAberto, setNovoClienteAberto] = useState(false);
+  const [novoClienteNome, setNovoClienteNome] = useState("");
+  const [novoClienteTelefone, setNovoClienteTelefone] = useState("");
+  const [salvandoCliente, setSalvandoCliente] = useState(false);
   const [diasValidade, setDiasValidade] = useState("");
   const [itens, setItens] = useState([]);
   const [produtoParaAdicionar, setProdutoParaAdicionar] = useState("");
@@ -468,6 +474,31 @@ function OrcamentosPageInterno() {
     }
   });
 
+  async function salvarNovoCliente() {
+    const nome = novoClienteNome.trim();
+    if (!nome) return;
+    setSalvandoCliente(true);
+    const { data, error } = await supabase
+      .from("clientes")
+      .insert({ nome, telefone: novoClienteTelefone.trim() || null })
+      .select("id, nome")
+      .single();
+    setSalvandoCliente(false);
+    if (error) {
+      setErro("Erro ao cadastrar cliente: " + error.message);
+      return;
+    }
+    // Entra na lista, ja selecionado, sem perder nada do orcamento.
+    setClientes((atual) =>
+      [...atual, data].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""))
+    );
+    setClienteId(String(data.id));
+    setNovoClienteNome("");
+    setNovoClienteTelefone("");
+    setNovoClienteAberto(false);
+    setMensagem("Cliente cadastrado.");
+  }
+
   function limparFormulario() {
     setClienteId("");
     setDiasValidade("");
@@ -799,7 +830,16 @@ function OrcamentosPageInterno() {
         >
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <div className="sm:col-span-2">
-              <label className={labelClasse}>Cliente</label>
+              <div className="flex items-center justify-between">
+                <label className={labelClasse}>Cliente</label>
+                <button
+                  type="button"
+                  onClick={() => setNovoClienteAberto((v) => !v)}
+                  className="text-[11px] font-medium text-emerald-700 hover:underline mb-1"
+                >
+                  {novoClienteAberto ? "cancelar" : "+ novo cliente"}
+                </button>
+              </div>
               <select
                 value={clienteId}
                 onChange={(e) => setClienteId(e.target.value)}
@@ -812,6 +852,37 @@ function OrcamentosPageInterno() {
                   </option>
                 ))}
               </select>
+              {novoClienteAberto && (
+                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={novoClienteNome}
+                      onChange={(e) => setNovoClienteNome(e.target.value)}
+                      placeholder="Nome do cliente"
+                      className={campoClasse}
+                    />
+                    <input
+                      type="text"
+                      value={novoClienteTelefone}
+                      onChange={(e) => setNovoClienteTelefone(e.target.value)}
+                      placeholder="Telefone"
+                      className={campoClasse}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={salvarNovoCliente}
+                    disabled={!novoClienteNome.trim() || salvandoCliente}
+                    className="mt-2 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                  >
+                    {salvandoCliente ? "Salvando..." : "Cadastrar e usar"}
+                  </button>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Os demais dados podem ser completados depois na tela de Clientes.
+                  </p>
+                </div>
+              )}
             </div>
             <div>
               <label className={labelClasse}>Validade da proposta (dias)</label>
