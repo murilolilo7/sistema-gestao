@@ -190,6 +190,15 @@ test("papel deduzido pelo nome: peças calculadas não têm papel do catálogo",
   assert.equal(papelDoItem({ nome: "VIGA PARA LAJE 0,25X0,90X9,00M" }), "VIGA_LAJE");
   assert.equal(papelDoItem({ nome: "CONSOLO TESOURA (dente gerber)" }), "CONSOLO");
   assert.equal(papelDoItem({ nome: "Tesoura 15M de vão livre (calculada)" }), "TESOURA");
+  // o PILAR calculado: sem isso ele sumia do checklist e levava a fundação
+  assert.equal(
+    papelDoItem({ nome: "PILAR 0,25x0,40 - 7,30m (6,00 livre + 1,30 fundacao)" }),
+    "PILAR"
+  );
+  assert.equal(papelDoItem({ nome: "PILAR DO MEIO DO VÃO 0,25x0,30" }), "PILAR");
+  assert.equal(papelDoItem({ nome: "TERÇA INTERMEDIÁRIA 5,00M" }), "TERCA");
+  assert.equal(papelDoItem({ nome: "FUNDAÇÃO" }), "FUNDACAO");
+  assert.equal(papelDoItem({ nome: "MONTAGEM" }), "MONTAGEM");
   // o papel do catálogo, quando existe, manda
   assert.equal(papelDoItem({ papel: "PILAR", nome: "VIGA PARA LAJE" }), "PILAR");
 });
