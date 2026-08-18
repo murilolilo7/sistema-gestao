@@ -2199,11 +2199,17 @@ function OrcamentosGalpaoPageInterno() {
     );
     setObservacao(orcamento.observacao || "");
     setObservacaoInterna(orcamento.observacao_interna || "");
+    // Duas peças com o mesmo nome (ex.: duas vigas de laje que o usuário
+    // ajustou para a mesma altura) NÃO podem receber a mesma chave: o sistema
+    // deixa de distinguir uma da outra e uma delas não some ao ser removida.
+    const chavesUsadas = new Set();
     const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => {
       const nomeItem =
         item.composicoes_galpao?.nome || item.descricao_livre || "Item removido";
       const secaoItem = item.secao === "laje" ? "laje" : "estrutura";
-      const chaveAuto = chaveAutomatica(nomeItem, secaoItem);
+      let chaveAuto = chaveAutomatica(nomeItem, secaoItem);
+      if (chaveAuto && chavesUsadas.has(chaveAuto)) chaveAuto = null; // a 2ª ganha chave própria
+      if (chaveAuto) chavesUsadas.add(chaveAuto);
       // A MONTAGEM salva tambem e respeitada: se o usuario ajustou as
       // diarias na mao (ex.: 10 no lugar das 9 da tabela), o valor dele
       // permanece ao reabrir o orcamento.
