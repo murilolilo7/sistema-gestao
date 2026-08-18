@@ -199,8 +199,9 @@ function ConteudoImpressao() {
         </div>
         <div className="text-xs space-y-1">
           <p>
+            {/* Data da PROPOSTA (envio ao cliente); sem ela, a de criação. */}
             <span className="font-semibold">Data:</span>{" "}
-            {formatarDataHora(orcamento.created_at)}
+            {formatarDataHora(orcamento.data_proposta || orcamento.created_at)}
           </p>
           <p>
             <span className="font-semibold">Válido até:</span>{" "}
