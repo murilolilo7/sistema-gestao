@@ -325,7 +325,13 @@ function OrcamentosGalpaoPageInterno() {
   const listaCongelada = useRef(false);
   function descongelarLista() {
     listaCongelada.current = false;
+    // Mexeu numa medida ou opção: o recálculo volta a valer para tudo.
+    removidasNaMao.current = new Set();
   }
+  // Peças automáticas que o usuário REMOVEU na mão. O cálculo não as recria:
+  // sem isso, apagar a viga da laje não adiantava — ela voltava na hora.
+  // A lista zera quando ele mexe numa medida (aí o recálculo é o que ele quer).
+  const removidasNaMao = useRef(new Set());
   const [vigaQtd, setVigaQtd] = useState("1");
 
   const [tesouraRefId, setTesouraRefId] = useState("");
@@ -641,7 +647,7 @@ function OrcamentosGalpaoPageInterno() {
             });
           }
         }
-        return recalcularFundacao([...novos, ...semAuto]);
+        return recalcularFundacao([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...semAuto]);
       });
     })();
     return () => {
@@ -1353,7 +1359,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "laje",
         });
       }
-      return recalcularMontagem([...novos, ...sem]);
+      return recalcularMontagem([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...sem]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, composicoes, totalGalpoes]);
@@ -1429,7 +1435,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         });
       }
-      return recalcularMontagem([...novos, ...semAuto]);
+      return recalcularMontagem([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temTravamento, travamentoDuplo, travamentoValorM3, comprimento, numeroVaos, totalGalpoes]);
@@ -1507,7 +1513,7 @@ function OrcamentosGalpaoPageInterno() {
           secao: "estrutura",
         });
       }
-      return recalcularMontagem([...novos, ...semAuto]);
+      return recalcularMontagem([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vao, comprimento, numeroVaos, totalGalpoes, largurasExtras, composicoes]);
@@ -1645,6 +1651,8 @@ function OrcamentosGalpaoPageInterno() {
   }
 
   function removerItem(chave) {
+    // Chave fixa = peça automática. Anota para o cálculo não trazer de volta.
+    if (typeof chave === "string") removidasNaMao.current.add(chave);
     setItens((atual) => {
       const itemRemovido = atual.find((i) => i.chave === chave);
       const restantes = atual.filter((i) => i.chave !== chave);
