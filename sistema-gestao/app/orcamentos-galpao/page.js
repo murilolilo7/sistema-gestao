@@ -62,6 +62,28 @@ function formatarDataSimples(valor) {
   return new Date(valor + "T00:00:00").toLocaleDateString("pt-BR");
 }
 
+// Hoje, no formato do campo de data (AAAA-MM-DD).
+function hojeISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
+// Validade contada A PARTIR DA DATA DA PROPOSTA (a data de envio), e não da
+// data em que o orçamento foi montado: um orçamento feito às 22h e enviado no
+// dia seguinte não pode nascer com um dia a menos de validade.
+function calcularDataFuturaDe(dataBase, dias) {
+  const n = Number(dias);
+  if (!n || n <= 0 || !dataBase) return "";
+  const [a, m, d] = dataBase.split("-").map(Number);
+  const data = new Date(a, m - 1, d);
+  data.setDate(data.getDate() + n);
+  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(
+    data.getDate()
+  ).padStart(2, "0")}`;
+}
+
 function calcularDataFutura(dias) {
   const n = Number(dias);
   if (!n || n <= 0) return "";
@@ -266,6 +288,9 @@ function OrcamentosGalpaoPageInterno() {
   const [nivelReforcado, setNivelReforcado] = useState("PESADO");
   const [nivelComLaje, setNivelComLaje] = useState("COM_LAJE");
   const [diasValidade, setDiasValidade] = useState("10");
+  // Data da proposta = data de envio ao cliente. Começa em hoje; se o
+  // orçamento for montado à noite para enviar amanhã, é só trocar aqui.
+  const [dataProposta, setDataProposta] = useState(hojeISO());
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
   const [buscaPeca, setBuscaPeca] = useState("");
@@ -2089,6 +2114,7 @@ function OrcamentosGalpaoPageInterno() {
     setPeDireito("");
     // todas as opções voltam ao padrão pela lista OPCOES
     limparOpcoes();
+    setDataProposta(hojeISO());
     setNumeroVaos("");
     setNumeroGalpoesGerminados("0");
     setLargurasExtras([]);
@@ -2140,6 +2166,11 @@ function OrcamentosGalpaoPageInterno() {
     // Escolhas salvas: restauradas ANTES dos itens, para os cálculos
     // automáticos rodarem com as mesmas opções de quando foi salvo.
     restaurarOpcoes(orcamento);
+    // Orçamento antigo (sem data da proposta) usa a data em que foi criado.
+    setDataProposta(
+      orcamento.data_proposta ||
+        (orcamento.created_at ? String(orcamento.created_at).slice(0, 10) : hojeISO())
+    );
     // o efeito da largura não deve sobrescrever o que veio do banco
     larguraTravamentoAuto.current = !!orcamento.tem_travamento;
     setNumeroVaos(orcamento.numero_vaos ? String(orcamento.numero_vaos) : "");
@@ -2274,7 +2305,8 @@ function OrcamentosGalpaoPageInterno() {
       preco_unitario: i.preco_unitario,
       secao: i.secao === "laje" ? "laje" : "estrutura",
     }));
-    const validadeCalculada = calcularDataFutura(diasValidade) || null;
+    // A validade conta da DATA DA PROPOSTA (envio), não de hoje.
+    const validadeCalculada = calcularDataFuturaDe(dataProposta, diasValidade) || null;
 
     const { data: idRetornado, error } = editingId
       ? await supabase.rpc("atualizar_orcamento_galpao", {
@@ -2330,6 +2362,11 @@ function OrcamentosGalpaoPageInterno() {
     if (idSalvo) {
       // Uma chamada só, montada pela lista OPCOES acima.
       await supabase.rpc("salvar_opcoes_orcamento_galpao", opcoesParaSalvar(idSalvo));
+      await supabase.rpc("salvar_data_proposta_galpao", {
+        orcamento_id_input: Number(idSalvo),
+        data_proposta_input: dataProposta || null,
+        dias_validade_input: Number(diasValidade) || null,
+      });
     }
 
     setMensagem(
@@ -3737,6 +3774,18 @@ function OrcamentosGalpaoPageInterno() {
           <TituloEtapa numero="7">Condições e finalização</TituloEtapa>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
             <div>
+              <label className={labelClasse}>Data da proposta</label>
+              <input
+                type="date"
+                value={dataProposta}
+                onChange={(e) => setDataProposta(e.target.value)}
+                className={campoClasse}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                É a data que sai no impresso e de onde conta a validade.
+              </p>
+            </div>
+            <div>
               <label className={labelClasse}>Validade da proposta (dias)</label>
               <input
                 type="number"
@@ -3748,7 +3797,8 @@ function OrcamentosGalpaoPageInterno() {
               />
               {diasValidade && Number(diasValidade) > 0 && (
                 <p className="text-xs text-slate-500 mt-1">
-                  Válido até {formatarDataSimples(calcularDataFutura(diasValidade))}
+                  Válido até{" "}
+                  {formatarDataSimples(calcularDataFuturaDe(dataProposta, diasValidade))}
                 </p>
               )}
             </div>
