@@ -446,6 +446,10 @@ function OrcamentosGalpaoPageInterno() {
   const doisDec = (n) =>
     Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [paramEng, setParamEng] = useState(null);
+  // Aviso vindo de calcular_pilar (ex.: "aço zerado" quando a faixa
+  // automática não tem ferragem cadastrada) — só vem preenchido no modo
+  // detalhado; em modo m³ fica sempre null.
+  const [avisoAcoPilar, setAvisoAcoPilar] = useState(null);
 
   useEffect(() => {
     supabase
@@ -477,6 +481,7 @@ function OrcamentosGalpaoPageInterno() {
           ? atual.filter((i) => !CHAVES_AUTO.includes(i.chave))
           : atual
       );
+      setAvisoAcoPilar(null);
       return;
     }
     const pe = Number(peDireito) || 0;
@@ -557,6 +562,12 @@ function OrcamentosGalpaoPageInterno() {
       if (!dPadrao || dPadrao.erro) return;
       const dComLaje = resComLaje?.data;
       const dReforcado = resReforcado?.data;
+
+      // Junta os avisos dos três cálculos (ex.: "aço zerado" numa faixa sem
+      // ferragem cadastrada) — só existe no modo detalhado; no modo m³ o
+      // banco já retorna null pra esse campo.
+      const avisos = [dPadrao?.aviso, dComLaje?.aviso, dReforcado?.aviso].filter(Boolean);
+      setAvisoAcoPilar(avisos.length > 0 ? [...new Set(avisos)].join(" ") : null);
 
       // R$/m3 armado derivado do proprio pilar padrao (mesmo valor usado em
       // tudo), para precificar o pilar menor do meio (25x30, 5m).
@@ -1663,11 +1674,19 @@ function OrcamentosGalpaoPageInterno() {
   function atualizarItem(chave, campo, valor) {
     setItens((atual) => {
       const itemAlvo = atual.find((i) => i.chave === chave);
+      // Guarda o texto como o usuário está digitando (só troca "," por "."),
+      // em vez de converter pra Number a cada tecla: um campo controlado
+      // exibe exatamente o que está no estado, então virar Number faria
+      // "12," virar "12" na hora — apagando a vírgula antes do usuário
+      // completar "12,5". Quem lê o valor (cálculos e o salvamento) sempre
+      // passa por Number(...), então a peça funciona igual no fim das contas.
+      let bruto = String(valor).replace(",", ".");
+      if (bruto.startsWith(".")) bruto = "0" + bruto;
       const atualizados = atual.map((i) =>
         i.chave === chave
           ? {
               ...i,
-              [campo]: Math.max(0, Number(String(valor).replace(",", ".")) || 0),
+              [campo]: bruto,
               // Editou a quantidade à mão? Marca pra os cálculos automáticos
               // (pilar, viga, terça) respeitarem e não sobrescreverem.
               ...(campo === "quantidade" ? { quantidadeEditada: true } : {}),
@@ -1698,7 +1717,9 @@ function OrcamentosGalpaoPageInterno() {
     });
   }
 
-  const subtotal = itens.reduce((soma, i) => soma + i.quantidade * i.preco_unitario, 0);
+  const subtotal = itens.reduce(
+    (soma, i) => soma + (Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0), 0
+  );
   const margemNumerica = Math.max(0, Number(margemComercial) || 0);
   const totalComMargem = subtotal * (1 + margemNumerica / 100);
   const descontoNumerico = Math.min(Math.max(0, Number(desconto) || 0), totalComMargem);
@@ -1712,9 +1733,11 @@ function OrcamentosGalpaoPageInterno() {
   const itensEstruturaOrdenados = ordenarItensPorPapel(itensEstrutura, ORDEM_ESTRUTURA);
   const itensLajeOrdenados = ordenarItensPorPapel(itensLaje, ORDEM_LAJE);
   const subtotalEstrutura = itensEstrutura.reduce(
-    (soma, i) => soma + i.quantidade * i.preco_unitario, 0
+    (soma, i) => soma + (Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0), 0
   );
-  const subtotalLaje = itensLaje.reduce((soma, i) => soma + i.quantidade * i.preco_unitario, 0);
+  const subtotalLaje = itensLaje.reduce(
+    (soma, i) => soma + (Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0), 0
+  );
   const areaLajeNumerica = Number(areaLaje) || 0;
   const fatorMargem = 1 + margemNumerica / 100;
   const valorPorM2 =
@@ -2315,8 +2338,11 @@ function OrcamentosGalpaoPageInterno() {
       composicao_id: i.composicao_id || null,
       descricao_livre: i.composicao_id ? null : i.nome,
       unidade_livre: i.composicao_id ? null : i.unidade,
-      quantidade: i.quantidade,
-      preco_unitario: i.preco_unitario,
+      // O estado local guarda o texto como foi digitado (aceita "," de
+      // decimal); aqui é o único lugar que precisa do número de verdade,
+      // já que vai pro banco.
+      quantidade: Math.max(0, Number(i.quantidade) || 0),
+      preco_unitario: Math.max(0, Number(i.preco_unitario) || 0),
       secao: i.secao === "laje" ? "laje" : "estrutura",
     }));
     // A validade conta da DATA DA PROPOSTA (envio), não de hoje.
@@ -3084,6 +3110,11 @@ function OrcamentosGalpaoPageInterno() {
           )}
 
           <TituloEtapa numero="5">Estrutura — peças do galpão</TituloEtapa>
+          {avisoAcoPilar && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 mb-3">
+              ⚠ {avisoAcoPilar}
+            </p>
+          )}
           <div className="lg:hidden">
             <PainelChecklist />
           </div>
@@ -3628,7 +3659,7 @@ function OrcamentosGalpaoPageInterno() {
                         />
                       </td>
                       <td className="py-1.5 text-right whitespace-nowrap">
-                        {formatarMoeda(i.quantidade * i.preco_unitario)}
+                        {formatarMoeda((Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0))}
                       </td>
                       <td className="py-1.5 text-right">
                         {!i.obrigatorio && (
@@ -3703,7 +3734,7 @@ function OrcamentosGalpaoPageInterno() {
                             />
                           </td>
                           <td className="py-1.5 text-right whitespace-nowrap">
-                            {formatarMoeda(i.quantidade * i.preco_unitario)}
+                            {formatarMoeda((Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0))}
                           </td>
                           <td className="py-1.5 text-right">
                             <button
