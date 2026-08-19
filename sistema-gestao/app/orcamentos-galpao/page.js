@@ -1667,7 +1667,7 @@ function OrcamentosGalpaoPageInterno() {
         i.chave === chave
           ? {
               ...i,
-              [campo]: Math.max(0, Number(valor) || 0),
+              [campo]: Math.max(0, Number(String(valor).replace(",", ".")) || 0),
               // Editou a quantidade à mão? Marca pra os cálculos automáticos
               // (pilar, viga, terça) respeitarem e não sobrescreverem.
               ...(campo === "quantidade" ? { quantidadeEditada: true } : {}),
@@ -2674,11 +2674,10 @@ function OrcamentosGalpaoPageInterno() {
                   {totalGalpoes > 1 ? "Largura galpão 1 (m)" : "Largura do galpão (m)"}
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   value={vao}
-                  onChange={(e) => { descongelarLista(); setVao(e.target.value); }}
+                  onChange={(e) => { descongelarLista(); aoDigitarDecimal(setVao)(e); }}
                   placeholder="Ex: 10"
                   className={campoClasse}
                 />
@@ -2686,11 +2685,10 @@ function OrcamentosGalpaoPageInterno() {
               <div>
                 <label className={labelClasse}>Comprimento (m)</label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   value={comprimento}
-                  onChange={(e) => { descongelarLista(); setComprimento(e.target.value); }}
+                  onChange={(e) => { descongelarLista(); aoDigitarDecimal(setComprimento)(e); }}
                   placeholder="Ex: 20"
                   className={campoClasse}
                 />
@@ -2717,11 +2715,10 @@ function OrcamentosGalpaoPageInterno() {
               <div>
                 <label className={labelClasse}>Pé direito (m)</label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   value={peDireito}
-                  onChange={(e) => { descongelarLista(); setPeDireito(e.target.value); }}
+                  onChange={(e) => { descongelarLista(); aoDigitarDecimal(setPeDireito)(e); }}
                   placeholder="Ex: 7,5"
                   className={campoClasse}
                 />
@@ -2874,12 +2871,13 @@ function OrcamentosGalpaoPageInterno() {
                   <div key={i}>
                     <label className={labelClasse}>Largura galpão {i + 2} (m)</label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
                       value={largurasExtras[i] ?? ""}
                       onChange={(e) => {
-                        const valor = e.target.value;
+                        descongelarLista();
+                        let valor = e.target.value.replace(",", ".");
+                        if (valor.startsWith(".")) valor = "0" + valor;
                         setLargurasExtras((atual) => {
                           const novo = [...atual];
                           novo[i] = valor;
@@ -3048,7 +3046,7 @@ function OrcamentosGalpaoPageInterno() {
               </p>
               <select
                 value={telhaId}
-                onChange={(e) => setTelhaId(e.target.value)}
+                onChange={(e) => { descongelarLista(); setTelhaId(e.target.value); }}
                 className={campoClasse}
               >
                 <option value="">Selecione o tipo de telha</option>
@@ -3065,7 +3063,7 @@ function OrcamentosGalpaoPageInterno() {
                   min="0"
                   step="1"
                   value={perdaTelha}
-                  onChange={(e) => setPerdaTelha(e.target.value)}
+                  onChange={(e) => { descongelarLista(); setPerdaTelha(e.target.value); }}
                   className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 {areaCalculada && telhaId && (
@@ -3228,12 +3226,11 @@ function OrcamentosGalpaoPageInterno() {
                     ))}
                   </select>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Área da laje (m²)"
                     value={areaLaje}
-                    onChange={(e) => { descongelarLista(); setAreaLaje(e.target.value); }}
+                    onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAreaLaje)(e); }}
                     className={campoClasse}
                   />
                 </div>
@@ -3259,11 +3256,10 @@ function OrcamentosGalpaoPageInterno() {
                   <div>
                     <label className={labelClasse}>Altura da laje (m)</label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
                       value={alturaLaje}
-                      onChange={(e) => { descongelarLista(); setAlturaLaje(e.target.value); }}
+                      onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAlturaLaje)(e); }}
                       className={campoClasse}
                     />
                   </div>
@@ -3299,22 +3295,20 @@ function OrcamentosGalpaoPageInterno() {
                           ))}
                         </select>
                         <input
-                          type="number"
-                          step="0.01"
-                          min="0"
+                          type="text"
+                          inputMode="decimal"
                           placeholder="Área da 2ª laje (m²)"
                           value={areaLaje2}
-                          onChange={(e) => { descongelarLista(); setAreaLaje2(e.target.value); }}
+                          onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAreaLaje2)(e); }}
                           className={campoClasse}
                         />
                         <div>
                           <input
-                            type="number"
-                            step="0.01"
-                            min="0"
+                            type="text"
+                            inputMode="decimal"
                             placeholder="Altura da 2ª laje (m)"
                             value={alturaLaje2}
-                            onChange={(e) => { descongelarLista(); setAlturaLaje2(e.target.value); }}
+                            onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAlturaLaje2)(e); }}
                             className={campoClasse}
                           />
                         </div>
@@ -3613,9 +3607,8 @@ function OrcamentosGalpaoPageInterno() {
                       <td className="py-1.5 pr-2 text-slate-500">{i.unidade || "-"}</td>
                       <td className="py-1.5 pr-2">
                         <input
-                          type="number"
-                          step="0.01"
-                          min="0"
+                          type="text"
+                          inputMode="decimal"
                           value={i.quantidade}
                           onChange={(e) =>
                             atualizarItem(i.chave, "quantidade", e.target.value)
@@ -3625,9 +3618,8 @@ function OrcamentosGalpaoPageInterno() {
                       </td>
                       <td className="py-1.5 pr-2">
                         <input
-                          type="number"
-                          step="0.01"
-                          min="0"
+                          type="text"
+                          inputMode="decimal"
                           value={i.preco_unitario}
                           onChange={(e) =>
                             atualizarItem(i.chave, "preco_unitario", e.target.value)
@@ -3690,9 +3682,8 @@ function OrcamentosGalpaoPageInterno() {
                           <td className="py-1.5 pr-2 text-slate-500">{i.unidade || "-"}</td>
                           <td className="py-1.5 pr-2">
                             <input
-                              type="number"
-                              step="0.01"
-                              min="0"
+                              type="text"
+                              inputMode="decimal"
                               value={i.quantidade}
                               onChange={(e) =>
                                 atualizarItem(i.chave, "quantidade", e.target.value)
@@ -3702,9 +3693,8 @@ function OrcamentosGalpaoPageInterno() {
                           </td>
                           <td className="py-1.5 pr-2">
                             <input
-                              type="number"
-                              step="0.01"
-                              min="0"
+                              type="text"
+                              inputMode="decimal"
                               value={i.preco_unitario}
                               onChange={(e) =>
                                 atualizarItem(i.chave, "preco_unitario", e.target.value)
@@ -3819,11 +3809,10 @@ function OrcamentosGalpaoPageInterno() {
             <div>
               <label className={labelClasse}>Desconto (R$)</label>
               <input
-                type="number"
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 value={desconto}
-                onChange={(e) => setDesconto(e.target.value)}
+                onChange={aoDigitarDecimal(setDesconto)}
                 placeholder="0,00"
                 className={campoClasse}
               />
@@ -3831,11 +3820,10 @@ function OrcamentosGalpaoPageInterno() {
             <div>
               <label className={labelClasse}>BDI (%)</label>
               <input
-                type="number"
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 value={margemComercial}
-                onChange={(e) => setMargemComercial(e.target.value)}
+                onChange={aoDigitarDecimal(setMargemComercial)}
                 placeholder="Ex: 25"
                 className={campoClasse}
               />
