@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { calcularDesenhoGalpao } from "../desenho-galpao";
+import { modulosDoGalpao, contarModulos } from "../calculos";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -128,6 +129,11 @@ function valorPorExtenso(valor) {
 
 function formatarDataHora(valor) {
   if (!valor) return "-";
+  // Data pura ("2026-09-29", ex.: data da proposta) é lida como meia-noite
+  // em UTC — no fuso do Brasil virava o dia ANTERIOR. Lida no horário local.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(valor))) {
+    return new Date(valor + "T00:00:00").toLocaleDateString("pt-BR");
+  }
   return new Date(valor).toLocaleDateString("pt-BR");
 }
 
@@ -148,28 +154,15 @@ function formatarMedida(valor) {
   });
 }
 
-// Extrai a medida (ex: "5,00" de "TERÇA INTERMEDIÁRIA 5,00M")
-function extrairMedidaDoNome(nome) {
-  const match = (nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i);
-  return match ? match[1] : null;
-}
-
-// Modulação = os tamanhos de terça que realmente estão no orçamento
-// (ex: intermediária 5,00M + início/final 6,00M). Não é uma fórmula —
-// é lida direto da lista de peças, então nunca destoa do que foi
-// montado de verdade.
-function calcularModulacao(itensOrcamento) {
-  const tercas = (itensOrcamento || []).filter(
-    (item) => item.composicoes_galpao?.papel === "TERCA" && Number(item.quantidade) > 0
-  );
-  if (tercas.length === 0) return "-";
-  const medidas = [
-    ...new Set(
-      tercas.map((t) => extrairMedidaDoNome(nomeDaPeca(t))).filter(Boolean)
-    ),
-  ].sort((a, b) => parseFloat(a.replace(",", ".")) - parseFloat(b.replace(",", ".")));
-  if (medidas.length === 0) return "-";
-  return medidas.map((m) => `${m}M`).join(" E ");
+// Modulação = os vãos do galpão ao longo do comprimento, pela MESMA fonte
+// que o orçamento usa pra calcular as peças (nº de vãos salvo; sem ele,
+// 5m/6m). Ex.: "8 VÃOS DE 4,00M" ou "4 VÃOS DE 5,00M + 2 VÃOS DE 6,00M".
+function calcularModulacao(orcamento) {
+  const modulos = modulosDoGalpao(orcamento.comprimento, orcamento.numero_vaos);
+  if (!modulos) return "-";
+  return contarModulos(modulos, "tamanho")
+    .map((g) => `${g.qtd} ${g.qtd === 1 ? "VÃO" : "VÃOS"} DE ${formatarMedida(g.valor)}M`)
+    .join(" + ");
 }
 
 // "TELHAS METÁLICAS" -> "METÁLICAS" | "CALHA FIBRA" -> "FIBRA"
@@ -211,19 +204,6 @@ function primeiraComPapel(itens, papel) {
   return (itens || []).find((item) => papelDaPeca(item) === papel);
 }
 
-// Modulação em número (maior terça do orçamento) — usada só para
-// espaçar os pilares no desenho. Se não houver terça, assume 5m.
-function modulacaoNumerica(itensOrcamento) {
-  const tercas = (itensOrcamento || []).filter(
-    (item) => item.composicoes_galpao?.papel === "TERCA" && Number(item.quantidade) > 0
-  );
-  const medidas = tercas
-    .map((t) => extrairMedidaDoNome(nomeDaPeca(t)))
-    .filter(Boolean)
-    .map((m) => parseFloat(m.replace(",", ".")));
-  if (medidas.length === 0) return 5;
-  return Math.max(...medidas);
-}
 
 // Desenho isométrico do galpão pré-moldado, gerado só com os dados do
 // orçamento: estrutura aberta com pilares, vigas de travamento, laje
@@ -334,15 +314,22 @@ function ConteudoImpressao() {
     : orcamento.vao
       ? Number(orcamento.vao) * (galpoesGerminados + 1)
       : null;
+  // Área da planta: a gravada no orçamento (já considera trapézio e
+  // geminados); orçamento antigo sem ela, pela largura x comprimento.
   const areaTotal =
-    larguraTotal && orcamento.comprimento ? larguraTotal * Number(orcamento.comprimento) : null;
+    Number(orcamento.area_m2) > 0
+      ? Number(orcamento.area_m2)
+      : larguraTotal && orcamento.comprimento
+        ? larguraTotal * Number(orcamento.comprimento)
+        : null;
+  const modulosOrc = modulosDoGalpao(orcamento.comprimento, orcamento.numero_vaos);
   const desenho = calcularDesenhoGalpao({
     vao: orcamento.vao,
     comprimento: orcamento.comprimento,
     peDireito: orcamento.pe_direito,
     galpoesGerminados,
     larguras: largurasGalpoes,
-    modulacao: modulacaoNumerica(itensOrcamento),
+    modulacao: modulosOrc ? Number(orcamento.comprimento) / modulosOrc.length : 5,
     temLaje: possuiPapel(itensOrcamento, "LAJE"),
     temTravamento: possuiPapel(itensOrcamento, "VIGA_TRAVAMENTO"),
     // O desenho impresso segue as peças do orçamento, igual ao da tela:
@@ -363,6 +350,36 @@ function ConteudoImpressao() {
     textoComprimento: orcamento.comprimento ? `${formatarMedida(orcamento.comprimento)}M` : null,
     textoAltura: orcamento.pe_direito ? `${formatarMedida(orcamento.pe_direito)}M` : null,
   });
+
+  // Lajes por nível, lidas das peças do orçamento (a quantidade da laje é
+  // em m²). A do 2º nível (topo dos pilares) vem marcada "2ª laje" no nome.
+  const ehNivel2 = (i) => /2ª\s*laje|2º\s*nível/i.test(nomeDaPeca(i));
+  const somaM2 = (lista) => lista.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
+  const pecasLaje = itensOrcamento.filter(
+    (i) => papelDaPeca(i) === "LAJE" && Number(i.quantidade) > 0
+  );
+  const areaNivel1 = somaM2(pecasLaje.filter((i) => !ehNivel2(i)));
+  const areaNivel2 = somaM2(pecasLaje.filter(ehNivel2));
+  const areaLajes = areaNivel1 + areaNivel2;
+  const naAltura = (h) => (Number(h) > 0 ? ` A ${formatarMedida(h)}M` : "");
+  const partesLaje = [];
+  if (areaNivel1 > 0)
+    partesLaje.push(`1º NÍVEL ${formatarMedida(areaNivel1)}M²${naAltura(orcamento.altura_laje)}`);
+  if (areaNivel2 > 0)
+    partesLaje.push(
+      `2º NÍVEL (TOPO DOS PILARES) ${formatarMedida(areaNivel2)}M²${naAltura(orcamento.altura_laje2)}`
+    );
+  // Sem a peça da laje, mas com as vigas: só avisa que vão as vigas.
+  const textoLajes =
+    partesLaje.join(" + ") ||
+    (possuiPapel(itensOrcamento, "VIGA_LAJE") ? "SOMENTE AS VIGAS PARA LAJE" : "NÃO CONTEMPLA");
+  const textoArea = !areaTotal
+    ? "-"
+    : areaLajes > 0
+      ? `GALPÃO ${formatarMedida(areaTotal)}M² + LAJES ${formatarMedida(areaLajes)}M² = ${formatarMedida(
+          areaTotal + areaLajes
+        )}M²`
+      : `${formatarMedida(areaTotal)}M²`;
 
   const especificacoes = [
     {
@@ -385,9 +402,7 @@ function ConteudoImpressao() {
     },
     {
       rotulo: "Modulação",
-      valor: possuiPapel(itensOrcamento, "TERCA")
-        ? calcularModulacao(itensOrcamento)
-        : "NÃO CONTEMPLA",
+      valor: calcularModulacao(orcamento),
     },
     {
       rotulo: "Telhas",
@@ -395,25 +410,18 @@ function ConteudoImpressao() {
         ? simplificarNome(nomeDaPeca(itemTelha), "TELHA")
         : "NÃO CONTEMPLA",
     },
-    {
-      rotulo: "Terças",
-      // Só afirma "em concreto armado" se houver terça no orçamento.
-      valor: possuiPapel(itensOrcamento, "TERCA") ? "EM CONCRETO ARMADO" : "NÃO CONTEMPLA",
-    },
-    { rotulo: "Laje pré-moldada", valor: possuiPapel(itensOrcamento, "LAJE") ? "SIM" : "NÃO" },
-    {
-      rotulo: "Área",
-      valor: areaTotal ? `${formatarMedida(areaTotal)}M²` : "-",
-    },
+    { rotulo: "Lajes", valor: textoLajes },
+    { rotulo: "Área", valor: textoArea },
     {
       rotulo: "Calha",
-      valor: itemCalha
-        ? simplificarNome(nomeDaPeca(itemCalha), "CALHA")
-        : "NÃO CONTEMPLA",
+      valor:
+        itemCalha && Number(itemCalha.quantidade) > 0
+          ? `${simplificarNome(nomeDaPeca(itemCalha), "CALHA")} — ${formatarMedida(itemCalha.quantidade)}M`
+          : "NÃO CONTEMPLA",
     },
     {
       rotulo: "Viga de travamento",
-      valor: possuiPapel(itensOrcamento, "VIGA_TRAVAMENTO") ? "SIM" : "NÃO",
+      valor: possuiPapel(itensOrcamento, "VIGA_TRAVAMENTO") ? "SIM" : "NÃO CONTEMPLA",
     },
   ];
 
@@ -473,7 +481,7 @@ function ConteudoImpressao() {
           </p>
           {orcamento.area_m2 && (
             <p>
-              <span className="font-semibold">Área coberta:</span> {orcamento.area_m2} m²
+              <span className="font-semibold">Área coberta:</span> {formatarMedida(orcamento.area_m2)} m²
             </p>
           )}
           <p>
@@ -573,16 +581,12 @@ function ConteudoImpressao() {
               {formatarMoeda(orcamento.total)}
             </td>
           </tr>
-          <tr>
-            <td
-              colSpan={4}
-              className="border border-slate-300 px-2 py-1.5 text-xs italic text-slate-600"
-            >
-              {valorPorExtenso(orcamento.total)}.
-            </td>
-          </tr>
         </tbody>
       </table>
+      {/* Valor por extenso do lado direito, logo abaixo do valor em número */}
+      <p className="text-right text-xs italic text-slate-600 mb-6 ml-auto max-w-md">
+        ({valorPorExtenso(orcamento.total)})
+      </p>
 
       {orcamento.observacao && (
         <div className="mb-8">

@@ -133,8 +133,162 @@ export function decomporComprimentoEmModulos(comprimentoTotal) {
 }
 
 // ---------------------------------------------------------------------------
+// GALPÃO TRAPEZOIDAL (vão diferente na frente e no fundo)
+// ---------------------------------------------------------------------------
+
+// Mesma regra de decomporComprimentoEmModulos, mas devolve a lista de
+// módulos com o TAMANHO REAL de cada um (o quebrado com seu valor
+// verdadeiro, não arredondado) — precisa disso pra achar a posição de cada
+// pórtico ao longo do comprimento. Ordem: vãos de 5m primeiro, os de 6m
+// depois, o quebrado por último (sempre correspondendo a terça de 6,00M).
+export function modulosDoComprimento(comprimentoTotal) {
+  const d = decomporComprimentoEmModulos(comprimentoTotal);
+  if (!d) return null;
+  const vaos6Reais = d.quebrado ? d.vaos6 - 1 : d.vaos6;
+  const modulos = [];
+  for (let i = 0; i < d.vaos5; i++) modulos.push({ medida: 5, tamanho: 5 });
+  for (let i = 0; i < vaos6Reais; i++) modulos.push({ medida: 6, tamanho: 6 });
+  if (d.quebrado) modulos.push({ medida: 6, tamanho: d.quebrado });
+  return modulos;
+}
+
+// FONTE ÚNICA DOS VÃOS do galpão. Toda peça que depende de vão (pilar,
+// tesoura, terça, travamento, vigas de laje, calha) tem de ler DAQUI.
+// - Sem nº de vãos informado (ou igual à sugestão): módulos de 5m/6m.
+// - Nº de vãos diferente da sugestão (ex.: cliente quer vão de 4m num
+//   galpão de 32m = 8 vãos): vãos IGUAIS de comprimento ÷ nº de vãos, e a
+//   peça sai com essa medida (viga de travamento de 4m, terça de 4m...).
+// medida = tamanho da peça comprada; tamanho = comprimento real do vão.
+export function modulosDoGalpao(comprimentoTotal, numeroVaos) {
+  const c = Number(comprimentoTotal) || 0;
+  if (c <= 0) return null;
+  const sugeridos = modulosDoComprimento(c);
+  const n = Math.floor(Number(numeroVaos) || 0);
+  if (n > 0 && (!sugeridos || n !== sugeridos.length)) {
+    const t = Math.round((c / n) * 100) / 100;
+    return Array.from({ length: n }, () => ({ medida: t, tamanho: t }));
+  }
+  return sugeridos;
+}
+
+// Quantos vãos de cada medida (ou tamanho): [{ valor, qtd }] na ordem em
+// que aparecem no galpão.
+export function contarModulos(modulos, campo = "medida") {
+  const mapa = new Map();
+  for (const m of modulos || []) mapa.set(m[campo], (mapa.get(m[campo]) || 0) + 1);
+  return [...mapa].map(([valor, qtd]) => ({ valor, qtd }));
+}
+
+// Posição de cada pórtico ao longo do comprimento (0 = frente, total =
+// fundo). Sempre nº de vãos + 1 posições — o mesmo "pilaresPorFileira"
+// que o pilar automático de vão constante já usa hoje.
+export function posicoesDosPorticos(comprimentoTotal, numeroVaos) {
+  const modulos = modulosDoGalpao(comprimentoTotal, numeroVaos);
+  if (!modulos) return null;
+  const posicoes = [0];
+  let acc = 0;
+  for (const m of modulos) {
+    acc += m.tamanho;
+    posicoes.push(Math.round(acc * 100) / 100);
+  }
+  // vãos iguais arredondados (ex.: 30 ÷ 7) — o último pórtico fica
+  // exatamente no fundo
+  posicoes[posicoes.length - 1] = Number(comprimentoTotal);
+  return posicoes;
+}
+
+// Vão (largura) na posição X do comprimento, por interpolação linear entre
+// o vão da frente (posição 0) e o vão do fundo (posição = comprimentoTotal).
+// Fora do trapézio (vaoFundo vazio, zero ou igual ao da frente) devolve
+// sempre vaoFrente, pra nunca afetar um galpão retangular comum.
+export function vaoNaPosicao(posicao, comprimentoTotal, vaoFrente, vaoFundo) {
+  const c = Number(comprimentoTotal) || 0;
+  const vf = Number(vaoFrente) || 0;
+  const vt = Number(vaoFundo);
+  if (!isFinite(vt) || vt <= 0 || c <= 0 || Math.abs(vt - vf) < 0.001) return vf;
+  const t = Math.max(0, Math.min(1, Number(posicao) / c));
+  return Math.round((vf + (vt - vf) * t) * 100) / 100;
+}
+
+// Área do trapézio: média das duas larguras × comprimento.
+export function areaTrapezio(vaoFrente, vaoFundo, comprimentoTotal) {
+  const vf = Number(vaoFrente) || 0;
+  const vt = Number(vaoFundo) || 0;
+  const c = Number(comprimentoTotal) || 0;
+  return vf > 0 && vt > 0 && c > 0 ? ((vf + vt) / 2) * c : 0;
+}
+
+// Terças por medida de compra: cada vão pede tercasNaPosicao(meio do vão)
+// terças (qtdTercasPorLinhaDeVao da largura ali — constante no galpão
+// retangular, variando no trapézio), somadas pela medida da peça: 5 ou 6
+// na sugestão, ou a medida dos vãos iguais (ex.: 4) quando o cliente
+// escolhe outro nº de vãos.
+export function tercasPorMedida(modulos, tercasNaPosicao) {
+  if (!modulos) return null;
+  let pos = 0;
+  const totais = {};
+  for (const m of modulos) {
+    const meio = pos + m.tamanho / 2;
+    totais[m.medida] = (totais[m.medida] || 0) + tercasNaPosicao(meio);
+    pos += m.tamanho;
+  }
+  return totais;
+}
+
+// Terças por medida no modo trapézio: a largura no meio de cada vão vem
+// da interpolação entre frente e fundo.
+export function tercasTrapezioPorMedida(comprimentoTotal, vaoFrente, vaoFundo, numeroVaos) {
+  return tercasPorMedida(modulosDoGalpao(comprimentoTotal, numeroVaos), (meio) =>
+    qtdTercasPorLinhaDeVao(vaoNaPosicao(meio, comprimentoTotal, vaoFrente, vaoFundo))
+  );
+}
+
+// Preço de uma terça fora das medidas cadastradas (ex.: 4m ou 5,5m):
+// reta entre os dois pontos reais do catálogo (R$ por metro de diferença),
+// estendida para fora deles quando preciso. pontos = [{ medida, preco }].
+export function precoTercaInterpolado(medida, pontos) {
+  const ps = (pontos || [])
+    .filter((p) => Number(p.medida) > 0 && Number(p.preco) > 0)
+    .sort((a, b) => a.medida - b.medida);
+  const alvo = Number(medida) || 0;
+  if (alvo <= 0 || ps.length === 0) return 0;
+  if (ps.length === 1) return Math.round((ps[0].preco / ps[0].medida) * alvo * 100) / 100;
+  const p1 = ps[0];
+  const p2 = ps[ps.length - 1];
+  const taxa = (p2.preco - p1.preco) / (p2.medida - p1.medida);
+  return Math.max(0, Math.round((p1.preco + taxa * (alvo - p1.medida)) * 100) / 100);
+}
+
+// ---------------------------------------------------------------------------
 // VIGAS E PILARES DA LAJE
 // ---------------------------------------------------------------------------
+
+// Quantos vãos a laje cobre, a partir da frente: laje parcial vai até a
+// profundidade informada (área ÷ largura). Viga de laje = vãos cobertos + 1
+// (uma em cada linha de pilar que a laje toca).
+export function vaosCobertosPelaLaje(modulos, profundidade) {
+  if (!modulos) return 0;
+  const prof = Number(profundidade) || 0;
+  let acumulado = 0;
+  let vaos = 0;
+  for (const m of modulos) {
+    if (acumulado >= prof - 0.01) break;
+    acumulado += m.tamanho;
+    vaos++;
+  }
+  return vaos;
+}
+
+// Altura da viga de laje: % do vão da viga (a MR7 usa de 7 a 10%; padrão
+// 10%), arredondada PARA CIMA no múltiplo de 5cm. 9m a 7% = 0,63 -> 0,65m.
+// % fora de 1 a 30 (ou vazio) volta pros 10% de sempre.
+export function alturaVigaLaje(vaoViga, pctDoVao) {
+  const v = Number(vaoViga) || 0;
+  if (v <= 0) return 0;
+  const p = Number(String(pctDoVao ?? "").replace(",", "."));
+  const pct = p >= 1 && p <= 30 ? p : 10;
+  return Math.round(Math.ceil((v * pct) / 100 / 0.05 - 1e-9) * 0.05 * 100) / 100;
+}
 
 // A viga da laje nunca passa de 10m: acima disso ela se divide em trechos, e
 // cada trecho a mais exige uma fila de pilar no meio.
@@ -159,19 +313,39 @@ export function trechosDaViga(larguraGalpao) {
 export function chaveAutomatica(nome, secao) {
   const n = (nome || "").toUpperCase();
   if (n.startsWith("CONSOLO TESOURA")) return "consolo-tesoura-auto";
-  if (n.startsWith("VIGA PARA LAJE")) return "viga-laje-auto";
+  // Peças da 2ª laje (dois pavimentos) têm chave própria — sem isso a viga
+  // de cima era confundida com a de baixo e a laje de cima virava peça
+  // solta, duplicando ao mexer nas medidas.
+  if (n.startsWith("VIGA PARA LAJE"))
+    return n.includes("2ª LAJE") || n.includes("2º NÍVEL") ? "viga-laje2-auto" : "viga-laje-auto";
+  if (n.startsWith("LAJE") && n.includes("2ª LAJE")) return "laje2-auto";
+  // Travamento e terça: chave pela MEDIDA da peça (5, 6, 5.4, 4...), a
+  // mesma que o cálculo automático usa — vãos iguais fora do padrão
+  // (ex.: 4m) também são reconhecidos.
   if (n.startsWith("VIGA DE TRAVAMENTO")) {
     const m = n.match(/X(\d+(?:[,.]\d+)?)M/);
     const comp = m ? parseFloat(m[1].replace(",", ".")) : 0;
-    return comp > 5 ? "travamento-auto-6" : "travamento-auto-5";
+    return comp > 0 ? `travamento-auto-${comp}` : null;
   }
   if (n.startsWith("FUNDAÇÃO") && secao === "laje") return "fundacao-laje";
   if (n.startsWith("TERÇA") || n.startsWith("TERCA")) {
-    if (/6[,.]00\s*M/.test(n)) return "terca-auto-6";
-    if (/5[,.]00\s*M/.test(n)) return "terca-auto-5";
-    return null;
+    const m = n.match(/(\d+(?:[,.]\d+)?)\s*M\b/);
+    const medida = m ? parseFloat(m[1].replace(",", ".")) : 0;
+    return medida > 0 ? `terca-auto-${medida}` : null;
   }
   if (n.startsWith("PILAR")) {
+    // Pilar avulso (calculado na hora, adicionado à mão) nunca é
+    // reidentificado como pilar automático — senão, ao reabrir o
+    // orçamento, um pilar avulso na seção da laje seria confundido com o
+    // pilar automático do meio do vão (os dois começam com "PILAR" e têm
+    // secao === "laje").
+    if (n.includes("AVULSO")) return null;
+    // Pilar do modo trapézio (um por pórtico, vão diferente em cada um) —
+    // nome vem com o sufixo "— Pórtico i/N (vão Xm)" (ver nomePilar() e o
+    // useEffect do trapézio em page.js). Precisa achar a MESMA chave que o
+    // efeito geraria de novo, senão duplica ao reabrir o orçamento.
+    const mTrap = n.match(/PÓRTICO (\d+)\/(\d+)/);
+    if (mTrap) return `pilar-trapezio-${Number(mTrap[1]) - 1}`;
     if (secao === "laje") return "pilar-auto-meio";
     if (n.includes("REFORÇADO") || n.includes("PESADO")) return "pilar-auto-reforcado";
     if (n.includes("SOB A LAJE")) return "pilar-auto-comlaje";

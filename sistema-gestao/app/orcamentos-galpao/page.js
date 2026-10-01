@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Copy, Eye, EyeOff, Pencil, Printer, ShoppingCart, MessageCircle, XCircle, RotateCcw } from "lucide-react";
+import { Copy, Eye, EyeOff, Pencil, Printer, ShoppingCart, MessageCircle, XCircle, RotateCcw, MoreVertical } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
 import DesenhoGalpao from "./desenho-galpao";
@@ -15,9 +15,24 @@ import {
   qtdTercasPorLinhaDeVao,
   decomporComprimentoEmModulos,
   chaveAutomatica,
+  posicoesDosPorticos,
+  vaoNaPosicao,
+  areaTrapezio,
+  modulosDoGalpao,
+  contarModulos,
+  tercasPorMedida,
+  precoTercaInterpolado,
+  vaosCobertosPelaLaje,
+  alturaVigaLaje,
+  qtdCalha,
+  qtdCapote,
 } from "./calculos";
 
 const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
+
+// Orçamentos por página na lista (o último é o teto — a lista nunca fica
+// infinita).
+const OPCOES_POR_PAGINA = [10, 20, 30, 50, 100];
 
 // Ordem fixa das peças dentro de cada seção, seguindo a planilha da
 // empresa. Peças novas do mesmo tipo entram logo abaixo das existentes
@@ -214,6 +229,47 @@ function recalcularFundacao(listaItens) {
   );
 }
 
+// Níveis de ferragem do pilar (mesma lista usada nos 3 seletores do pilar
+// automático) — compartilhada aqui também pelo formulário de pilar avulso.
+const NIVEIS_PILAR = [
+  { valor: "AUTO", rotulo: "Automático (pela medida)" },
+  { valor: "ESBELTO", rotulo: "Esbelto 25×30" },
+  { valor: "LEVE", rotulo: "Leve 25×40" },
+  { valor: "MEDIO", rotulo: "Médio 25×40" },
+  { valor: "PESADO", rotulo: "Pesado 25×40" },
+  { valor: "COM_LAJE", rotulo: "Com laje 25×40" },
+];
+
+// Duas casas decimais, formato pt-BR — usado em nomes de peça calculada.
+const doisDec = (n) =>
+  Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Platibanda: só uma fatia da seção do pilar sobe (ex.: 0,15 dos 0,40), o
+// resto fica de apoio da tesoura — por isso o acréscimo é pequeno (não é o
+// pilar inteiro esticado). Função de módulo (não fecha sobre estado) pra
+// poder ser chamada tanto pelo pilar automático quanto pelo manual, sem
+// duplicar a conta.
+function custoPlatibanda(data, platAlt, platEsp) {
+  if (platAlt <= 0 || platEsp <= 0) return 0;
+  const vol = Number(data.secao_largura_m) * platEsp * platAlt;
+  const vM3 = Number(data.valor_m3_armado) || 0;
+  return Math.round(vol * vM3 * 100) / 100;
+}
+
+// Nome da peça de pilar calculado, a partir do retorno de calcular_pilar().
+// Função de módulo pelo mesmo motivo de custoPlatibanda acima.
+function nomePilar(data, pe, platAlt, sufixo) {
+  return (
+    "PILAR " +
+    doisDec(data.secao_largura_m, 2) + "x" + doisDec(data.secao_altura_m, 2) +
+    " - " + doisDec(data.comprimento_total_m, 2) + "m (" +
+    doisDec(pe, 2) + " livre" +
+    (platAlt > 0 ? " + " + doisDec(platAlt, 2) + " platibanda" : "") +
+    " + " + doisDec(data.fundacao_m, 2) + " fundacao)" +
+    (sufixo ? " — " + sufixo : "")
+  );
+}
+
 function OrcamentosGalpaoPageInterno() {
   const [modo, setModo] = useState("lista"); // 'lista' | 'novo' | 'editar'
   const [clientes, setClientes] = useState([]);
@@ -237,6 +293,32 @@ function OrcamentosGalpaoPageInterno() {
   const [perdidoSalvando, setPerdidoSalvando] = useState(false);
   const [expandidoId, setExpandidoId] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
+  // Lista paginada: 10 por página por padrão; o usuário escolhe mais, até
+  // o teto de OPCOES_POR_PAGINA (a escolha fica guardada neste navegador).
+  const [pagina, setPagina] = useState(1);
+  const [porPagina, setPorPagina] = useState(10);
+  useEffect(() => {
+    try {
+      const salvo = Number(window.localStorage.getItem("orcamentos-galpao-por-pagina"));
+      if (OPCOES_POR_PAGINA.includes(salvo)) setPorPagina(salvo);
+    } catch {}
+  }, []);
+  // Menu "⋯" de ações de um orçamento da lista: posição fixa na tela, pra
+  // não ficar cortado pela rolagem da tabela.
+  const [menuAcoes, setMenuAcoes] = useState(null); // { id, top, right }
+  useEffect(() => {
+    if (!menuAcoes) return;
+    const fechar = () => setMenuAcoes(null);
+    const naTecla = (e) => e.key === "Escape" && fechar();
+    window.addEventListener("scroll", fechar, true);
+    window.addEventListener("resize", fechar);
+    window.addEventListener("keydown", naTecla);
+    return () => {
+      window.removeEventListener("scroll", fechar, true);
+      window.removeEventListener("resize", fechar);
+      window.removeEventListener("keydown", naTecla);
+    };
+  }, [menuAcoes]);
   const [editingId, setEditingId] = useState(null);
   const [editingCodigo, setEditingCodigo] = useState(null);
   const [nomeUsuario, setNomeUsuario] = useState("");
@@ -244,6 +326,11 @@ function OrcamentosGalpaoPageInterno() {
   const [clienteId, setClienteId] = useState("");
   const [modeloId, setModeloId] = useState("");
   const [vao, setVao] = useState("");
+  // Galpão trapezoidal: vão diferente na frente ("vao") e no fundo. Vazio =
+  // galpão retangular comum (a imensa maioria). Preenchido e diferente de
+  // "vao" = cada pórtico ao longo do comprimento tem seu próprio vão,
+  // interpolado entre os dois (ver calculos.js: posicoesDosPorticos/vaoNaPosicao).
+  const [vaoFundo, setVaoFundo] = useState("");
   const [comprimento, setComprimento] = useState("");
   const [peDireito, setPeDireito] = useState("");
   // Platibanda: parte da secao do pilar (ex.: 15 dos 40cm) que sobe acima da
@@ -270,10 +357,22 @@ function OrcamentosGalpaoPageInterno() {
   // Vigas sem laje: o cliente pode querer so as vigas (a laje vem depois).
   const [temVigaLajeAvulsa, setTemVigaLajeAvulsa] = useState(false);
   const [temSegundaLaje, setTemSegundaLaje] = useState(false);
-  const [alturaLaje2, setAlturaLaje2] = useState("7.00");
+  // Vazio = acompanha o pé-direito (topo dos pilares) — ver o efeito
+  // "altura do 2º nível" mais abaixo.
+  const [alturaLaje2, setAlturaLaje2] = useState("");
   const [areaLaje2, setAreaLaje2] = useState("");
   const [tipoLajeId2, setTipoLajeId2] = useState("");
-  const [pilarLajeId, setPilarLajeId] = useState("");
+  // Pilar avulso (calculado na hora, via calcular_pilar) — dois pontos de
+  // entrada: o genérico (seção Estrutura) e o da laje/mezanino, cada um com
+  // seu próprio formulário, mas os dois chamam adicionarPilarCalculado().
+  const [pilarAvulsoPe, setPilarAvulsoPe] = useState("");
+  const [pilarAvulsoVao, setPilarAvulsoVao] = useState("");
+  const [pilarAvulsoComLaje, setPilarAvulsoComLaje] = useState(false);
+  const [pilarAvulsoNivel, setPilarAvulsoNivel] = useState("AUTO");
+  const [pilarAvulsoQtd, setPilarAvulsoQtd] = useState("1");
+  const [pilarLajePe, setPilarLajePe] = useState("");
+  const [pilarLajeVao, setPilarLajeVao] = useState("");
+  const [pilarLajeNivel, setPilarLajeNivel] = useState("AUTO");
   const [pilarLajeQtd, setPilarLajeQtd] = useState("1");
   const [montagemLajeQtd, setMontagemLajeQtd] = useState("");
   // Nivel de ferragem do pilar reforçado do germinado (fileira do meio,
@@ -307,6 +406,9 @@ function OrcamentosGalpaoPageInterno() {
   const [vigaAltura, setVigaAltura] = useState("");
   const [vigaVao, setVigaVao] = useState("");
   const [vigaValorM3, setVigaValorM3] = useState("");
+  // Altura da viga de laje = este % do vão da viga (na prática 7 a 10%).
+  // Padrão 10% — o mesmo que o sistema sempre usou.
+  const [vigaPctVao, setVigaPctVao] = useState("10");
   // Viga de travamento: uma por vao em cada linha de pilar. Vem marcada a
   // partir de 12m de largura (padrao da obra), mas o usuario decide sempre.
   const [temTravamento, setTemTravamento] = useState(false);
@@ -368,6 +470,7 @@ function OrcamentosGalpaoPageInterno() {
     return supabase
       .from("composicoes_galpao")
       .select("id, codigo, nome, unidade, preco, papel, comprimento_referencia, montagem_por_dia")
+      .eq("ativo", true)
       .order("nome");
   }
   function buscarModelos() {
@@ -377,7 +480,7 @@ function OrcamentosGalpaoPageInterno() {
     return supabase
       .from("orcamentos_galpao")
       .select(
-        "*, clientes(nome, telefone), modelos_galpao(nome, tipo), itens_orcamento_galpao(id, composicao_id, descricao_livre, unidade_livre, quantidade, preco_unitario, secao, composicoes_galpao(nome, unidade, papel))"
+        "*, clientes(nome, telefone, cpf_cnpj), modelos_galpao(nome, tipo), itens_orcamento_galpao(id, composicao_id, descricao_livre, unidade_livre, quantidade, preco_unitario, secao, composicoes_galpao(nome, unidade, papel))"
       )
       .order("codigo", { ascending: false });
   }
@@ -441,15 +544,30 @@ function OrcamentosGalpaoPageInterno() {
   // larguras diferentes — o galpão 1 usa o campo principal e os demais
   // usam os campos extras (vazio = repete a largura do galpão 1).
   const totalGalpoes = Math.max(0, Number(numeroGalpoesGerminados) || 0) + 1;
+  // Trapézio (um galpão só, vão mudando ao longo do comprimento) e
+  // geminados (vários galpões retângulos colados) não se combinam na v1 —
+  // trapézio só é considerado ativo quando não há geminado.
+  const trapezioAtivo =
+    totalGalpoes <= 1 &&
+    vaoFundo !== "" &&
+    Math.abs((Number(vaoFundo) || 0) - (Number(vao) || 0)) > 0.001;
+  // FONTE ÚNICA dos vãos ao longo do comprimento (ver calculos.js):
+  // respeita o "Nº de vãos" digitado; sem ele, módulos de 5m/6m. Toda peça
+  // que depende de vão lê daqui — antes cada uma contava do seu jeito e
+  // travamento/vigas de laje/terças ignoravam o nº de vãos escolhido.
+  const modulos = modulosDoGalpao(comprimento, numeroVaos);
+  const nVaos = modulos ? modulos.length : 0;
 
   // ---- Pilar calculado: liga/desliga em Engenharia de custos ----
-  const doisDec = (n) =>
-    Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [paramEng, setParamEng] = useState(null);
   // Aviso vindo de calcular_pilar (ex.: "aço zerado" quando a faixa
   // automática não tem ferragem cadastrada) — só vem preenchido no modo
   // detalhado; em modo m³ fica sempre null.
   const [avisoAcoPilar, setAvisoAcoPilar] = useState(null);
+  // Aviso do modo trapézio: combinações fora do escopo (laje/mezanino ou
+  // galpão geminado junto com trapézio) recusam gerar pilar automático em
+  // vez de arriscar número errado.
+  const [avisoTrapezio, setAvisoTrapezio] = useState(null);
 
   useEffect(() => {
     supabase
@@ -473,6 +591,17 @@ function OrcamentosGalpaoPageInterno() {
       "pilar-auto-meio",
       "consolo-tesoura-auto",
     ];
+    // Trapézio: pilar é gerado por outro useEffect (um por pórtico, vão
+    // diferente em cada um) — este aqui só garante que os de vão constante
+    // não fiquem escondidos por baixo enquanto o trapézio está ativo.
+    if (trapezioAtivo) {
+      setItens((atual) =>
+        atual.some((i) => CHAVES_AUTO.includes(i.chave))
+          ? atual.filter((i) => !CHAVES_AUTO.includes(i.chave))
+          : atual
+      );
+      return;
+    }
     // Sem pilares (cliente ja tem a estrutura pronta e quer so a coberta),
     // ou pilar automatico desligado nos parametros: nenhum pilar e lancado.
     if (!comPilares || !paramEng || !paramEng.pilar_automatico) {
@@ -487,8 +616,7 @@ function OrcamentosGalpaoPageInterno() {
     const pe = Number(peDireito) || 0;
     const v = Number(vao) || 0;
     if (pe <= 0 || v <= 0) return;
-    const dedu = decomporComprimentoEmModulos(comprimento);
-    const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
+    const nV = nVaos;
     if (nV <= 0) return;
 
     // Grade de pilares: 1 galpao = 2 fileiras; cada germinado a mais soma 1.
@@ -521,21 +649,8 @@ function OrcamentosGalpaoPageInterno() {
     // 0,25 x 0,15 x 1,20 = 0,045 m3 (~R$ 135), e nao o pilar inteiro esticado.
     const platAlt = temPlatibanda ? Number(alturaPlatibanda) || 0 : 0;
     const platEsp = temPlatibanda ? Number(espessuraPlatibanda) || 0 : 0;
-    const custoPlatibanda = (data) => {
-      if (platAlt <= 0 || platEsp <= 0) return 0;
-      const vol = Number(data.secao_largura_m) * platEsp * platAlt;
-      const vM3 = Number(data.valor_m3_armado) || 0;
-      return Math.round(vol * vM3 * 100) / 100;
-    };
-
-    const nomePilar = (data, sufixo) =>
-      "PILAR " +
-      doisDec(data.secao_largura_m, 2) + "x" + doisDec(data.secao_altura_m, 2) +
-      " - " + doisDec(data.comprimento_total_m, 2) + "m (" +
-      doisDec(pe, 2) + " livre" +
-      (platAlt > 0 ? " + " + doisDec(platAlt, 2) + " platibanda" : "") +
-      " + " + doisDec(data.fundacao_m, 2) + " fundacao)" +
-      (sufixo ? " — " + sufixo : "");
+    // nomePilar/custoPlatibanda agora são funções de módulo (topo do
+    // arquivo) — reaproveitadas aqui e também pelo pilar avulso (manual).
 
     let cancelado = false;
     (async () => {
@@ -590,11 +705,11 @@ function OrcamentosGalpaoPageInterno() {
           novos.push({
             chave: "pilar-auto-padrao",
             composicao_id: null,
-            nome: nomePilar(dPadrao, temSufixo ? "padrao" : ""),
+            nome: nomePilar(dPadrao, pe, platAlt, temSufixo ? "padrao" : ""),
             unidade: "PÇ",
             papel: "PILAR",
             quantidade: qtdDe("pilar-auto-padrao", qtdPadrao),
-            preco_unitario: (Number(dPadrao.custo_total) || 0) + custoPlatibanda(dPadrao),
+            preco_unitario: (Number(dPadrao.custo_total) || 0) + custoPlatibanda(dPadrao, platAlt, platEsp),
             secao: "estrutura",
           });
         }
@@ -602,11 +717,11 @@ function OrcamentosGalpaoPageInterno() {
           novos.push({
             chave: "pilar-auto-comlaje",
             composicao_id: null,
-            nome: nomePilar(dComLaje, "sob a laje"),
+            nome: nomePilar(dComLaje, pe, platAlt, "sob a laje"),
             unidade: "PÇ",
             papel: "PILAR",
             quantidade: qtdDe("pilar-auto-comlaje", qtdComLaje),
-            preco_unitario: (Number(dComLaje.custo_total) || 0) + custoPlatibanda(dComLaje),
+            preco_unitario: (Number(dComLaje.custo_total) || 0) + custoPlatibanda(dComLaje, platAlt, platEsp),
             secao: "estrutura",
           });
         }
@@ -614,11 +729,11 @@ function OrcamentosGalpaoPageInterno() {
           novos.push({
             chave: "pilar-auto-reforcado",
             composicao_id: null,
-            nome: nomePilar(dReforcado, "reforçado (2 tesouras)"),
+            nome: nomePilar(dReforcado, pe, platAlt, "reforçado (2 tesouras)"),
             unidade: "PÇ",
             papel: "PILAR",
             quantidade: qtdDe("pilar-auto-reforcado", qtdReforcado),
-            preco_unitario: (Number(dReforcado.custo_total) || 0) + custoPlatibanda(dReforcado),
+            preco_unitario: (Number(dReforcado.custo_total) || 0) + custoPlatibanda(dReforcado, platAlt, platEsp),
             secao: "estrutura",
           });
         }
@@ -664,7 +779,122 @@ function OrcamentosGalpaoPageInterno() {
     return () => {
       cancelado = true;
     };
-  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, comPilares, nivelPadrao, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber]);
+  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, comPilares, nivelPadrao, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber, trapezioAtivo]);
+
+  // Trapézio: gera um par de pilares por PÓRTICO (não por fileira única),
+  // cada um com seu próprio vão interpolado entre a frente e o fundo —
+  // separado do efeito de vão constante acima pra não arriscar a lógica
+  // dele, que já é usada em praticamente todo orçamento.
+  useEffect(() => {
+    if (listaCongelada.current) return;
+    if (modo === "lista") return;
+    // Sempre que a condição de gerar não estiver 100% satisfeita, tira
+    // qualquer peça de pórtico que tenha sobrado — senão, desligar o
+    // trapézio (ou a laje/os pilares) deixaria peça presa na lista.
+    const limparPilaresTrapezio = () =>
+      setItens((atual) =>
+        atual.some((i) => String(i.chave).startsWith("pilar-trapezio-"))
+          ? recalcularFundacao(atual.filter((i) => !String(i.chave).startsWith("pilar-trapezio-")))
+          : atual
+      );
+    if (!trapezioAtivo) {
+      limparPilaresTrapezio();
+      return;
+    }
+    if (!comPilares || !paramEng || !paramEng.pilar_automatico) {
+      limparPilaresTrapezio();
+      return;
+    }
+    // Fora do escopo da v1: laje/mezanino sobre trapézio (a viga da laje e
+    // os pilares "sob a laje"/"do meio" assumem vão constante). Recusa em
+    // vez de arriscar um número errado.
+    if (Number(areaLaje) > 0) {
+      setAvisoTrapezio(
+        "Trapézio automático ainda não cobre laje/mezanino — lance esses pilares manualmente (pilar avulso)."
+      );
+      limparPilaresTrapezio();
+      return;
+    }
+    setAvisoTrapezio(null);
+    const pe = Number(peDireito) || 0;
+    if (pe <= 0 || !comprimento) {
+      limparPilaresTrapezio();
+      return;
+    }
+    const posicoes = posicoesDosPorticos(comprimento, numeroVaos);
+    if (!posicoes) {
+      limparPilaresTrapezio();
+      return;
+    }
+
+    const platAlt = temPlatibanda ? Number(alturaPlatibanda) || 0 : 0;
+    const platEsp = temPlatibanda ? Number(espessuraPlatibanda) || 0 : 0;
+
+    let cancelado = false;
+    (async () => {
+      // Nível sempre fixo em "PESADO" (a única faixa com seção 0,25x0,40 pra
+      // QUALQUER pé-direito/vão) — o modo AUTO escolhe a seção batendo o vão
+      // contra uma tabela importada de obras reais isoladas (cada uma com
+      // seu vão fixo), e varrer isso ao longo do trapézio misturava seções
+      // de obras diferentes na mesma peça (ex.: 0,25x0,40 / 0,34x0,19 /
+      // 0,24x0,14 no mesmo galpão). Assim a estrutura fica visualmente/
+      // estruturalmente uniforme; o aço fica um pouco mais forte que o
+      // mínimo (PESADO foi pensado pra pilar de 2 tesouras), então o preço
+      // tende a sair um pouco acima do ideal — do lado seguro. Pórtico que
+      // precisar de algo diferente, ajuste a quantidade e lance à mão.
+      const resultados = await Promise.all(
+        posicoes.map((pos) => {
+          const vaoAtual = vaoNaPosicao(pos, comprimento, vao, vaoFundo);
+          return supabase.rpc("calcular_pilar", {
+            pe_direito_input: pe,
+            vao_input: vaoAtual,
+            com_laje_input: false,
+            nivel_input: "PESADO",
+          });
+        })
+      );
+      if (cancelado) return;
+
+      const avisos = resultados.map((r) => r?.data?.aviso).filter(Boolean);
+      setAvisoAcoPilar(avisos.length > 0 ? [...new Set(avisos)].join(" ") : null);
+
+      setItens((atual) => {
+        // Tira TODAS as peças de pórtico antigas (não só as que casam com o
+        // número de posições de agora) — senão, encurtar o comprimento
+        // deixaria pórticos a mais presos na lista.
+        const semTrapezio = atual.filter((i) => !String(i.chave).startsWith("pilar-trapezio-"));
+        const qtdDe = (chave, padrao) => {
+          const a = atual.find((i) => i.chave === chave);
+          return a && a.quantidadeEditada ? a.quantidade : padrao;
+        };
+        const novos = [];
+        resultados.forEach((r, i) => {
+          const data = r?.data;
+          if (!data || data.erro) return;
+          const chave = `pilar-trapezio-${i}`;
+          const vaoAtual = vaoNaPosicao(posicoes[i], comprimento, vao, vaoFundo);
+          novos.push({
+            chave,
+            composicao_id: null,
+            nome: nomePilar(
+              data, pe, platAlt,
+              `Pórtico ${i + 1}/${posicoes.length} (vão ${vaoAtual}m)`
+            ),
+            unidade: "PÇ",
+            papel: "PILAR",
+            quantidade: qtdDe(chave, 2), // 2 pilares por pórtico (esquerdo/direito)
+            preco_unitario: (Number(data.custo_total) || 0) + custoPlatibanda(data, platAlt, platEsp),
+            secao: "estrutura",
+          });
+        });
+        return recalcularFundacao([...novos, ...semTrapezio.filter((i) => !removidasNaMao.current.has(i.chave))]);
+      });
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [paramEng, peDireito, vao, vaoFundo, comprimento, numeroVaos, modo, comPilares, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, areaLaje, trapezioAtivo]);
+
   const listaLarguras =
     totalGalpoes > 1 && vao
       ? Array.from({ length: totalGalpoes }, (_, i) =>
@@ -674,7 +904,11 @@ function OrcamentosGalpaoPageInterno() {
   const somaLarguras = listaLarguras
     ? listaLarguras.reduce((s, n) => s + n, 0)
     : Number(vao) || 0;
-  const areaCalculada = vao && comprimento ? somaLarguras * Number(comprimento) : null;
+  const areaCalculada = trapezioAtivo
+    ? areaTrapezio(vao, vaoFundo, comprimento) || null
+    : vao && comprimento
+    ? somaLarguras * Number(comprimento)
+    : null;
 
   // Recalcula telha/calha/capote automaticamente, ao vivo, sempre que as
   // medidas, o nº de galpões germinados ou o tipo de telha mudam.
@@ -693,7 +927,9 @@ function OrcamentosGalpaoPageInterno() {
             i === 0 ? Number(vao) : Number(largurasExtras[i - 1]) || Number(vao)
           ).reduce((s, n) => s + n, 0)
         : Number(vao);
-    const area = somaL * Number(comprimento);
+    // Trapézio: área é a do trapézio (média das duas larguras), não a do
+    // retângulo pela largura da frente.
+    const area = trapezioAtivo ? areaTrapezio(vao, vaoFundo, comprimento) : somaL * Number(comprimento);
 
     setItens((atual) => {
       if (atual.length === 0) return atual;
@@ -734,42 +970,37 @@ function OrcamentosGalpaoPageInterno() {
       // bordas externas + 1 calha central por cada junção entre galpões).
       // multiplicador = nº de galpões germinados + 1 (1 galpão => 2, como
       // antes; 2 galpões germinados => 3; 3 => 4; e assim por diante).
-      // Nº de vãos: usa o informado; vazio, deduz pelo comprimento (5m/6m)
-      // para a calha nunca ficar zerada à toa.
-      const dCalha = decomporComprimentoEmModulos(comprimento);
-      const vaosCalha = Number(numeroVaos) || (dCalha ? dCalha.vaos5 + dCalha.vaos6 : 0);
-      if (vaosCalha > 0) {
-        const multiplicadorCalha = germinados + 1;
-        const qtdCalha =
-          Math.round(
-            (multiplicadorCalha * Number(comprimento) +
-              0.5 * multiplicadorCalha * vaosCalha) *
-              100
-          ) / 100;
-        novos = novos.map((i) => (i.nome === "CALHA FIBRA" ? { ...i, quantidade: qtdCalha } : i));
+      // Nº de vãos: a fonte única (nVaos) — o informado, ou 5m/6m.
+      if (nVaos > 0) {
+        const qtdC = Math.round(qtdCalha(comprimento, nVaos, germinados) * 100) / 100;
+        novos = novos.map((i) => (i.nome === "CALHA FIBRA" ? { ...i, quantidade: qtdC } : i));
       }
 
       // Capote: um jogo de capotes por galpão (multiplicador = nº de
       // galpões germinados, direto — 1 galpão => 1x, 2 germinados => 2x).
-      const qtdCapote = Math.round((Number(comprimento) + 2) * germinados * 100) / 100;
-      novos = novos.map((i) => (i.nome === "CAPOTE" ? { ...i, quantidade: qtdCapote } : i));
+      const qtdCp = Math.round(qtdCapote(comprimento, germinados) * 100) / 100;
+      novos = novos.map((i) => (i.nome === "CAPOTE" ? { ...i, quantidade: qtdCp } : i));
 
       // Laje/mezanino: vendida por m² direto (o preço já é por m², a
       // área de referência de cada painel só entra no cálculo de custo
       // por trás) — mesma lógica da telha, sem multiplicador de perda.
+      // A 2ª laje (chave "laje2-auto") tem efeito próprio: nunca é tocada
+      // aqui — senão, com as duas lajes do mesmo tipo, a de cima herdava a
+      // área da de baixo.
+      const ehLaje2 = (i) => i.chave === "laje2-auto";
       novos = novos.filter(
         (i) =>
-          i.chave === "laje2-auto" ||
+          ehLaje2(i) ||
           !(i.papel === "LAJE" && (!tipoLajeId || i.composicao_id !== Number(tipoLajeId)))
       );
       if (tipoLajeId && areaLaje) {
         const laje = composicoes.find((c) => String(c.id) === String(tipoLajeId));
         if (laje) {
           const qtdLaje = Math.round(Number(areaLaje) * 100) / 100;
-          const jaExisteLaje = novos.some((i) => i.composicao_id === laje.id);
+          const jaExisteLaje = novos.some((i) => !ehLaje2(i) && i.composicao_id === laje.id);
           if (jaExisteLaje) {
             novos = novos.map((i) =>
-              i.composicao_id === laje.id ? { ...i, quantidade: qtdLaje } : i
+              !ehLaje2(i) && i.composicao_id === laje.id ? { ...i, quantidade: qtdLaje } : i
             );
           } else {
             novos.push({
@@ -791,6 +1022,7 @@ function OrcamentosGalpaoPageInterno() {
     });
   }, [
     vao,
+    vaoFundo,
     comprimento,
     numeroVaos,
     numeroGalpoesGerminados,
@@ -976,13 +1208,44 @@ function OrcamentosGalpaoPageInterno() {
       }));
   }
 
+  // Galpão editado: liga/desliga calha e capote na lista. Desligado, o item
+  // sai e não volta sozinho (o recálculo automático só atualiza a
+  // quantidade de quem já está na lista). Ligado, entra com a quantidade
+  // pelas medidas — mesma conta do recálculo automático.
+  function alternarItemBase(nome, entra) {
+    descongelarLista();
+    setItens((atual) => {
+      if (!entra) return atual.filter((i) => i.nome !== nome);
+      if (atual.some((i) => i.nome === nome)) return atual;
+      const c = buscarComposicao(nome);
+      if (!c) return atual;
+      const qtd =
+        nome === "CALHA FIBRA"
+          ? nVaos > 0 ? Math.round(qtdCalha(comprimento, nVaos, totalGalpoes) * 100) / 100 : 0
+          : Math.round(qtdCapote(comprimento, totalGalpoes) * 100) / 100;
+      return [
+        ...atual,
+        {
+          chave: proximaChave.current++,
+          composicao_id: c.id,
+          nome: c.nome,
+          unidade: c.unidade,
+          papel: c.papel,
+          quantidade: qtd,
+          preco_unitario: Number(c.preco) || 0,
+          secao: "estrutura",
+        },
+      ];
+    });
+  }
+
   // ---------- Sugestões automáticas pelas medidas ----------
   // Tesouras: (nº de vãos + 1) por galpão — uma em cada linha de
   // pilares, incluindo as duas empenas. Geminados com larguras
   // diferentes sugerem por grupo de largura (primeiro as tesouras do
   // galpão 1; depois de adicionar, sugere as do próximo galpão).
   function sugestaoTesoura() {
-    const numVaos = Number(numeroVaos) || 0;
+    const numVaos = nVaos;
     if (numVaos <= 0 || !vao) return null;
     const larguras = listaLarguras || [Number(vao)];
     // Mantém a ordem dos galpões (1º, 2º, ...) — objeto puro reordenaria
@@ -1018,8 +1281,7 @@ function OrcamentosGalpaoPageInterno() {
   // quantidade nunca fica presa na da peça anterior.
   function sugestaoQuantidadePara(comp) {
     if (!comp) return null;
-    const dedu = decomporComprimentoEmModulos(comprimento);
-    const nV = Number(numeroVaos) || (dedu ? dedu.vaos5 + dedu.vaos6 : 0);
+    const nV = nVaos;
     if (comp.papel === "PILAR") {
       // usa o nº de vãos informado OU o deduzido pelo comprimento
       if (nV <= 0) return null;
@@ -1050,7 +1312,7 @@ function OrcamentosGalpaoPageInterno() {
   }
 
   function sugestaoPilares() {
-    const numVaos = Number(numeroVaos) || 0;
+    const numVaos = nVaos;
     if (numVaos <= 0) return null;
     return {
       linhas: numVaos + 1,
@@ -1059,55 +1321,57 @@ function OrcamentosGalpaoPageInterno() {
     };
   }
 
-  // Sugestão de terças para a peça selecionada: identifica a medida da
-  // terça pelo nome (5,00M / 6,00M), calcula quantas terças por vão
-  // (somando os galpões geminados) e multiplica pelos vãos daquela
-  // medida. Sem decomposição possível, usa o nº de vãos informado.
+  // Vãos do galpão em texto, pela fonte única: "8 × 4m" ou "4 × 5m + 2 × 6m".
+  const fmtM = (n) => String(Math.round(Number(n) * 100) / 100).replace(".", ",") + "m";
+  // % do vão usado na altura da viga de laje, como entra na conta (fora de
+  // 1 a 30 volta pros 10% — mesma regra de alturaVigaLaje).
+  const pctVigaNum = Number(String(vigaPctVao).replace(",", "."));
+  const pctVigaTxt =
+    String(pctVigaNum >= 1 && pctVigaNum <= 30 ? pctVigaNum : 10).replace(".", ",") + "%";
+  const textoModulos = modulos
+    ? `${comprimento}m = ` +
+      contarModulos(modulos, "tamanho").map((g) => `${g.qtd} × ${fmtM(g.valor)}`).join(" + ")
+    : "";
+
+  // Terças que o galpão PRECISA, por medida de compra (5, 6, ou a medida
+  // dos vãos iguais escolhidos, ex.: 4) — a largura de cada vão decide
+  // quantas linhas (constante no retangular, interpolada no trapézio).
+  const larguraTercas = listaLarguras || [Number(vao)];
+  const tercasPorVao = larguraTercas.reduce((s, l) => s + qtdTercasPorLinhaDeVao(l), 0);
+  function tercasNecessariasPorMedida() {
+    if (!vao || !modulos) return null;
+    return tercasPorMedida(modulos, (meio) =>
+      trapezioAtivo
+        ? qtdTercasPorLinhaDeVao(vaoNaPosicao(meio, comprimento, vao, vaoFundo))
+        : tercasPorVao
+    );
+  }
+  const medidaDaTerca = (nome) => {
+    const m = (nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i)?.[1];
+    return m ? Math.round(parseFloat(m.replace(",", ".")) * 100) / 100 : null;
+  };
+
+  // Sugestão de terças para a peça selecionada: pela medida no nome da
+  // peça (5,00M / 6,00M), soma as terças dos vãos dessa medida.
   function sugestaoTerca(comp) {
     if (!vao || !comprimento) return null;
-    const larguras = listaLarguras || [Number(vao)];
-    const porVao = larguras.map((l) => qtdTercasPorLinhaDeVao(l));
-    const totalPorVao = porVao.reduce((s, n) => s + n, 0);
-    if (totalPorVao <= 0) return null;
-
-    const detalheLarguras =
-      larguras.length === 1
-        ? `${larguras[0]}m ÷ 1,6 → ${porVao[0]} por vão (sempre par)`
-        : larguras.map((l, i) => `${l}m → ${porVao[i]}`).join(" + ") +
-          ` = ${totalPorVao} por vão (sempre par)`;
-
-    const medidaTxt = (comp?.nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i)?.[1] || null;
-    const medida = medidaTxt ? parseFloat(medidaTxt.replace(",", ".")) : null;
-    const decomp = decomporComprimentoEmModulos(comprimento);
-
-    if (decomp && (medida === 5 || medida === 6)) {
-      const nVaosDaMedida = medida === 6 ? decomp.vaos6 : decomp.vaos5;
-      const composicaoTexto =
-        `${comprimento}m = ` +
-        [
-          decomp.vaos5 > 0 ? `${decomp.vaos5} × 5m` : null,
-          decomp.vaos6 > 0 ? `${decomp.vaos6} × 6m` : null,
-        ]
-          .filter(Boolean)
-          .join(" + ");
-      if (nVaosDaMedida <= 0) {
-        return {
-          qtd: 0,
-          texto: `${composicaoTexto} — esse comprimento fecha sem vãos de ${medida}m, então essa terça não seria necessária`,
-        };
-      }
+    const totais = tercasNecessariasPorMedida();
+    if (!totais) return null;
+    const medida = medidaDaTerca(comp?.nome);
+    const detalheLarguras = trapezioAtivo
+      ? `vão varia de ${vao}m (frente) a ${vaoFundo}m (fundo)`
+      : larguraTercas.length === 1
+        ? `${larguraTercas[0]}m ÷ 1,6 → ${tercasPorVao} por vão (sempre par)`
+        : `${tercasPorVao} por vão (somando os galpões, sempre par)`;
+    const qtd = medida ? totais[medida] || 0 : 0;
+    if (!qtd) {
+      const medidasDoGalpao = Object.keys(totais).map((m) => fmtM(m)).join(" e ");
       return {
-        qtd: totalPorVao * nVaosDaMedida,
-        texto: `${detalheLarguras} × ${nVaosDaMedida} vão(s) de ${medida}m (${composicaoTexto}) = ${totalPorVao * nVaosDaMedida}`,
+        qtd: 0,
+        texto: `${textoModulos} — não há vão de ${medida ? fmtM(medida) : "?"} neste galpão; ele pede terça de ${medidasDoGalpao}`,
       };
     }
-
-    const nVaosInformado = Number(numeroVaos) || 0;
-    if (nVaosInformado <= 0) return null;
-    return {
-      qtd: totalPorVao * nVaosInformado,
-      texto: `${detalheLarguras} × ${nVaosInformado} vãos informados = ${totalPorVao * nVaosInformado}`,
-    };
+    return { qtd, texto: `${detalheLarguras} nos vãos de ${fmtM(medida)} (${textoModulos}) = ${qtd}` };
   }
 
   const pecaSelecionada = composicoes.find(
@@ -1122,70 +1386,39 @@ function OrcamentosGalpaoPageInterno() {
   // decomposição do comprimento) com o que já foi LANÇADO no orçamento.
   const conferenciaTercas = (() => {
     if (!vao || !comprimento) return null;
-    const decomp = decomporComprimentoEmModulos(comprimento);
-    if (!decomp) return null;
-    const larguras = listaLarguras || [Number(vao)];
-    const totalPorVao = larguras.reduce((s, l) => s + qtdTercasPorLinhaDeVao(l), 0);
-    if (totalPorVao <= 0) return null;
-    const lancadas = { 5: 0, 6: 0 };
+    const totais = tercasNecessariasPorMedida();
+    if (!totais) return null;
+    const lancadas = {};
     itens.forEach((i) => {
       if (i.papel !== "TERCA") return;
-      const m = (i.nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i)?.[1];
-      const medida = m ? Math.round(parseFloat(m.replace(",", "."))) : null;
-      if (medida === 5 || medida === 6) lancadas[medida] += Number(i.quantidade) || 0;
+      const medida = medidaDaTerca(i.nome);
+      if (medida) lancadas[medida] = (lancadas[medida] || 0) + (Number(i.quantidade) || 0);
     });
-    const linhas = [];
-    for (const medida of [5, 6]) {
-      const vaosDaMedida = medida === 5 ? decomp.vaos5 : decomp.vaos6;
-      if (vaosDaMedida <= 0) continue;
-      linhas.push({
-        medida,
-        vaos: vaosDaMedida,
-        necessarias: totalPorVao * vaosDaMedida,
-        lancadas: lancadas[medida],
-      });
-    }
+    const linhas = contarModulos(modulos, "medida")
+      .map((g) => ({
+        medida: g.valor,
+        vaos: g.qtd,
+        necessarias: totais[g.valor] || 0,
+        lancadas: lancadas[g.valor] || 0,
+      }))
+      .filter((l) => l.necessarias > 0);
     if (linhas.length === 0) return null;
-    const composicaoTexto =
-      `${comprimento}m = ` +
-      [
-        decomp.vaos5 > 0 ? `${decomp.vaos5} × 5m` : null,
-        decomp.vaos6 > 0 ? `${decomp.vaos6} × 6m` : null,
-      ]
-        .filter(Boolean)
-        .join(" + ");
-    return { composicaoTexto, totalPorVao, linhas };
+    return { composicaoTexto: textoModulos, totalPorVao: tercasPorVao, linhas };
   })();
 
-  // ---------- Vigas da laje: sequência de módulos e sugestões ----------
-  // Módulos na ordem física (os de 5m primeiro, os de 6m no final).
-  function sequenciaModulos() {
-    const d = decomporComprimentoEmModulos(comprimento);
-    if (!d) return null;
-    return [...Array(d.vaos5).fill(5), ...Array(d.vaos6).fill(6)];
-  }
-
-  // Quantas vigas de laje: uma em cada linha de pilares que a laje toca.
+  // ---------- Vigas da laje ----------
+  // Quantas vigas de laje: uma em cada linha de pilares que a laje toca,
+  // pelos vãos da fonte única (respeita o nº de vãos escolhido).
   // Laje parcial: profundidade = área da laje ÷ largura total do galpão.
-  function sugestaoQtdVigasLaje() {
-    if (!somaLarguras || !comprimento) return null;
+  // areaRef: área da laje em questão (1ª ou 2ª); vazia = galpão inteiro.
+  function sugestaoQtdVigasLaje(areaRef = areaLaje) {
+    if (!somaLarguras || !comprimento || !modulos) return null;
     const prof =
-      Number(areaLaje) > 0
-        ? Math.min(Number(comprimento), Number(areaLaje) / somaLarguras)
+      Number(areaRef) > 0
+        ? Math.min(Number(comprimento), Number(areaRef) / somaLarguras)
         : Number(comprimento);
-    const seq = sequenciaModulos();
-    if (seq) {
-      let acumulado = 0;
-      let vaosCobertos = 0;
-      for (const modulo of seq) {
-        if (acumulado >= prof - 0.01) break;
-        acumulado += modulo;
-        vaosCobertos++;
-      }
-      return { qtd: vaosCobertos + 1, vaosCobertos, prof };
-    }
-    const nV = Number(numeroVaos) || 0;
-    return nV > 0 ? { qtd: nV + 1, vaosCobertos: nV, prof } : null;
+    const vaosCobertos = vaosCobertosPelaLaje(modulos, prof);
+    return vaosCobertos > 0 ? { qtd: vaosCobertos + 1, vaosCobertos, prof } : null;
   }
 
   const temPilarNoMeioDaLaje = itens.some((i) => i.secao === "laje" && i.papel === "PILAR");
@@ -1196,10 +1429,13 @@ function OrcamentosGalpaoPageInterno() {
     if (!s) return null;
     const larg = Number(vao) || 0;
     const trechos = larg > 0 ? Math.ceil(larg / 10) : 1;
+    // 2º nível (topo dos pilares): as vigas de cima somam às de baixo
+    const s2 = temSegundaLaje ? sugestaoQtdVigasLaje(areaLaje2) : null;
+    const linhasTotais = s.qtd + (s2?.qtd || 0);
     const lancadas = itens
       .filter((i) => i.papel === "VIGA_LAJE")
       .reduce((soma, i) => soma + (Number(i.quantidade) || 0), 0);
-    return { ...s, qtd: s.qtd * trechos, trechos, lancadas };
+    return { ...s, qtd: linhasTotais * trechos, trechos, lancadas, doisNiveis: !!s2 };
   })();
 
   function adicionarItem() {
@@ -1233,7 +1469,8 @@ function OrcamentosGalpaoPageInterno() {
   // (comprimento da viga) = largura do galpão — ou METADE, se já houver
   // pilar de laje no meio; quantidade = linhas de pilar que a laje toca.
   // ALTURA: pré-dimensionamento consagrado usado junto à NBR 6118 para
-  // viga biapoiada = vão ÷ 10, arredondado PARA CIMA no múltiplo de 5cm
+  // viga biapoiada = % do vão (campo "altura da viga", padrão 10%; a MR7
+  // usa de 7 a 10%), arredondado PARA CIMA no múltiplo de 5cm
   // (a própria NBR 6118 não fixa pré-dimensionamento; o projeto
   // estrutural final confirma). Tudo é só ponto de partida, editável.
   useEffect(() => {
@@ -1244,8 +1481,8 @@ function OrcamentosGalpaoPageInterno() {
     if (larguraGalpao1 <= 0) return;
     const trechos = larguraGalpao1 > 0 ? Math.ceil(larguraGalpao1 / 10) : 1;
     const vaoDaViga = Math.round((larguraGalpao1 / trechos) * 100) / 100;
-    // altura = vão/10, múltiplo de 5cm para cima (10m -> 1,00m; 5m -> 0,50m)
-    const alturaViga = Math.round(Math.ceil(vaoDaViga / 10 / 0.05) * 0.05 * 100) / 100;
+    // altura = % do vão informado (padrão 10%), múltiplo de 5cm para cima
+    const alturaViga = alturaVigaLaje(vaoDaViga, vigaPctVao);
     setVigaLargura("0.25");
     setVigaAltura(String(alturaViga));
     setVigaVao(String(vaoDaViga));
@@ -1256,7 +1493,7 @@ function OrcamentosGalpaoPageInterno() {
 
   // Viga da laje AUTOMÁTICA no orçamento: entra já dividida (vão = metade da
   // largura) quando a largura passa de 10m — que é quando existe o pilar no
-  // meio pra dividir a viga —, ou inteira até 10m. Altura = vão ÷ 10 (múltiplo
+  // meio pra dividir a viga —, ou inteira até 10m. Altura = % do vão (múltiplo
   // de 5cm). Quantidade = linhas de pilar que a laje cobre. Preço = 0,25 ×
   // altura × vão × valor do m³ que o usuário informa; enquanto o m³ estiver em
   // branco a viga aparece com preço 0 (a definir) e não soma no total.
@@ -1285,12 +1522,17 @@ function OrcamentosGalpaoPageInterno() {
     }
     const trechos = larguraGalpao > 0 ? Math.ceil(larguraGalpao / 10) : 1;
     const vaoViga = Math.round((larguraGalpao / trechos) * 100) / 100;
-    const alturaViga = Math.round(Math.ceil(vaoViga / 10 / 0.05) * 0.05 * 100) / 100;
+    const alturaViga = alturaVigaLaje(vaoViga, vigaPctVao);
     const m3 = Number(vigaValorM3) || 0;
     const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
+    // A descrição diz o NÍVEL e o % usado — dá pra saber qual viga é qual
+    // mesmo depois de mudar a altura.
+    const nivel1 =
+      Number(alturaLaje) > 0 ? `1º nível (laje a ${doisDec(Number(alturaLaje), 2)}m)` : "1º nível";
     const nome =
       "VIGA PARA LAJE " +
       doisDec(0.25, 2) + "X" + doisDec(alturaViga, 2) + "X" + doisDec(vaoViga, 2) + "M" +
+      " — " + nivel1 + " · altura " + pctVigaTxt + " do vão" +
       (trechos > 1 ? " — dividida em " + trechos + " (pilar no meio)" : "");
     setItens((atual) => {
       const ant = atual.find((i) => i.chave === "viga-laje-auto");
@@ -1310,7 +1552,7 @@ function OrcamentosGalpaoPageInterno() {
       ];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tipoSelecionado, vao, comprimento, areaLaje, temVigaLajeAvulsa, numeroVaos, vigaValorM3, totalGalpoes]);
+  }, [tipoSelecionado, vao, comprimento, areaLaje, temVigaLajeAvulsa, numeroVaos, vigaValorM3, vigaPctVao, alturaLaje, totalGalpoes]);
 
   // SEGUNDA LAJE (galpao de dois pavimentos): lanca a peca da laje de cima e
   // as vigas dela. Mesma regra da primeira: a viga nunca passa de 10m, entao
@@ -1345,13 +1587,14 @@ function OrcamentosGalpaoPageInterno() {
           secao: "laje",
         });
       }
-      // b) as vigas da laje de cima
-      const sug = sugestaoQtdVigasLaje();
+      // b) as vigas da laje de cima — pela área DELA (vazia = galpão todo),
+      // não pela da laje de baixo
+      const sug = sugestaoQtdVigasLaje(areaLaje2);
       const qtdViga = sug?.qtd || 0;
       if (qtdViga > 0) {
         const trechos = Math.ceil(larguraGalpao / 10);
         const vaoViga = Math.round((larguraGalpao / trechos) * 100) / 100;
-        const alturaViga = Math.round(Math.ceil(vaoViga / 10 / 0.05) * 0.05 * 100) / 100;
+        const alturaViga = alturaVigaLaje(vaoViga, vigaPctVao);
         const m3 = Number(vigaValorM3) || 0;
         const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
         const antV = atual.find((i) => i.chave === CH_VIGA2);
@@ -1360,7 +1603,8 @@ function OrcamentosGalpaoPageInterno() {
           composicao_id: null,
           nome:
             "VIGA PARA LAJE " + doisDec(0.25, 2) + "X" + doisDec(alturaViga, 2) + "X" +
-            doisDec(vaoViga, 2) + "M — 2ª laje (" + doisDec(Number(alturaLaje2) || 0, 2) + "m)" +
+            doisDec(vaoViga, 2) + "M — 2º nível, topo dos pilares (2ª laje, " +
+            doisDec(Number(alturaLaje2) || 0, 2) + "m) · altura " + pctVigaTxt + " do vão" +
             (trechos > 1 ? " — dividida em " + trechos : ""),
           unidade: "UND",
           papel: "VIGA_LAJE",
@@ -1373,7 +1617,7 @@ function OrcamentosGalpaoPageInterno() {
       return recalcularMontagem([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...sem]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, composicoes, totalGalpoes]);
+  }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, vigaPctVao, composicoes, totalGalpoes]);
 
   // Nº de vãos AUTOMÁTICO: vem do comprimento (dividido em módulos de 5m e 6m).
   // Preenche o campo pra ficar visível junto com a sugestão. Editável: se o
@@ -1389,6 +1633,25 @@ function OrcamentosGalpaoPageInterno() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comprimento]);
+
+  // Altura do 2º nível: a caixinha diz "topo dos pilares", então a altura
+  // ACOMPANHA o pé-direito — antes vinha fixa em 7,00m e, com pé-direito
+  // maior, os pilares passavam da laje de cima (parecia platibanda).
+  // Se o usuário digitar outra altura, o sistema para de mexer: só segue
+  // enquanto a altura estiver vazia ou igual ao pé-direito anterior.
+  const peAnteriorLaje2 = useRef(null);
+  useEffect(() => {
+    const pe = peDireito ? String(peDireito) : "";
+    const anterior = peAnteriorLaje2.current;
+    peAnteriorLaje2.current = pe;
+    if (!temSegundaLaje || !pe) return;
+    const seguindo =
+      alturaLaje2 === "" ||
+      Number(alturaLaje2) === Number(pe) ||
+      (anterior !== null && anterior !== "" && Number(alturaLaje2) === Number(anterior));
+    if (seguindo && alturaLaje2 !== pe) setAlturaLaje2(pe);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peDireito, temSegundaLaje]);
 
   // Viga de travamento: a caixinha acompanha a largura — marcada a partir de
   // 12m, desmarcada abaixo. So muda quando a largura CRUZA esse limite, para
@@ -1410,13 +1673,12 @@ function OrcamentosGalpaoPageInterno() {
   useEffect(() => {
     // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
     if (listaCongelada.current) return;
-    const CHAVES = ["travamento-auto-5", "travamento-auto-6"];
+    const ehAuto = (i) => String(i.chave).startsWith("travamento-auto-");
     setItens((atual) => {
-      const semAuto = atual.filter((i) => !CHAVES.includes(i.chave));
-      const d = decomporComprimentoEmModulos(comprimento);
+      const semAuto = atual.filter((i) => !ehAuto(i));
       // No editado a viga de travamento tambem entra: e o usuario quem marca
       // a caixinha, entao ela reflete o que o cliente pediu.
-      if (!temTravamento || !d) return semAuto;
+      if (!temTravamento || !modulos) return semAuto;
       const linhas = totalGalpoes + 1; // 2 fileiras no avulso, +1 por geminado
       const porVao = travamentoDuplo ? 2 : 1;
       const m3 = Number(String(travamentoValorM3).replace(",", ".")) || 0;
@@ -1425,23 +1687,24 @@ function OrcamentosGalpaoPageInterno() {
         return a && a.quantidadeEditada ? a.quantidade : padrao;
       };
       const novos = [];
-      for (const medida of [5, 6]) {
-        // O vao quebrado (ex.: 5,40m) conta como vao de 6m, igual as tercas.
-        const vaosDaMedida = medida === 5 ? d.vaos5 : d.vaos6;
-        const qtd = vaosDaMedida * linhas * porVao;
+      // Uma peça por TAMANHO real de vão (fonte única): 5m e 6m na sugestão,
+      // o quebrado (ex.: 5,40m) com o tamanho dele, ou os vãos iguais que o
+      // cliente escolheu (ex.: 8 vãos de 4m = vigas de 4m).
+      for (const { valor: comp, qtd: vaosDoTamanho } of contarModulos(modulos, "tamanho")) {
+        const qtd = vaosDoTamanho * linhas * porVao;
         if (qtd <= 0) continue;
-        const comp = medida === 6 && d.quebrado ? d.quebrado : medida;
+        const chave = `travamento-auto-${comp}`;
         const preco =
           m3 > 0 ? Math.round(0.15 * 0.3 * comp * m3 * 100) / 100 : 0;
         novos.push({
-          chave: `travamento-auto-${medida}`,
+          chave,
           composicao_id: null,
           nome:
             "VIGA DE TRAVAMENTO 0,15X0,30X" + doisDec(comp, 2) + "M" +
             (travamentoDuplo ? " — 2 por vão" : ""),
           unidade: "UND",
           papel: "VIGA_TRAVAMENTO",
-          quantidade: qtdDe(`travamento-auto-${medida}`, qtd),
+          quantidade: qtdDe(chave, qtd),
           preco_unitario: preco,
           secao: "estrutura",
         });
@@ -1483,51 +1746,56 @@ function OrcamentosGalpaoPageInterno() {
     // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
     if (listaCongelada.current) return;
     setItens((atual) => {
-      const semAuto = atual.filter(
-        (i) => i.chave !== "terca-auto-5" && i.chave !== "terca-auto-6"
-      );
+      const semAuto = atual.filter((i) => !String(i.chave).startsWith("terca-auto-"));
       if (tipoSelecionado === "editado") return semAuto;
-      const decomp = decomporComprimentoEmModulos(comprimento);
-      const larguras = listaLarguras || [Number(vao)];
-      const totalPorVao = larguras.reduce(
-        (s, l) => s + qtdTercasPorLinhaDeVao(l),
-        0
-      );
-      if (!vao || !comprimento || !decomp || totalPorVao <= 0) return semAuto;
-      const tercasCat = composicoes.filter((c) => c.papel === "TERCA");
-      const acharTerca = (medida) =>
-        tercasCat.find((c) => {
-          const m = (c.nome || "").match(/(\d+(?:,\d+)?)\s*M\b/i)?.[1];
-          return m
-            ? Math.round(parseFloat(m.replace(",", "."))) === medida
-            : false;
-        });
+      const totais = tercasNecessariasPorMedida();
+      if (!vao || !comprimento || !totais) return semAuto;
+      const tercasCat = composicoes
+        .filter((c) => c.papel === "TERCA")
+        .map((c) => ({ comp: c, medida: medidaDaTerca(c.nome), preco: Number(c.preco) || 0 }))
+        .filter((t) => t.medida);
       const qtdDe = (chave, padrao) => {
         const a = atual.find((i) => i.chave === chave);
         return a && a.quantidadeEditada ? a.quantidade : padrao;
       };
       const novos = [];
-      for (const medida of [5, 6]) {
-        const vaosDaMedida = medida === 5 ? decomp.vaos5 : decomp.vaos6;
-        const qtd = totalPorVao * vaosDaMedida;
+      for (const [medidaTxt, qtd] of Object.entries(totais)) {
+        const medida = Number(medidaTxt);
         if (qtd <= 0) continue;
-        const comp = acharTerca(medida);
-        if (!comp) continue;
+        const chave = `terca-auto-${medida}`;
+        const doCatalogo = tercasCat.find((t) => Math.abs(t.medida - medida) < 0.01);
+        if (doCatalogo) {
+          novos.push({
+            chave,
+            composicao_id: doCatalogo.comp.id,
+            nome: doCatalogo.comp.nome,
+            unidade: doCatalogo.comp.unidade,
+            papel: "TERCA",
+            quantidade: qtdDe(chave, qtd),
+            preco_unitario: doCatalogo.preco,
+            secao: "estrutura",
+          });
+          continue;
+        }
+        // Vão fora do catálogo (ex.: cliente quer vãos de 4m): terça dessa
+        // medida, com preço pela reta entre as terças reais de 5m e 6m.
+        const preco = precoTercaInterpolado(medida, tercasCat);
+        if (preco <= 0) continue;
         novos.push({
-          chave: `terca-auto-${medida}`,
-          composicao_id: comp.id,
-          nome: comp.nome,
-          unidade: comp.unidade,
+          chave,
+          composicao_id: null,
+          nome: `TERÇA ${doisDec(medida, 2)}M — avulsa (interpolada entre 5m e 6m)`,
+          unidade: "PÇ",
           papel: "TERCA",
-          quantidade: qtdDe(`terca-auto-${medida}`, qtd),
-          preco_unitario: Number(comp.preco) || 0,
+          quantidade: qtdDe(chave, qtd),
+          preco_unitario: preco,
           secao: "estrutura",
         });
       }
       return recalcularMontagem([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...semAuto]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vao, comprimento, numeroVaos, totalGalpoes, largurasExtras, composicoes]);
+  }, [tipoSelecionado, vao, vaoFundo, comprimento, numeroVaos, totalGalpoes, largurasExtras, composicoes]);
 
   // Campos decimais que aceitam vírgula: ",25" vira "0.25" na hora.
   const aoDigitarDecimal = (setter) => (e) => {
@@ -1570,62 +1838,126 @@ function OrcamentosGalpaoPageInterno() {
     setErro("");
   }
 
-  function adicionarTesouraProporcional() {
-    const ref = tesourasComReferencia.find((t) => String(t.id) === String(tesouraRefId));
-    const tamanho = Number(tesouraTamanho) || 0;
-    const qtd = Math.max(1, Number(tesouraQtd) || 1);
-    if (!ref || tamanho <= 0) {
-      setErro("Selecione uma tesoura de referência e informe o tamanho desejado.");
-      return;
-    }
+  // Insere UMA tesoura calculada proporcionalmente — usada tanto pelo botão
+  // manual (lê tesouraRefId/tamanho/qtd do estado) quanto pelo gerador em
+  // lote do trapézio (recebe os parâmetros direto, um por pórtico).
+  // Fórmula provisória (reta entre o vão da peça e a referência) — não é
+  // engenharia real ainda, é a mesma usada hoje em todo orçamento.
+  function inserirTesouraProporcional({ refId, tamanho, qtd, sufixoNome, origemTrapezio }) {
+    const ref = tesourasComReferencia.find((t) => String(t.id) === String(refId));
+    const tam = Number(tamanho) || 0;
+    const quantidade = Math.max(1, Number(qtd) || 1);
+    if (!ref || tam <= 0) return { erro: "Selecione uma tesoura de referência e informe o tamanho desejado." };
     const precoProporcional =
-      Math.round((Number(ref.preco) / Number(ref.comprimento_referencia)) * tamanho * 100) / 100;
+      Math.round((Number(ref.preco) / Number(ref.comprimento_referencia)) * tam * 100) / 100;
     setItens((atual) => [
       ...atual,
       {
         chave: proximaChave.current++,
         composicao_id: null,
-        nome: `Tesoura ${tamanho}M de vão livre (calculada proporcionalmente a partir da ${ref.nome})`,
+        nome:
+          `Tesoura ${tam}M de vão livre (calculada proporcionalmente a partir da ${ref.nome})` +
+          (sufixoNome ? " — " + sufixoNome : ""),
         unidade: "PÇ",
         papel: "TESOURA",
-        quantidade: qtd,
+        quantidade,
         preco_unitario: precoProporcional,
         secao: "estrutura",
+        ...(origemTrapezio ? { origemTrapezio: true } : {}),
       },
     ]);
+    return { erro: null };
+  }
+
+  function adicionarTesouraProporcional() {
+    const { erro } = inserirTesouraProporcional({
+      refId: tesouraRefId, tamanho: tesouraTamanho, qtd: tesouraQtd,
+    });
+    if (erro) {
+      setErro(erro);
+      return;
+    }
     setTesouraRefId("");
     setTesouraTamanho("");
     setTesouraQtd("1");
     setErro("");
   }
 
-  function adicionarPilarLaje() {
-    const pilar = composicoes.find((c) => String(c.id) === String(pilarLajeId));
-    const qtd = Math.max(1, Number(pilarLajeQtd) || 1);
-    if (!pilar) {
-      setErro("Selecione o pilar da laje/mezanino.");
+  // Gera uma tesoura por pórtico do trapézio numa tacada só — ação manual e
+  // revisável (não um useEffect silencioso), igual ao resto do sistema trata
+  // tesoura hoje. Clicar de novo (ex.: depois de mudar o vão do fundo)
+  // refaz do zero em vez de duplicar, graças à flag "origemTrapezio".
+  function gerarTesourasDoTrapezio() {
+    if (!trapezioAtivo || !tesouraRefId) {
+      setErro("Ative o modo trapézio e escolha a tesoura de referência antes de gerar em lote.");
       return;
     }
+    const posicoes = posicoesDosPorticos(comprimento, numeroVaos);
+    if (!posicoes) {
+      setErro("Informe o comprimento antes de gerar as tesouras do trapézio.");
+      return;
+    }
+    setItens((atual) => atual.filter((i) => !i.origemTrapezio));
+    let algumErro = null;
+    posicoes.forEach((pos, i) => {
+      const vaoAtual = vaoNaPosicao(pos, comprimento, vao, vaoFundo);
+      const { erro } = inserirTesouraProporcional({
+        refId: tesouraRefId,
+        tamanho: vaoAtual,
+        qtd: 1,
+        sufixoNome: `pórtico ${i + 1}/${posicoes.length}`,
+        origemTrapezio: true,
+      });
+      if (erro) algumErro = erro;
+    });
+    setErro(algumErro || "");
+    if (!algumErro) notificar(`${posicoes.length} tesouras do trapézio geradas.`);
+  }
+
+  // Pilar avulso: calcula na hora via calcular_pilar() — o mesmo motor do
+  // pilar automático — em vez de escolher um tamanho pronto do catálogo.
+  // Usado tanto pelo bloco genérico (seção Estrutura) quanto pelo bloco de
+  // pilar da laje/mezanino; os dois só mudam pé-direito/vão/nível/seção.
+  async function adicionarPilarCalculado({ pe, vaoP, comLaje, nivel, qtd, secao, limpar }) {
+    const peN = Number(String(pe).replace(",", "."));
+    const vaoN = Number(String(vaoP).replace(",", "."));
+    const quantidade = Math.max(1, Number(qtd) || 1);
+    if (!peN || peN <= 0 || !vaoN || vaoN <= 0) {
+      setErro("Informe o pé-direito livre e o vão do pilar.");
+      return;
+    }
+    const { data, error } = await supabase.rpc("calcular_pilar", {
+      pe_direito_input: peN,
+      vao_input: vaoN,
+      com_laje_input: comLaje,
+      ...(nivel && nivel !== "AUTO" ? { nivel_input: nivel } : {}),
+    });
+    if (error || !data || data.erro) {
+      setErro("Erro ao calcular o pilar: " + (error?.message || data?.erro || ""));
+      return;
+    }
+    if (data.aviso) notificar(data.aviso, "erro");
+    const platAlt = temPlatibanda ? Number(alturaPlatibanda) || 0 : 0;
+    const platEsp = temPlatibanda ? Number(espessuraPlatibanda) || 0 : 0;
     setItens((atual) => {
       const novos = [
         ...atual,
         {
           chave: proximaChave.current++,
-          composicao_id: pilar.id,
-          nome: pilar.nome,
-          unidade: pilar.unidade,
-          papel: pilar.papel,
-          quantidade: qtd,
-          preco_unitario: Number(pilar.preco) || 0,
-          secao: "laje",
+          composicao_id: null,
+          nome: nomePilar(data, peN, platAlt, "avulso"),
+          unidade: "PÇ",
+          papel: "PILAR",
+          quantidade,
+          preco_unitario: (Number(data.custo_total) || 0) + custoPlatibanda(data, platAlt, platEsp),
+          secao,
         },
       ];
-      // Pilar da laje também precisa de fundação (1 dia por pilar).
+      // Pilar avulso também precisa de fundação (1 dia por pilar), igual ao automático.
       return recalcularFundacao(novos);
     });
-    setPilarLajeId("");
-    setPilarLajeQtd("1");
     setErro("");
+    limpar();
   }
 
   function adicionarMontagemLaje() {
@@ -1744,31 +2076,49 @@ function OrcamentosGalpaoPageInterno() {
     areaCalculada && areaCalculada > 0
       ? (subtotalEstrutura * fatorMargem) / areaCalculada
       : null;
+  // Laje: pela área das lajes informadas (1ª + 2ª). Sem área informada (só
+  // as vigas, ex.: laje de coberta), pela área da planta — é a área que
+  // as vigas cobrem.
+  const areaLajeTotal =
+    areaLajeNumerica + (temSegundaLaje ? Number(areaLaje2) || 0 : 0);
+  const areaDivisorLaje = areaLajeTotal > 0 ? areaLajeTotal : areaCalculada || 0;
   const valorPorM2Laje =
-    itensLaje.length > 0 && areaLajeNumerica > 0
-      ? (subtotalLaje * fatorMargem) / areaLajeNumerica
+    itensLaje.length > 0 && subtotalLaje > 0 && areaDivisorLaje > 0
+      ? (subtotalLaje * fatorMargem) / areaDivisorLaje
       : null;
-  // Valor/m2 FINAL: o que o cliente paga por m2 depois do desconto. Os
-  // valores por secao acima continuam sem desconto, porque servem para
-  // conferir a composicao; este aqui e o numero da negociacao.
-  const areaTotalOrcamento =
-    (areaCalculada || 0) > 0 ? areaCalculada : areaLajeNumerica;
-  const valorPorM2Final =
-    areaTotalOrcamento > 0 ? totalFinal / areaTotalOrcamento : null;
+  // Valor/m² do orçamento = SOMA das seções (estrutura + laje), como o
+  // Murilo negocia: "galpão R$ X/m² + laje R$ Y/m²". O desconto entra na
+  // mesma proporção do total (antes, a linha de baixo dividia o total com
+  // laje pela área da planta e não batia com o valor da estrutura).
+  const fatorDesconto = totalComMargem > 0 ? totalFinal / totalComMargem : 1;
+  const somaPorM2 =
+    valorPorM2 !== null || valorPorM2Laje !== null
+      ? (valorPorM2 || 0) + (valorPorM2Laje || 0)
+      : null;
+  const somaPorM2ComDesconto = somaPorM2 !== null ? somaPorM2 * fatorDesconto : null;
+  const textoAreaLaje =
+    areaLajeTotal > 0
+      ? `÷ ${areaLajeTotal.toLocaleString("pt-BR")}m² de laje`
+      : `÷ ${(areaCalculada || 0).toLocaleString("pt-BR")}m² da planta — laje sem área informada`;
 
   // ---------- Validação de coerência: nº de vãos x comprimento ----------
+  // Nº de vãos diferente da sugestão é VÁLIDO (cliente escolhe a medida do
+  // vão): o galpão passa a ter vãos iguais e TODAS as peças seguem isso.
+  // O aviso só deixa claro qual medida cada vão ficou.
   const avisoVaos = (() => {
     const nV = Number(numeroVaos) || 0;
-    if (!comprimento || nV <= 0) return null;
+    if (!comprimento || nV <= 0 || !modulos) return null;
     const d = decomporComprimentoEmModulos(comprimento);
-    if (!d) return null;
-    const vaosPeloComprimento = d.vaos5 + d.vaos6;
+    const vaosPeloComprimento = d ? d.vaos5 + d.vaos6 : 0;
     if (vaosPeloComprimento === nV) return null;
-    const comp =
-      [d.vaos5 > 0 ? `${d.vaos5} × 5m` : null, d.vaos6 > 0 ? `${d.vaos6} × 6m` : null]
-        .filter(Boolean)
-        .join(" + ");
-    return `Pelo comprimento de ${comprimento}m, o galpão fecha com ${vaosPeloComprimento} vãos (${comp}) — você informou ${nV}. Confira antes de lançar as peças.`;
+    const sugestao = d
+      ? ` (a sugestão pelo comprimento seria ${vaosPeloComprimento} vãos: ` +
+        [d.vaos5 > 0 ? `${d.vaos5} × 5m` : null, d.vaos6 > 0 ? `${d.vaos6} × 6m` : null]
+          .filter(Boolean)
+          .join(" + ") +
+        ")"
+      : "";
+    return `${nV} vãos de ${fmtM(modulos[0].tamanho)} cada — pilares, tesouras, terças, vigas de travamento e de laje seguem essa medida${sugestao}.`;
   })();
 
   // ---------- CHECKLIST UNIFICADO DA ESTRUTURA ----------
@@ -1816,8 +2166,7 @@ function OrcamentosGalpaoPageInterno() {
       }));
     }
     if (!vao || !comprimento) return [];
-    const dCheck = decomporComprimentoEmModulos(comprimento);
-    const nV = Number(numeroVaos) || (dCheck ? dCheck.vaos5 + dCheck.vaos6 : 0);
+    const nV = nVaos;
     const G = totalGalpoes;
     const somaQtd = (filtro) =>
       itens.filter(filtro).reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
@@ -1900,7 +2249,7 @@ function OrcamentosGalpaoPageInterno() {
     if (conferenciaTercas) {
       for (const l of conferenciaTercas.linhas) {
         linhas.push({
-          rotulo: `Terças de ${l.medida}m`,
+          rotulo: `Terças de ${fmtM(l.medida)}`,
           detalhe: `${conferenciaTercas.totalPorVao}/vão × ${l.vaos} vão(s)`,
           necessario: l.necessarias,
           lancado: l.lancadas,
@@ -1908,6 +2257,23 @@ function OrcamentosGalpaoPageInterno() {
           texto: `${fmtNum(l.lancadas)} de ${fmtNum(l.necessarias)}`,
         });
       }
+    }
+
+    // Vigas de travamento: só entra na conferência quando a caixinha está
+    // marcada — muitos galpões (largura < 12m) não usam.
+    if (temTravamento && nV > 0) {
+      const linhasTrav = totalGalpoes + 1;
+      const porVaoTrav = travamentoDuplo ? 2 : 1;
+      const nec = nV * linhasTrav * porVaoTrav;
+      const lan = somaQtd((i) => i.papel === "VIGA_TRAVAMENTO");
+      linhas.push({
+        rotulo: "Vigas de travamento",
+        detalhe: `${nV} vão(s) × ${linhasTrav} linha(s)${porVaoTrav > 1 ? " × 2 por vão" : ""}`,
+        necessario: nec,
+        lancado: lan,
+        ok: lan >= nec,
+        texto: `${fmtNum(lan)} de ${fmtNum(nec)}`,
+      });
     }
 
     // Telha: área total x (1 + perda%)
@@ -2011,7 +2377,12 @@ function OrcamentosGalpaoPageInterno() {
           conferenciaVigasLaje.lancadas >= conferenciaVigasLaje.qtd;
         linhas.push({
           rotulo: "Vigas da laje",
-          detalhe: valorM3 > 0 ? `linhas de pilar na laje` : `falta o valor do m³`,
+          detalhe:
+            valorM3 > 0
+              ? conferenciaVigasLaje.doisNiveis
+                ? `linhas de pilar nos 2 níveis`
+                : `linhas de pilar na laje`
+              : `falta o valor do m³`,
           necessario: conferenciaVigasLaje.qtd,
           lancado: conferenciaVigasLaje.lancadas,
           ok: qtdOk && valorM3 > 0,
@@ -2093,10 +2464,11 @@ function OrcamentosGalpaoPageInterno() {
     ["travamento_duplo",     travamentoDuplo,   setTravamentoDuplo,   false,   "bool"],
     ["travamento_valor_m3",  travamentoValorM3, setTravamentoValorM3, "1300",  "num"],
     ["viga_valor_m3",        vigaValorM3,       setVigaValorM3,       "",      "num"],
+    ["viga_pct_vao",         vigaPctVao,        setVigaPctVao,        "10",    "num"],
     ["viga_laje_avulsa",     temVigaLajeAvulsa, setTemVigaLajeAvulsa, false,   "bool"],
     ["altura_laje",          alturaLaje,        setAlturaLaje,        "3.50",  "num"],
     ["tem_segunda_laje",     temSegundaLaje,    setTemSegundaLaje,    false,   "bool"],
-    ["altura_laje2",         alturaLaje2,       setAlturaLaje2,       "7.00",  "num"],
+    ["altura_laje2",         alturaLaje2,       setAlturaLaje2,       "",      "num"],
     ["area_laje2",           areaLaje2,         setAreaLaje2,         "",      "num"],
     ["tipo_laje2_id",        tipoLajeId2,       setTipoLajeId2,       "",      "num"],
     ["tem_platibanda",       temPlatibanda,     setTemPlatibanda,     false,   "bool"],
@@ -2141,6 +2513,7 @@ function OrcamentosGalpaoPageInterno() {
     setClienteId("");
     setModeloId("");
     setVao("");
+    setVaoFundo("");
     setComprimento("");
     setPeDireito("");
     // todas as opções voltam ao padrão pela lista OPCOES
@@ -2153,7 +2526,14 @@ function OrcamentosGalpaoPageInterno() {
     setTelhaId("");
     setAreaLaje("");
     setTipoLajeId("");
-    setPilarLajeId("");
+    setPilarAvulsoPe("");
+    setPilarAvulsoVao("");
+    setPilarAvulsoComLaje(false);
+    setPilarAvulsoNivel("AUTO");
+    setPilarAvulsoQtd("1");
+    setPilarLajePe("");
+    setPilarLajeVao("");
+    setPilarLajeNivel("AUTO");
     setPilarLajeQtd("1");
     setMontagemLajeQtd("");
     setDiasValidade("10");
@@ -2192,6 +2572,7 @@ function OrcamentosGalpaoPageInterno() {
     setClienteId(String(orcamento.cliente_id || ""));
     setModeloId(orcamento.modelo_id ? String(orcamento.modelo_id) : "");
     setVao(orcamento.vao ? String(orcamento.vao) : "");
+    setVaoFundo(orcamento.vao_fundo ? String(orcamento.vao_fundo) : "");
     setComprimento(orcamento.comprimento ? String(orcamento.comprimento) : "");
     setPeDireito(orcamento.pe_direito ? String(orcamento.pe_direito) : "");
     // Escolhas salvas: restauradas ANTES dos itens, para os cálculos
@@ -2367,6 +2748,7 @@ function OrcamentosGalpaoPageInterno() {
           numero_galpoes_germinados_input: Math.max(0, Number(numeroGalpoesGerminados) || 0),
           larguras_galpoes_input: listaLarguras,
           area_laje_input: areaLaje ? Number(areaLaje) : null,
+          vao_fundo_input: trapezioAtivo ? Number(vaoFundo) : null,
         })
       : await supabase.rpc("criar_orcamento_galpao", {
           cliente_id_input: Number(clienteId),
@@ -2385,6 +2767,7 @@ function OrcamentosGalpaoPageInterno() {
           numero_galpoes_germinados_input: Math.max(0, Number(numeroGalpoesGerminados) || 0),
           larguras_galpoes_input: listaLarguras,
           area_laje_input: areaLaje ? Number(areaLaje) : null,
+          vao_fundo_input: trapezioAtivo ? Number(vaoFundo) : null,
         });
 
     if (error) {
@@ -2496,12 +2879,38 @@ function OrcamentosGalpaoPageInterno() {
   const orcamentosFiltrados = orcamentos.filter((o) => {
     const termo = termoBusca.trim().toLowerCase();
     if (!termo) return true;
+    // Telefone e CPF/CNPJ comparam só os números (digitar "82 98181" ou
+    // "43.926" acha do mesmo jeito) — ajuda com clientes de nome repetido.
+    const soDigitos = termo.replace(/\D/g, "");
+    const bateNumero = (v) =>
+      soDigitos.length >= 3 && String(v || "").replace(/\D/g, "").includes(soDigitos);
     return (
       o.clientes?.nome?.toLowerCase().includes(termo) ||
       o.titulo?.toLowerCase().includes(termo) ||
-      String(o.codigo).includes(termo)
+      String(o.codigo).includes(termo) ||
+      bateNumero(o.clientes?.telefone) ||
+      bateNumero(o.clientes?.cpf_cnpj)
     );
   });
+
+  // Paginação (em cima do resultado da busca)
+  const totalPaginas = Math.max(1, Math.ceil(orcamentosFiltrados.length / porPagina));
+  const paginaAtual = Math.min(pagina, totalPaginas); // ex.: busca reduziu a lista
+  const inicioPagina = (paginaAtual - 1) * porPagina;
+  const orcamentosDaPagina = orcamentosFiltrados.slice(inicioPagina, inicioPagina + porPagina);
+  // Números de página a mostrar: primeira, última e 2 vizinhas da atual
+  const numerosPagina = [];
+  for (let p = 1; p <= totalPaginas; p++) {
+    if (p === 1 || p === totalPaginas || Math.abs(p - paginaAtual) <= 2) numerosPagina.push(p);
+    else if (numerosPagina[numerosPagina.length - 1] !== "…") numerosPagina.push("…");
+  }
+  function mudarPorPagina(n) {
+    setPorPagina(n);
+    setPagina(1);
+    try {
+      window.localStorage.setItem("orcamentos-galpao-por-pagina", String(n));
+    } catch {}
+  }
 
   const campoClasse =
     "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
@@ -2602,7 +3011,37 @@ function OrcamentosGalpaoPageInterno() {
             const bloco = alvo.closest("[data-bloco]")?.getAttribute("data-bloco");
             if (bloco === "peca") adicionarItem();
             else if (bloco === "tesoura") adicionarTesouraProporcional();
-            else if (bloco === "pilar-laje") adicionarPilarLaje();
+            else if (bloco === "pilar-avulso")
+              adicionarPilarCalculado({
+                pe: pilarAvulsoPe,
+                vaoP: pilarAvulsoVao,
+                comLaje: pilarAvulsoComLaje,
+                nivel: pilarAvulsoNivel,
+                qtd: pilarAvulsoQtd,
+                secao: "estrutura",
+                limpar: () => {
+                  setPilarAvulsoPe("");
+                  setPilarAvulsoVao("");
+                  setPilarAvulsoComLaje(false);
+                  setPilarAvulsoNivel("AUTO");
+                  setPilarAvulsoQtd("1");
+                },
+              });
+            else if (bloco === "pilar-laje")
+              adicionarPilarCalculado({
+                pe: pilarLajePe,
+                vaoP: pilarLajeVao,
+                comLaje: true,
+                nivel: pilarLajeNivel,
+                qtd: pilarLajeQtd,
+                secao: "laje",
+                limpar: () => {
+                  setPilarLajePe("");
+                  setPilarLajeVao("");
+                  setPilarLajeNivel("AUTO");
+                  setPilarLajeQtd("1");
+                },
+              });
             else if (bloco === "montagem-laje") adicionarMontagemLaje();
             else if (bloco === "viga-laje") adicionarVigaLaje();
           }}
@@ -2697,7 +3136,11 @@ function OrcamentosGalpaoPageInterno() {
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
               <div>
                 <label className={labelClasse}>
-                  {totalGalpoes > 1 ? "Largura galpão 1 (m)" : "Largura do galpão (m)"}
+                  {trapezioAtivo
+                    ? "Vão na frente (m)"
+                    : totalGalpoes > 1
+                    ? "Largura galpão 1 (m)"
+                    : "Largura do galpão (m)"}
                 </label>
                 <input
                   type="text"
@@ -2771,6 +3214,50 @@ function OrcamentosGalpaoPageInterno() {
                   className={campoClasse}
                 />
               </div>
+            </div>
+          )}
+
+          {modeloId && totalGalpoes <= 1 && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={vaoFundo !== ""}
+                  onChange={(e) => {
+                    descongelarLista();
+                    setVaoFundo(e.target.checked ? (vao || "") : "");
+                  }}
+                  className="h-4 w-4"
+                />
+                Galpão trapezoidal — vão diferente na frente e no fundo
+              </label>
+              {vaoFundo !== "" && (
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label className={labelClasse}>Vão no fundo (m)</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={vaoFundo}
+                      onChange={(e) => { descongelarLista(); aoDigitarDecimal(setVaoFundo)(e); }}
+                      placeholder="Ex: 16,5"
+                      className={campoClasse}
+                    />
+                  </div>
+                  {trapezioAtivo && (
+                    <p className="col-span-2 sm:col-span-3 text-[11px] text-slate-500 self-end pb-2">
+                      Cada pórtico (pilar + tesoura) ao longo do comprimento vai ter seu próprio vão,
+                      interpolado entre {vao}m e {vaoFundo}m. Pilares são gerados automaticamente;
+                      tesouras precisam do botão &quot;Gerar tesouras do trapézio&quot; mais abaixo.
+                    </p>
+                  )}
+                </div>
+              )}
+              {avisoTrapezio && (
+                <p className="mt-2 text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1">
+                  {avisoTrapezio}
+                </p>
+              )}
             </div>
           )}
 
@@ -2882,8 +3369,8 @@ function OrcamentosGalpaoPageInterno() {
           )}
 
           {modeloId && avisoVaos && (
-            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 mb-3">
-              ⚠ {avisoVaos}
+            <p className="text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded px-2 py-1.5 mb-3">
+              {avisoVaos}
             </p>
           )}
           {modeloId && totalGalpoes > 1 && (
@@ -2934,7 +3421,7 @@ function OrcamentosGalpaoPageInterno() {
               </div>
               <div>
                 <p className="text-xs text-emerald-700">
-                  {itensLaje.length > 0 ? "Valor/m² estrutura (sem laje)" : "Valor por m² (atual)"}
+                  {itensLaje.length > 0 ? "Valor/m² estrutura" : "Valor por m² (atual)"}
                 </p>
                 <p className="text-lg font-semibold text-emerald-900">
                   {valorPorM2 !== null ? formatarMoeda(valorPorM2) : "-"}
@@ -2943,15 +3430,15 @@ function OrcamentosGalpaoPageInterno() {
               {itensLaje.length > 0 && (
                 <>
                   <div>
-                    <p className="text-xs text-emerald-700">Área da laje/mezanino</p>
+                    <p className="text-xs text-emerald-700">Valor/m² laje</p>
                     <p className="text-lg font-semibold text-emerald-900">
-                      {areaLajeNumerica > 0 ? `${areaLajeNumerica.toLocaleString("pt-BR")} m²` : "-"}
+                      {valorPorM2Laje !== null ? formatarMoeda(valorPorM2Laje) : "-"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-emerald-700">Valor/m² da laje</p>
+                    <p className="text-xs text-emerald-700">Soma (estrutura + laje)</p>
                     <p className="text-lg font-semibold text-emerald-900">
-                      {valorPorM2Laje !== null ? formatarMoeda(valorPorM2Laje) : "-"}
+                      {somaPorM2 !== null ? formatarMoeda(somaPorM2) : "-"}
                     </p>
                   </div>
                 </>
@@ -3059,6 +3546,23 @@ function OrcamentosGalpaoPageInterno() {
                   desejado); vale para tamanhos próximos da referência — vãos muito maiores podem
                   exigir seção estrutural diferente.
                 </p>
+                {trapezioAtivo && (
+                  <div className="mt-3 pt-3 border-t border-slate-200">
+                    <button
+                      type="button"
+                      onClick={gerarTesourasDoTrapezio}
+                      disabled={!tesouraRefId}
+                      className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
+                    >
+                      Gerar tesouras do trapézio ({posicoesDosPorticos(comprimento, numeroVaos)?.length || 0} pórticos)
+                    </button>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Usa a tesoura de referência escolhida acima e gera uma peça por pórtico, com o
+                      vão de cada um interpolado entre {vao || "?"}m e {vaoFundo}m. Clicar de novo
+                      substitui as que já foram geradas em vez de duplicar.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3106,6 +3610,32 @@ function OrcamentosGalpaoPageInterno() {
                   </span>
                 )}
               </div>
+              {/* Galpão editado: nem todo galpão tem coberta de telha (ex.: laje
+                  como coberta) — calha e capote entram só se marcados. */}
+              {tipoSelecionado === "editado" && (
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  <p className="text-xs font-medium text-slate-600 mb-1">
+                    Entra no orçamento (galpão editado):
+                  </p>
+                  <div className="flex flex-wrap gap-4">
+                    {["CALHA FIBRA", "CAPOTE"].map((nomeBase) => (
+                      <label key={nomeBase} className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={itens.some((i) => i.nome === nomeBase)}
+                          onChange={(e) => alternarItemBase(nomeBase, e.target.checked)}
+                          className="h-4 w-4"
+                        />
+                        {nomeBase === "CALHA FIBRA" ? "Calha" : "Capote"}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Desmarcado, o item sai da lista e não volta sozinho. Marcado de novo, entra já
+                    com a quantidade calculada pelas medidas.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -3193,6 +3723,80 @@ function OrcamentosGalpaoPageInterno() {
               >
                 Adicionar peça
               </button>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-3 mb-3">
+              <p className="text-xs font-medium text-slate-600 mb-2">
+                Pilar calculado (avulso) — pé-direito e vão próprios, fora da grade automática
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2" data-bloco="pilar-avulso">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Pé-direito (m)"
+                  value={pilarAvulsoPe}
+                  onChange={aoDigitarDecimal(setPilarAvulsoPe)}
+                  className={campoClasse}
+                />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Vão (m)"
+                  value={pilarAvulsoVao}
+                  onChange={aoDigitarDecimal(setPilarAvulsoVao)}
+                  className={campoClasse}
+                />
+                <select
+                  value={pilarAvulsoNivel}
+                  onChange={(e) => setPilarAvulsoNivel(e.target.value)}
+                  className={campoClasse}
+                >
+                  {NIVEIS_PILAR.map((n) => (
+                    <option key={n.valor} value={n.valor}>{n.rotulo}</option>
+                  ))}
+                </select>
+                <label className="flex items-center gap-1.5 text-xs text-slate-600 px-1">
+                  <input
+                    type="checkbox"
+                    checked={pilarAvulsoComLaje}
+                    onChange={(e) => setPilarAvulsoComLaje(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Com laje
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Qtd."
+                  value={pilarAvulsoQtd}
+                  onChange={(e) => setPilarAvulsoQtd(e.target.value)}
+                  className={campoClasse}
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    adicionarPilarCalculado({
+                      pe: pilarAvulsoPe,
+                      vaoP: pilarAvulsoVao,
+                      comLaje: pilarAvulsoComLaje,
+                      nivel: pilarAvulsoNivel,
+                      qtd: pilarAvulsoQtd,
+                      secao: "estrutura",
+                      limpar: () => {
+                        setPilarAvulsoPe("");
+                        setPilarAvulsoVao("");
+                        setPilarAvulsoComLaje(false);
+                        setPilarAvulsoNivel("AUTO");
+                        setPilarAvulsoQtd("1");
+                      },
+                    })
+                  }
+                  disabled={!pilarAvulsoPe || !pilarAvulsoVao}
+                  className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
+                >
+                  Adicionar pilar
+                </button>
+              </div>
             </div>
             {sugestaoPilarAtiva && (
               <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mb-2 inline-block">
@@ -3345,27 +3949,51 @@ function OrcamentosGalpaoPageInterno() {
                         </div>
                       </div>
                       <p className="mt-2 text-xs text-slate-500">
-                        A 2ª laje entra com as próprias vigas. Ex.: uma a 3,50m e outra a
-                        7,00m. Confira se o pé-direito comporta as duas.
+                        A 2ª laje entra com as próprias vigas, no topo dos pilares: a altura
+                        acompanha o pé-direito sozinha. Se o 2º nível for em outra altura,
+                        digite aqui — aí o sistema para de mexer.
                       </p>
+                      {Number(alturaLaje2) > 0 &&
+                        Number(peDireito) > 0 &&
+                        Number(alturaLaje2) < Number(peDireito) - 0.01 && (
+                          <p className="mt-1 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
+                            O 2º nível ({alturaLaje2}m) está abaixo do pé-direito ({peDireito}m): os
+                            pilares passam da laje de cima (no desenho parece platibanda). Se a laje
+                            é a coberta, use a altura do pé-direito.
+                          </p>
+                        )}
                     </>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2" data-bloco="pilar-laje">
+                <p className="text-xs text-slate-500 mb-1">
+                  Pilar da laje/mezanino (quando necessário) — calculado na hora, com laje sempre marcada:
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-2" data-bloco="pilar-laje">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Pé-direito (m)"
+                    value={pilarLajePe}
+                    onChange={aoDigitarDecimal(setPilarLajePe)}
+                    className={campoClasse}
+                  />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Vão (m)"
+                    value={pilarLajeVao}
+                    onChange={aoDigitarDecimal(setPilarLajeVao)}
+                    className={campoClasse}
+                  />
                   <select
-                    value={pilarLajeId}
-                    onChange={(e) => setPilarLajeId(e.target.value)}
-                    className={campoClasse + " sm:col-span-2"}
+                    value={pilarLajeNivel}
+                    onChange={(e) => setPilarLajeNivel(e.target.value)}
+                    className={campoClasse}
                   >
-                    <option value="">Pilar da laje (quando necessário)</option>
-                    {composicoes
-                      .filter((c) => c.papel === "PILAR")
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.nome} — {formatarMoeda(p.preco)}
-                        </option>
-                      ))}
+                    {NIVEIS_PILAR.map((n) => (
+                      <option key={n.valor} value={n.valor}>{n.rotulo}</option>
+                    ))}
                   </select>
                   <input
                     type="number"
@@ -3377,8 +4005,23 @@ function OrcamentosGalpaoPageInterno() {
                   />
                   <button
                     type="button"
-                    onClick={adicionarPilarLaje}
-                    disabled={!pilarLajeId}
+                    onClick={() =>
+                      adicionarPilarCalculado({
+                        pe: pilarLajePe,
+                        vaoP: pilarLajeVao,
+                        comLaje: true,
+                        nivel: pilarLajeNivel,
+                        qtd: pilarLajeQtd,
+                        secao: "laje",
+                        limpar: () => {
+                          setPilarLajePe("");
+                          setPilarLajeVao("");
+                          setPilarLajeNivel("AUTO");
+                          setPilarLajeQtd("1");
+                        },
+                      })
+                    }
+                    disabled={!pilarLajePe || !pilarLajeVao}
                     className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
                   >
                     Adicionar pilar
@@ -3432,13 +4075,36 @@ function OrcamentosGalpaoPageInterno() {
                     </span>
                   )}
                 </div>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <label className="text-xs text-slate-600">Altura da viga (% do vão):</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="10"
+                    value={vigaPctVao}
+                    onChange={(e) => { descongelarLista(); aoDigitarDecimal(setVigaPctVao)(e); }}
+                    className={`${campoClasse} max-w-[80px]`}
+                  />
+                  <span className="text-xs text-slate-500">
+                    {Number(vao) > 0
+                      ? (() => {
+                          const tr = Math.ceil(Number(vao) / 10);
+                          const vv = Math.round((Number(vao) / tr) * 100) / 100;
+                          return `vão da viga ${fmtM(vv)} × ${pctVigaTxt} = altura ${fmtM(
+                            alturaVigaLaje(vv, vigaPctVao)
+                          )} (arredonda pra cima de 5 em 5cm) — vale pros 2 níveis`;
+                        })()
+                      : "normalmente de 7 a 10% — vale pros 2 níveis"}
+                  </span>
+                </div>
                 <p className="text-xs text-slate-500 mb-2">
                   A viga da laje entra automática no orçamento
                   {Number(vao) > 10
                     ? " já dividida (vão = metade da largura, por causa do pilar no meio)"
                     : ""}
-                  , altura = vão ÷ 10, uma por linha de pilar que a laje cobre. Você edita
-                  quantidade e preço direto na linha da viga, na lista abaixo.
+                  , altura = {pctVigaTxt} do vão (campo acima), uma por linha de pilar que a laje
+                  cobre. A descrição de cada viga mostra o nível (1º ou topo dos pilares) e o %
+                  usado. Quantidade e preço você edita direto na linha, na lista abaixo.
                 </p>
                 {conferenciaVigasLaje && (
                   <div
@@ -3463,7 +4129,7 @@ function OrcamentosGalpaoPageInterno() {
                 <p className="text-xs text-slate-400 mb-2">
                   Sugestão automática: largura fixa de 0,25m; vão (comprimento da viga) = largura
                   do galpão{temPilarNoMeioDaLaje ? " ÷ 2 (há pilar de laje no meio)" : ""} — com
-                  pilar no meio, a viga vira metade e a altura recalcula. Altura = vão ÷ 10
+                  pilar no meio, a viga vira metade e a altura recalcula. Altura = {pctVigaTxt} do vão
                   arredondada ao múltiplo de 5cm (pré-dimensionamento de viga biapoiada usado com
                   a NBR 6118 — a norma em si não fixa pré-dimensionamento; o projeto estrutural
                   final confirma). Tudo editável.
@@ -3760,7 +4426,7 @@ function OrcamentosGalpaoPageInterno() {
                         <td colSpan={4} className="py-1 text-right text-xs font-medium text-emerald-700">
                           Com BDI ({margemNumerica}%)
                           {valorPorM2Laje !== null
-                            ? ` — ${formatarMoeda(valorPorM2Laje)}/m² (÷ ${areaLajeNumerica.toLocaleString("pt-BR")}m²)`
+                            ? ` — ${formatarMoeda(valorPorM2Laje)}/m² (${textoAreaLaje})`
                             : ""}
                         </td>
                         <td className="py-1 text-right font-semibold whitespace-nowrap">
@@ -3768,6 +4434,18 @@ function OrcamentosGalpaoPageInterno() {
                         </td>
                         <td></td>
                       </tr>
+                      {somaPorM2 !== null && valorPorM2 !== null && valorPorM2Laje !== null && (
+                        <tr className="border-t border-slate-300">
+                          <td colSpan={4} className="py-1.5 text-right text-xs font-semibold text-slate-700">
+                            Valor/m² do orçamento (estrutura {formatarMoeda(valorPorM2)} + laje{" "}
+                            {formatarMoeda(valorPorM2Laje)})
+                          </td>
+                          <td className="py-1.5 text-right font-bold whitespace-nowrap">
+                            {formatarMoeda(somaPorM2)}/m²
+                          </td>
+                          <td></td>
+                        </tr>
+                      )}
                     </>
                   )}
                 </tbody>
@@ -3793,9 +4471,18 @@ function OrcamentosGalpaoPageInterno() {
                   Área: <b className="text-slate-700">{areaCalculada.toLocaleString("pt-BR")} m²</b>
                 </span>
               )}
-              {valorPorM2 !== null && (
+              {somaPorM2 !== null && (
                 <span className="text-slate-500">
-                  <b className="text-slate-700">{formatarMoeda(valorPorM2)}</b>/m²
+                  {valorPorM2Laje !== null ? (
+                    <>
+                      Estrutura {formatarMoeda(valorPorM2 || 0)} + laje {formatarMoeda(valorPorM2Laje)} ={" "}
+                      <b className="text-slate-700">{formatarMoeda(somaPorM2)}</b>/m²
+                    </>
+                  ) : (
+                    <>
+                      <b className="text-slate-700">{formatarMoeda(somaPorM2)}</b>/m²
+                    </>
+                  )}
                 </span>
               )}
               {checklistEstrutura.length > 0 && (
@@ -3899,14 +4586,17 @@ function OrcamentosGalpaoPageInterno() {
                 <span className="text-slate-500">Total do orçamento: </span>
                 <span className="font-semibold text-lg">{formatarMoeda(totalFinal)}</span>
               </p>
-              {valorPorM2Final !== null && (
+              {somaPorM2ComDesconto !== null && (
                 <p className="text-slate-500">
                   {descontoNumerico > 0 ? "Valor/m² com desconto: " : "Valor/m²: "}
-                  <b className="text-slate-700">{formatarMoeda(valorPorM2Final)}</b>
-                  <span className="text-xs text-slate-400">
-                    {" "}
-                    (÷ {areaTotalOrcamento.toLocaleString("pt-BR")} m²)
-                  </span>
+                  <b className="text-slate-700">{formatarMoeda(somaPorM2ComDesconto)}</b>
+                  {valorPorM2Laje !== null && (
+                    <span className="text-xs text-slate-400">
+                      {" "}
+                      (estrutura {formatarMoeda((valorPorM2 || 0) * fatorDesconto)} + laje{" "}
+                      {formatarMoeda(valorPorM2Laje * fatorDesconto)})
+                    </span>
+                  )}
                 </p>
               )}
               <p className="text-xs text-slate-400">Vendedor: {nomeUsuario}</p>
@@ -3992,10 +4682,16 @@ function OrcamentosGalpaoPageInterno() {
                     </div>
                   )}
                   {valorPorM2Laje !== null && (
-                    <div className="flex justify-between">
-                      <span>Valor/m² laje</span>
-                      <b>{formatarMoeda(valorPorM2Laje)}</b>
-                    </div>
+                    <>
+                      <div className="flex justify-between">
+                        <span>Valor/m² laje</span>
+                        <b>{formatarMoeda(valorPorM2Laje)}</b>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Soma (estrutura + laje)</span>
+                        <b>{formatarMoeda(somaPorM2)}</b>
+                      </div>
+                    </>
                   )}
                   <div className="flex justify-between border-t border-emerald-200 pt-0.5 mt-0.5">
                     <span>Total do orçamento</span>
@@ -4071,8 +4767,8 @@ function OrcamentosGalpaoPageInterno() {
         <input
           type="text"
           value={termoBusca}
-          onChange={(e) => setTermoBusca(e.target.value)}
-          placeholder="Pesquisar por cliente, título ou código..."
+          onChange={(e) => { setTermoBusca(e.target.value); setPagina(1); }}
+          placeholder="Pesquisar por cliente, telefone, CPF/CNPJ, título ou código..."
           className={campoClasse}
         />
         <button
@@ -4107,12 +4803,17 @@ function OrcamentosGalpaoPageInterno() {
                 <th className="px-4 py-2 font-medium"></th>
               </tr>
             </thead>
-            {orcamentosFiltrados.map((o) => (
+            {orcamentosDaPagina.map((o) => (
               <tbody key={o.id} className="border-t border-slate-100">
                 <tr>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-400">{o.codigo}</td>
-                  <td className="px-4 py-2 font-medium whitespace-nowrap">
-                    {o.clientes?.nome ?? "-"}
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    <span className="block font-medium">{o.clientes?.nome ?? "-"}</span>
+                    {(o.clientes?.telefone || o.clientes?.cpf_cnpj) && (
+                      <span className="block text-xs text-slate-400">
+                        {[o.clientes?.telefone, o.clientes?.cpf_cnpj].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2 max-w-xs" title={o.titulo}>
                     <span className="block truncate">{o.titulo || "-"}</span>
@@ -4135,75 +4836,38 @@ function OrcamentosGalpaoPageInterno() {
                     <BadgeStatus status={o.status === "recusado" ? "recusado" : estaVencido(o) ? "vencido" : o.status} />
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-3">
+                    <div className="flex items-center justify-end gap-1">
                       <button
                         onClick={() => setExpandidoId(expandidoId === o.id ? null : o.id)}
-                        className="text-slate-600 hover:text-slate-900"
+                        className="rounded p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                         title={expandidoId === o.id ? "Ocultar itens" : "Ver itens"}
                       >
                         {expandidoId === o.id ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
-                      <Link
-                        href={`/orcamentos-galpao/imprimir?codigo=${o.codigo}`}
-                        target="_blank"
-                        className="text-slate-600 hover:text-slate-900"
-                        title="Imprimir"
-                      >
-                        <Printer size={16} />
-                      </Link>
                       <button
-                        onClick={() => duplicarOrcamento(o)}
-                        className="text-slate-600 hover:text-slate-900"
-                        title="Duplicar (cria um novo a partir deste)"
+                        onClick={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          // sem espaço embaixo (últimas linhas), abre pra cima
+                          const cabeAbaixo = r.bottom + 300 < window.innerHeight;
+                          setMenuAcoes((atual) =>
+                            atual?.id === o.id
+                              ? null
+                              : {
+                                  id: o.id,
+                                  right: window.innerWidth - r.right,
+                                  ...(cabeAbaixo
+                                    ? { top: r.bottom + 4 }
+                                    : { bottom: window.innerHeight - r.top + 4 }),
+                                }
+                          );
+                        }}
+                        className="rounded p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                        title="Mais ações"
+                        aria-haspopup="menu"
+                        aria-expanded={menuAcoes?.id === o.id}
                       >
-                        <Copy size={16} />
+                        <MoreVertical size={16} />
                       </button>
-                      {o.status !== "aprovado" && o.status !== "recusado" && (
-                        <>
-                          {linkFollowUpWhatsApp(o) && (
-                            <a
-                              href={linkFollowUpWhatsApp(o)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-green-600 hover:text-green-800"
-                              title="Cobrar retorno no WhatsApp (mensagem pronta)"
-                            >
-                              <MessageCircle size={16} />
-                            </a>
-                          )}
-                          <button
-                            onClick={() => abrirEdicao(o)}
-                            className="text-emerald-700 hover:text-emerald-900"
-                            title="Editar"
-                          >
-                            <Pencil size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleConverter(o.id)}
-                            disabled={convertendoId === o.id}
-                            className="text-emerald-700 hover:text-emerald-900 disabled:opacity-50"
-                            title="Converter em venda"
-                          >
-                            <ShoppingCart size={16} />
-                          </button>
-                          <button
-                            onClick={() => abrirPerdido(o)}
-                            className="text-slate-400 hover:text-rose-600"
-                            title="Marcar como perdido (cliente não fechou)"
-                          >
-                            <XCircle size={16} />
-                          </button>
-                        </>
-                      )}
-                      {o.status === "recusado" && (
-                        <button
-                          onClick={() => reabrirOrcamento(o)}
-                          className="text-slate-500 hover:text-emerald-700"
-                          title={`Reabrir (volta para Pendente)${o.motivo_recusa ? ` — perdido por: ${o.motivo_recusa}` : ""}`}
-                        >
-                          <RotateCcw size={16} />
-                        </button>
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -4275,6 +4939,159 @@ function OrcamentosGalpaoPageInterno() {
           </table>
         )}
       </div>
+
+      {/* ---------- Paginação ---------- */}
+      {!loading && orcamentosFiltrados.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <span className="text-slate-500">
+            {inicioPagina + 1}–{Math.min(inicioPagina + porPagina, orcamentosFiltrados.length)} de{" "}
+            {orcamentosFiltrados.length} orçamentos
+          </span>
+          {totalPaginas > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPagina(paginaAtual - 1)}
+                disabled={paginaAtual <= 1}
+                className="rounded-lg border border-slate-300 px-2.5 py-1 text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+              >
+                Anterior
+              </button>
+              {numerosPagina.map((p, idx) =>
+                p === "…" ? (
+                  <span key={`r${idx}`} className="px-1 text-slate-400">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPagina(p)}
+                    aria-current={p === paginaAtual ? "page" : undefined}
+                    className={`min-w-[2rem] rounded-lg px-2 py-1 ${
+                      p === paginaAtual
+                        ? "bg-emerald-600 text-white font-semibold"
+                        : "border border-slate-300 text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+              <button
+                type="button"
+                onClick={() => setPagina(paginaAtual + 1)}
+                disabled={paginaAtual >= totalPaginas}
+                className="rounded-lg border border-slate-300 px-2.5 py-1 text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+              >
+                Próxima
+              </button>
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-slate-500">
+            Por página:
+            <select
+              value={porPagina}
+              onChange={(e) => mudarPorPagina(Number(e.target.value))}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+            >
+              {OPCOES_POR_PAGINA.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {/* ---------- Menu "⋯" de ações de um orçamento ---------- */}
+      {menuAcoes &&
+        (() => {
+          const o = orcamentos.find((x) => x.id === menuAcoes.id);
+          if (!o) return null;
+          const aberto = o.status !== "aprovado" && o.status !== "recusado";
+          const linkWhats = aberto ? linkFollowUpWhatsApp(o) : null;
+          const itemClasse =
+            "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50";
+          const fechar = () => setMenuAcoes(null);
+          return (
+            <>
+              <div className="fixed inset-0 z-[80]" onClick={fechar} />
+              <div
+                role="menu"
+                className="fixed z-[81] w-56 rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                style={{ top: menuAcoes.top, bottom: menuAcoes.bottom, right: menuAcoes.right }}
+              >
+                <Link
+                  href={`/orcamentos-galpao/imprimir?codigo=${o.codigo}`}
+                  target="_blank"
+                  onClick={fechar}
+                  className={itemClasse}
+                  role="menuitem"
+                >
+                  <Printer size={15} /> Imprimir
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => { fechar(); duplicarOrcamento(o); }}
+                  className={itemClasse}
+                  role="menuitem"
+                >
+                  <Copy size={15} /> Duplicar
+                </button>
+                {aberto && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => { fechar(); abrirEdicao(o); }}
+                      className={itemClasse}
+                      role="menuitem"
+                    >
+                      <Pencil size={15} className="text-emerald-700" /> Editar
+                    </button>
+                    {linkWhats && (
+                      <a
+                        href={linkWhats}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={fechar}
+                        className={itemClasse}
+                        role="menuitem"
+                      >
+                        <MessageCircle size={15} className="text-green-600" /> Cobrar retorno no WhatsApp
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => { fechar(); handleConverter(o.id); }}
+                      disabled={convertendoId === o.id}
+                      className={itemClasse}
+                      role="menuitem"
+                    >
+                      <ShoppingCart size={15} className="text-emerald-700" /> Converter em venda
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { fechar(); abrirPerdido(o); }}
+                      className={`${itemClasse} text-rose-700`}
+                      role="menuitem"
+                    >
+                      <XCircle size={15} /> Marcar como perdido
+                    </button>
+                  </>
+                )}
+                {o.status === "recusado" && (
+                  <button
+                    type="button"
+                    onClick={() => { fechar(); reabrirOrcamento(o); }}
+                    className={itemClasse}
+                    role="menuitem"
+                    title={o.motivo_recusa ? `Perdido por: ${o.motivo_recusa}` : undefined}
+                  >
+                    <RotateCcw size={15} /> Reabrir (volta para Pendente)
+                  </button>
+                )}
+              </div>
+            </>
+          );
+        })()}
 
       {/* ---------- Modal: marcar como perdido ---------- */}
       {perdidoAlvo && (

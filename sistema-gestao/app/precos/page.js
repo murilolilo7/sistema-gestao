@@ -12,9 +12,18 @@ function formatarMoeda(valor) {
   return Number(valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-const PAPEIS_SUGERIDOS = [
-  "TESOURA", "PILAR", "TERCA", "VIGA_TRAVAMENTO", "LAJE",
-  "TELHA", "CALHA", "CAPOTE", "MONTAGEM", "FUNDACAO",
+const PAPEIS_SUGERIDOS = ["PILAR", "TELHA", "CALHA", "CAPOTE", "MONTAGEM", "FUNDACAO"];
+
+// Terça, Laje, Tesoura, Viga de travamento, Poste, Capitel e Base Cálice
+// ganharam cartão próprio em Engenharia -> Cálculo de peças (receita, BDI,
+// preço sugerido, cadastrar/editar/excluir/desativar, tudo lá). Manter essas
+// peças editáveis aqui TAMBÉM criaria de novo duas telas pra mexer na mesma
+// peça — exatamente o problema que motivou reorganizar isso. Por isso somem
+// da lista abaixo; só Pilar (catálogo antigo, mantido por causa de orçamentos
+// já salvos) e os itens sem fórmula (Telha, Calha, Capote, Montagem,
+// Fundação) continuam aqui.
+const PAPEIS_GERENCIADOS_EM_ENGENHARIA = [
+  "TESOURA", "TERCA", "LAJE", "VIGA_TRAVAMENTO", "POSTE", "CAPITEL", "BASE_CALICE",
 ];
 
 function PrecosPage() {
@@ -25,7 +34,6 @@ function PrecosPage() {
   const [erro, setErro] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [salvandoId, setSalvandoId] = useState(null);
-  const [recalculando, setRecalculando] = useState(false);
   const [termoBusca, setTermoBusca] = useState("");
   const [secaoAberta, setSecaoAberta] = useState(null); // null | 'insumos' | 'maoDeObra' | 'composicoes'
   const [categoriaAberta, setCategoriaAberta] = useState(null); // qual papel está aberto dentro de Peças
@@ -61,15 +69,6 @@ function PrecosPage() {
     preco: "",
   });
 
-  // Receita (composição) expandida
-  const [receitaExpandidaId, setReceitaExpandidaId] = useState(null);
-  const [receitaItens, setReceitaItens] = useState([]);
-  const [carregandoReceita, setCarregandoReceita] = useState(false);
-  const [salvandoReceita, setSalvandoReceita] = useState(false);
-  const [novoItemTipo, setNovoItemTipo] = useState("insumo");
-  const [novoItemRefId, setNovoItemRefId] = useState("");
-  const [novoItemQtd, setNovoItemQtd] = useState("");
-
   function buscarInsumos() {
     return supabase.from("insumos").select("id, codigo, nome, unidade, valor_unitario").order("nome");
   }
@@ -82,7 +81,7 @@ function PrecosPage() {
   function buscarComposicoes() {
     return supabase
       .from("composicoes_galpao")
-      .select("id, codigo, nome, papel, unidade, custo, preco, bdi_pct, area_referencia, composicao_itens(quantidade, insumos(valor_unitario), mao_de_obra(valor_hora))")
+      .select("id, codigo, nome, papel, unidade, custo, preco, bdi_pct, area_referencia, ativo, composicao_itens(quantidade, insumos(valor_unitario), mao_de_obra(valor_hora))")
       .order("codigo");
   }
 
@@ -297,9 +296,52 @@ function PrecosPage() {
   }
 
   async function excluirComposicao(comp) {
+    // A FK de itens_orcamento_galpao/itens_venda pra composicoes_galpao é
+    // ON DELETE SET NULL — apagar uma peça já usada não bloqueia nem avisa
+    // sozinho, só faz esses itens virarem "Item removido" ao reabrir.
+    // Por isso checamos uso real ANTES de oferecer exclusão física.
+    const [resOrc, resVenda] = await Promise.all([
+      supabase
+        .from("itens_orcamento_galpao")
+        .select("id", { count: "exact", head: true })
+        .eq("composicao_id", comp.id),
+      supabase
+        .from("itens_venda")
+        .select("id", { count: "exact", head: true })
+        .eq("composicao_id", comp.id),
+    ]);
+    const usos = (resOrc.count || 0) + (resVenda.count || 0);
+
+    if (usos > 0) {
+      const ok = await confirmar({
+        titulo: "Peça já usada em orçamento/venda",
+        texto: `"${comp.nome}" já foi usada em ${usos} item(ns) real(is) — excluir faria esses itens perderem o nome/preço ao reabrir. Em vez de excluir, desative: ela some da lista de peças novas, mas continua existindo para os itens antigos.`,
+        confirmarTexto: "Desativar",
+        perigoso: true,
+      });
+      if (!ok) return;
+      setSalvandoId(comp.id);
+      setErro("");
+      setMensagem("");
+      const { error } = await supabase
+        .from("composicoes_galpao")
+        .update({ ativo: false })
+        .eq("id", comp.id);
+      if (error) {
+        setErro("Erro ao desativar: " + error.message);
+      } else {
+        notificar(`${comp.nome} desativada.`);
+        setComposicoes((atual) =>
+          atual.map((c) => (c.id === comp.id ? { ...c, ativo: false } : c))
+        );
+      }
+      setSalvandoId(null);
+      return;
+    }
+
     const ok = await confirmar({
       titulo: "Excluir peça?",
-      texto: `"${comp.nome}" será removida. Orçamentos que já usaram essa peça não são afetados — eles guardam o nome/valor de quando foram feitos.`,
+      texto: `"${comp.nome}" será removida definitivamente — ela nunca foi usada em nenhum orçamento ou venda.`,
       confirmarTexto: "Excluir",
       perigoso: true,
     });
@@ -313,7 +355,6 @@ function PrecosPage() {
     } else {
       notificar(`${comp.nome} excluída.`);
       setComposicoes((atual) => atual.filter((c) => c.id !== comp.id));
-      if (receitaExpandidaId === comp.id) setReceitaExpandidaId(null);
     }
     setSalvandoId(null);
   }
@@ -364,168 +405,13 @@ function PrecosPage() {
     setSalvandoId(null);
   }
 
-  async function recalcularTudo() {
-    const ok = await confirmar({
-      titulo: "Recalcular todas as peças?",
-      texto:
-        "O custo/preço de todas as peças com receita de insumos será atualizado com os valores atuais. Peças sem receita (Telha, Montagem, Fundação etc.) não são afetadas.",
-      confirmarTexto: "Recalcular",
+  const composicoesFiltradas = composicoes
+    .filter((c) => !PAPEIS_GERENCIADOS_EM_ENGENHARIA.includes(c.papel))
+    .filter((c) => {
+      const termo = termoBusca.trim().toLowerCase();
+      if (!termo) return true;
+      return c.nome.toLowerCase().includes(termo) || (c.papel || "").toLowerCase().includes(termo);
     });
-    if (!ok) return;
-    setRecalculando(true);
-    setErro("");
-    setMensagem("");
-    const { data, error } = await supabase.rpc("recalcular_todas_composicoes");
-    if (error) {
-      setErro("Erro ao recalcular: " + error.message);
-    } else {
-      notificar(`${data} composições recalculadas a partir dos insumos/mão de obra atuais.`);
-      const { data: novasComposicoes } = await buscarComposicoes();
-      if (novasComposicoes) setComposicoes(novasComposicoes);
-    }
-    setRecalculando(false);
-  }
-
-  // ---------- RECEITA DE UMA PEÇA ----------
-  function buscarReceita(composicaoId) {
-    return supabase
-      .from("composicao_itens")
-      .select(
-        "id, insumo_id, mao_de_obra_id, quantidade, insumos(nome, unidade, valor_unitario), mao_de_obra(funcao, valor_hora)"
-      )
-      .eq("composicao_produto_id", composicaoId);
-  }
-
-  async function alternarReceita(composicaoId) {
-    if (receitaExpandidaId === composicaoId) {
-      setReceitaExpandidaId(null);
-      return;
-    }
-    setErro("");
-    setMensagem("");
-    setCarregandoReceita(true);
-    setReceitaExpandidaId(composicaoId);
-    setNovoItemRefId("");
-    setNovoItemQtd("");
-    const { data, error } = await buscarReceita(composicaoId);
-    if (error) {
-      setErro("Erro ao carregar receita: " + error.message);
-      setReceitaItens([]);
-    } else {
-      setReceitaItens(
-        data.map((item) => ({
-          id: item.id,
-          insumo_id: item.insumo_id,
-          mao_de_obra_id: item.mao_de_obra_id,
-          quantidade: item.quantidade,
-          nome: item.insumos?.nome || item.mao_de_obra?.funcao || "?",
-          unidade: item.insumos?.unidade || "HORA",
-          valor_unitario: item.insumos?.valor_unitario ?? item.mao_de_obra?.valor_hora ?? 0,
-        }))
-      );
-    }
-    setCarregandoReceita(false);
-  }
-
-  function adicionarLinhaReceita() {
-    if (!novoItemRefId || novoItemQtd === "") {
-      setErro("Selecione o insumo/função e informe a quantidade.");
-      return;
-    }
-    setErro("");
-    if (novoItemTipo === "insumo") {
-      const insumo = insumos.find((i) => String(i.id) === String(novoItemRefId));
-      if (!insumo) return;
-      setReceitaItens((atual) => [
-        ...atual,
-        {
-          id: `novo-${Date.now()}`,
-          insumo_id: insumo.id,
-          mao_de_obra_id: null,
-          quantidade: Number(novoItemQtd) || 0,
-          nome: insumo.nome,
-          unidade: insumo.unidade,
-          valor_unitario: Number(insumo.valor_unitario) || 0,
-        },
-      ]);
-    } else {
-      const mdo = maoDeObra.find((m) => String(m.id) === String(novoItemRefId));
-      if (!mdo) return;
-      setReceitaItens((atual) => [
-        ...atual,
-        {
-          id: `novo-${Date.now()}`,
-          insumo_id: null,
-          mao_de_obra_id: mdo.id,
-          quantidade: Number(novoItemQtd) || 0,
-          nome: mdo.funcao,
-          unidade: "HORA",
-          valor_unitario: Number(mdo.valor_hora) || 0,
-        },
-      ]);
-    }
-    setNovoItemRefId("");
-    setNovoItemQtd("");
-  }
-
-  function removerLinhaReceita(id) {
-    setReceitaItens((atual) => atual.filter((item) => item.id !== id));
-  }
-
-  function atualizarQuantidadeReceita(id, valor) {
-    setReceitaItens((atual) =>
-      atual.map((item) => (item.id === id ? { ...item, quantidade: valor } : item))
-    );
-  }
-
-  async function salvarReceita(composicaoId) {
-    setSalvandoReceita(true);
-    setErro("");
-    setMensagem("");
-
-    const { error: erroDelete } = await supabase
-      .from("composicao_itens")
-      .delete()
-      .eq("composicao_produto_id", composicaoId);
-    if (erroDelete) {
-      setErro("Erro ao salvar receita: " + erroDelete.message);
-      setSalvandoReceita(false);
-      return;
-    }
-
-    if (receitaItens.length > 0) {
-      const payload = receitaItens.map((item) => ({
-        composicao_produto_id: composicaoId,
-        insumo_id: item.insumo_id,
-        mao_de_obra_id: item.mao_de_obra_id,
-        quantidade: Number(item.quantidade) || 0,
-      }));
-      const { error: erroInsert } = await supabase.from("composicao_itens").insert(payload);
-      if (erroInsert) {
-        setErro("Erro ao salvar receita: " + erroInsert.message);
-        setSalvandoReceita(false);
-        return;
-      }
-    }
-
-    const { error: erroRecalc } = await supabase.rpc("recalcular_composicao", {
-      composicao_id_input: composicaoId,
-    });
-    if (erroRecalc) {
-      setErro("Receita salva, mas houve erro ao recalcular o preço: " + erroRecalc.message);
-    } else {
-      notificar("Receita salva e o preço da peça foi recalculado.");
-      const { data } = await buscarComposicoes();
-      if (data) setComposicoes(data);
-    }
-    setSalvandoReceita(false);
-  }
-
-  const composicoesFiltradas = composicoes.filter((c) => {
-    const termo = termoBusca.trim().toLowerCase();
-    if (!termo) return true;
-    return c.nome.toLowerCase().includes(termo) || (c.papel || "").toLowerCase().includes(termo);
-  });
   const composicoesPorPapel = composicoesFiltradas.reduce((acc, c) => {
     const grupo = c.papel || "Sem categoria";
     if (!acc[grupo]) acc[grupo] = [];
@@ -957,23 +843,6 @@ function PrecosPage() {
       </div>
       )}
 
-      {souAdmin && (
-      <div className="mb-6">
-        <button
-          onClick={recalcularTudo}
-          disabled={recalculando}
-          className="rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
-        >
-          {recalculando ? "Recalculando..." : "Recalcular todas as peças a partir dos insumos/mão de obra acima"}
-        </button>
-        <p className="text-xs text-slate-400 mt-1">
-          Atualiza SOMENTE o custo de cada peça (soma da composição) — o preço de venda que você
-          definiu nunca é alterado. Peças sem composição (Telha, Calha, Capote, Montagem, Fundação e
-          peças incluídas manualmente) não são afetadas.
-        </p>
-      </div>
-      )}
-
       {/* COMPOSIÇÕES */}
       <button
         type="button"
@@ -988,6 +857,17 @@ function PrecosPage() {
       </button>
       {secaoAberta === "composicoes" && (
       <div>
+      {souAdmin && (
+      <p className="text-xs text-slate-500 mb-3 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+        Terça, Laje, Tesoura, Viga de travamento, Poste, Capitel e Base Cálice não aparecem mais
+        aqui embaixo — cadastrar, editar, desativar e excluir essas peças agora é só em{" "}
+        <Link href="/engenharia" className="text-emerald-700 hover:underline font-medium">
+          Engenharia → Cálculo de peças
+        </Link>
+        , pra não ter duas telas mexendo na mesma peça. Aqui em Preços fica só Pilar (catálogo
+        antigo, mantido por causa de orçamentos já salvos) e os itens sem fórmula.
+      </p>
+      )}
       <div className="flex justify-end mb-2">
         {souAdmin && (
         <button onClick={() => setMostrarFormComposicao((v) => !v)} className={botaoIncluir}>
@@ -1078,7 +958,6 @@ function PrecosPage() {
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600 text-left">
             <tr>
-              <th className="px-4 py-2 font-medium"></th>
               <th className="px-4 py-2 font-medium">Código</th>
               <th className="px-4 py-2 font-medium">Nome</th>
               <th className="px-4 py-2 font-medium">Custo</th>
@@ -1089,29 +968,26 @@ function PrecosPage() {
           {composicoesPorPapel[papel].map((c) => (
             <tbody key={c.id} className="border-t border-slate-100">
               <tr>
-                <td className="px-2 py-2">
-                  <button
-                    onClick={() => alternarReceita(c.id)}
-                    className="text-slate-500 hover:text-slate-900"
-                    title="Ver/editar receita (insumos e mão de obra)"
-                  >
-                    {receitaExpandidaId === c.id ? (
-                      <ChevronDown size={16} />
-                    ) : (
-                      <ChevronRight size={16} />
-                    )}
-                  </button>
-                </td>
                 <td className="px-4 py-2 text-slate-400">{c.codigo}</td>
                 <td className="px-4 py-2">
-                  <input
-                    value={c.nome}
-                    onChange={(e) =>
-                      atualizarCampo(composicoes, setComposicoes, c.id, "nome", e.target.value)
-                    }
-                    disabled={!souAdmin}
-                    className={campoTexto + " w-full"}
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={c.nome}
+                      onChange={(e) =>
+                        atualizarCampo(composicoes, setComposicoes, c.id, "nome", e.target.value)
+                      }
+                      disabled={!souAdmin}
+                      className={campoTexto + " w-full"}
+                    />
+                    {c.ativo === false && (
+                      <span
+                        className="shrink-0 rounded-full bg-slate-200 text-slate-600 text-[10px] font-medium px-2 py-0.5"
+                        title="Não aparece mais nos seletores de peça — segue existindo só pra orçamentos/vendas antigos que já a usam."
+                      >
+                        Inativo
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-2">
                   <input
@@ -1124,7 +1000,7 @@ function PrecosPage() {
                     disabled={!souAdmin || (c.composicao_itens || []).length > 0}
                     title={
                       (c.composicao_itens || []).length > 0
-                        ? "Custo calculado ao vivo pela composição da peça (abra a setinha pra ver) — ajuste as quantidades da composição e ele acompanha na hora"
+                        ? "Custo histórico da composição antiga — não afeta o cálculo de pilar novo, que usa a faixa de armadura em Engenharia"
                         : undefined
                     }
                     className={campoNumero}
@@ -1171,149 +1047,6 @@ function PrecosPage() {
                   )}
                 </td>
               </tr>
-              {receitaExpandidaId === c.id && (
-                <tr>
-                  <td colSpan={6} className="bg-slate-50 px-4 py-3">
-                    <p className="text-xs font-medium text-slate-500 mb-2">
-                      Receita de &quot;{c.nome}&quot; (insumos e mão de obra)
-                    </p>
-                    {carregandoReceita ? (
-                      <p className="text-xs text-slate-400">Carregando receita...</p>
-                    ) : (
-                      <>
-                        {receitaItens.length === 0 ? (
-                          <p className="text-xs text-slate-400 mb-2">
-                            Nenhum insumo/mão de obra cadastrado — o preço desta peça é manual.
-                          </p>
-                        ) : (
-                          <table className="w-full text-xs mb-2">
-                            <thead className="text-slate-500 text-left">
-                              <tr>
-                                <th className="py-1 font-medium">Insumo / Mão de obra</th>
-                                <th className="py-1 font-medium w-24">Un.</th>
-                                <th className="py-1 font-medium w-28">Quantidade</th>
-                                <th className="py-1 font-medium w-24">Valor unit.</th>
-                                <th className="py-1 font-medium w-24 text-right">Subtotal</th>
-                                <th className="py-1 font-medium w-10"></th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {receitaItens.map((item) => (
-                                <tr key={item.id} className="border-t border-slate-200">
-                                  <td className="py-1 pr-2">{item.nome}</td>
-                                  <td className="py-1 pr-2 text-slate-500">{item.unidade}</td>
-                                  <td className="py-1 pr-2">
-                                    <input
-                                      type="number"
-                                      step="0.0001"
-                                      value={item.quantidade}
-                                      onChange={(e) =>
-                                        atualizarQuantidadeReceita(item.id, e.target.value)
-                                      }
-                                      disabled={!souAdmin}
-                                      className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                                    />
-                                  </td>
-                                  <td className="py-1 pr-2 text-slate-500">
-                                    {formatarMoeda(item.valor_unitario)}
-                                  </td>
-                                  <td className="py-1 pr-2 text-right font-medium">
-                                    {formatarMoeda(Number(item.quantidade || 0) * Number(item.valor_unitario || 0))}
-                                  </td>
-                                  <td className="py-1 text-right">
-                                    {souAdmin && (
-                                    <button
-                                      onClick={() => removerLinhaReceita(item.id)}
-                                      className="text-red-600 hover:text-red-800"
-                                      title="Remover"
-                                    >
-                                      <Trash2 size={13} />
-                                    </button>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                              <tr className="border-t border-slate-300">
-                                <td colSpan={4} className="py-1 pr-2 text-right font-medium text-slate-500">
-                                  Custo total da receita
-                                  {c.area_referencia > 0 && ` (÷ ${c.area_referencia}m² de referência)`}
-                                </td>
-                                <td className="py-1 pr-2 text-right font-semibold">
-                                  {formatarMoeda(
-                                    (receitaItens.reduce(
-                                      (soma, item) =>
-                                        soma + Number(item.quantidade || 0) * Number(item.valor_unitario || 0),
-                                      0
-                                    )) / (c.area_referencia > 0 ? Number(c.area_referencia) : 1)
-                                  )}
-                                </td>
-                                <td></td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        )}
-
-                        {souAdmin && (
-                        <>
-                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-2">
-                          <select
-                            value={novoItemTipo}
-                            onChange={(e) => {
-                              setNovoItemTipo(e.target.value);
-                              setNovoItemRefId("");
-                            }}
-                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          >
-                            <option value="insumo">Insumo</option>
-                            <option value="mao_de_obra">Mão de obra</option>
-                          </select>
-                          <select
-                            value={novoItemRefId}
-                            onChange={(e) => setNovoItemRefId(e.target.value)}
-                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 sm:col-span-2"
-                          >
-                            <option value="">
-                              {novoItemTipo === "insumo" ? "Selecione o insumo" : "Selecione a função"}
-                            </option>
-                            {(novoItemTipo === "insumo" ? insumos : maoDeObra).map((opt) => (
-                              <option key={opt.id} value={opt.id}>
-                                {novoItemTipo === "insumo" ? opt.nome : opt.funcao}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              step="0.0001"
-                              placeholder="Qtd."
-                              value={novoItemQtd}
-                              onChange={(e) => setNovoItemQtd(e.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                            />
-                            <button
-                              type="button"
-                              onClick={adicionarLinhaReceita}
-                              className="rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium px-3 py-1 transition whitespace-nowrap"
-                            >
-                              + Item
-                            </button>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => salvarReceita(c.id)}
-                          disabled={salvandoReceita}
-                          className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 transition"
-                        >
-                          {salvandoReceita ? "Salvando..." : "Salvar receita e recalcular esta peça"}
-                        </button>
-                        </>
-                        )}
-                      </>
-                    )}
-                  </td>
-                </tr>
-              )}
             </tbody>
           ))}
         </table>

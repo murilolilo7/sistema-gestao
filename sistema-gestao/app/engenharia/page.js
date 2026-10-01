@@ -11,6 +11,21 @@ import {
   confirmar,
   LinhasEsqueleto,
 } from "@/components/Ui";
+import CartaoPeca from "./CartaoPeca";
+
+// Papeis com receita/preco proprios que ganham cartao na secao "Calculo de
+// pecas" — Pilar fica de fora (ja tem secao propria acima, com faixa de
+// armadura) e os itens simples (Calha, Capote, Fundacao, Montagem, Telha)
+// ficam em /precos, porque sao preco de tabela, sem formula por tras.
+const PAPEIS_CARTAO = [
+  { papel: "TERCA", titulo: "Terça" },
+  { papel: "LAJE", titulo: "Laje" },
+  { papel: "TESOURA", titulo: "Tesoura" },
+  { papel: "VIGA_TRAVAMENTO", titulo: "Viga de travamento" },
+  { papel: "POSTE", titulo: "Poste (caixa d'água)" },
+  { papel: "CAPITEL", titulo: "Capitel (caixa d'água)" },
+  { papel: "BASE_CALICE", titulo: "Base tipo cálice" },
+];
 
 // =====================================================================
 // ENGENHARIA DE CUSTOS
@@ -52,8 +67,27 @@ function EngenhariaPage() {
   const [simLaje, setSimLaje] = useState(false);
   const [sim, setSim] = useState(null);
 
+  // ---------- Calculo de pecas (Terca/Laje/Tesoura/Viga/Poste/Capitel/Base) ----------
+  const [composicoesPecas, setComposicoesPecas] = useState([]);
+  const [tercaAvulsaComprimento, setTercaAvulsaComprimento] = useState("");
+  const [tesouraRefId, setTesouraRefId] = useState("");
+  const [tesouraVaoDesejado, setTesouraVaoDesejado] = useState("");
+  const [lajeCargaId, setLajeCargaId] = useState("");
+  const [lajeArea, setLajeArea] = useState("");
+  const [novaPecaPapel, setNovaPecaPapel] = useState(null);
+  const [novaPecaNome, setNovaPecaNome] = useState("");
+  const [salvandoNovaPeca, setSalvandoNovaPeca] = useState(false);
+
   useEffect(() => {
     carregar();
+  }, []);
+
+  // Roda o simulador uma vez com os valores padrao, so pra ter um exemplo
+  // pronto pra mostrar no card "Como o pilar e calculado" assim que a tela
+  // abre — sem duplicar a conta, e o mesmo resultado que o Simulador usa.
+  useEffect(() => {
+    simular();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function carregar() {
@@ -95,7 +129,46 @@ function EngenhariaPage() {
     setFuncoes(rFun.data || []);
     const rPar = await supabase.from("parametros_engenharia").select("*").order("id").limit(1);
     setParam((rPar.data || [])[0] || null);
+    await buscarComposicoesPecas();
     setLoading(false);
+  }
+
+  async function buscarComposicoesPecas() {
+    const { data } = await supabase
+      .from("composicoes_galpao")
+      .select(
+        "id, nome, papel, unidade, custo, preco, bdi_pct, area_referencia, comprimento_referencia, composicao_itens(id, insumo_id, mao_de_obra_id, quantidade, insumos(nome, unidade, valor_unitario), mao_de_obra(funcao, valor_hora))"
+      )
+      .eq("ativo", true)
+      .in("papel", PAPEIS_CARTAO.map((p) => p.papel))
+      .order("nome");
+    setComposicoesPecas(data || []);
+  }
+
+  async function adicionarPeca(papel) {
+    if (!novaPecaNome.trim()) {
+      notificar("Informe o nome da peça.", "erro");
+      return;
+    }
+    setSalvandoNovaPeca(true);
+    const { error } = await supabase.from("composicoes_galpao").insert({
+      nome: novaPecaNome.trim(),
+      papel,
+      unidade: papel === "LAJE" ? "M2" : "UN",
+      custo: 0,
+      preco: 0,
+      bdi_pct: 0,
+      ativo: true,
+    });
+    if (error) {
+      notificar("Erro ao adicionar peça: " + error.message, "erro");
+    } else {
+      notificar(`"${novaPecaNome.trim()}" adicionada — sem receita ainda, defina insumos/mão de obra abrindo o cartão.`);
+      setNovaPecaNome("");
+      setNovaPecaPapel(null);
+      await buscarComposicoesPecas();
+    }
+    setSalvandoNovaPeca(false);
   }
   const acos = insumos.filter((i) => i.bitola_mm);
   const insumoPorId = (id) => insumos.find((i) => i.id === id);
@@ -445,6 +518,44 @@ function EngenhariaPage() {
                   <b>{moeda(0.73 * (Number(param.valor_m3_armado) || 0))}</b>
                 </p>
               </div>
+
+              {sim && !sim.erro && (
+                <div className="mt-4 rounded-lg bg-white border border-emerald-200 p-3">
+                  <p className="text-xs text-slate-500 mb-2">
+                    Exemplo com os valores de hoje — pé-direito {simPe}m, vão {simVao}m
+                    {simLaje ? ", com laje" : ""} (o mesmo pilar do Simulador, aqui embaixo ↓):
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                    <span className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1">
+                      <span className="text-slate-500">Concreto </span>
+                      <b className="text-slate-800">{moeda(sim.custo_concreto)}</b>
+                    </span>
+                    <span className="text-slate-400">+</span>
+                    <span className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1">
+                      <span className="text-slate-500">Aço </span>
+                      <b className="text-slate-800">{moeda(sim.custo_aco)}</b>
+                    </span>
+                    <span className="text-slate-400">+</span>
+                    <span className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1">
+                      <span className="text-slate-500">Mão de obra </span>
+                      <b className="text-slate-800">{moeda(sim.custo_mao_de_obra)}</b>
+                    </span>
+                    <span className="text-slate-400">=</span>
+                    <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-1">
+                      <span className="text-slate-500">Detalhado </span>
+                      <b className="text-emerald-700">{moeda(sim.custo_detalhado)}</b>
+                    </span>
+                    <span className="text-slate-400 mx-1">|</span>
+                    <span className="rounded-md bg-slate-50 border border-slate-200 px-2 py-1">
+                      <span className="text-slate-500">Pelo m³ ({num(sim.volume_m3, 3)} m³ × {moeda(sim.valor_m3_armado)}) </span>
+                      <b className="text-slate-800">{moeda(sim.custo_por_m3)}</b>
+                    </span>
+                  </div>
+                  {sim.aviso && (
+                    <p className="text-amber-700 bg-amber-50 rounded px-2 py-1 mt-2 text-xs">{sim.aviso}</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -460,8 +571,11 @@ function EngenhariaPage() {
               </p>
             </div>
             <p className="text-xs text-slate-500 mb-3">
-              Quantidades em kg por m3 (laudo do laboratorio). A coluna kg por unidade converte
-              para a unidade de compra: lata, litro ou kg.
+              Quantidade em kg por m3 (laudo do laboratorio) x preco do insumo = custo dessa
+              linha. "kg por unidade" só entra na conta quando o insumo NÃO é comprado por kg/litro
+              (ex.: um insumo vendido em saco de 40kg) — nesse caso o kg/m3 é dividido por esse
+              valor antes de multiplicar pelo preço. Para os insumos de hoje (cimento, areia,
+              brita, água, aditivo), fica em 1 e não muda nada.
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -470,8 +584,7 @@ function EngenhariaPage() {
                     <th className="text-left px-2 py-2 font-medium">Insumo</th>
                     <th className="text-left px-2 py-2 font-medium">kg por m3</th>
                     <th className="text-left px-2 py-2 font-medium">kg por unidade</th>
-                    <th className="text-left px-2 py-2 font-medium">Consumo</th>
-                    <th className="text-right px-2 py-2 font-medium">Custo</th>
+                    <th className="text-right px-2 py-2 font-medium">Custo dessa linha</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -509,11 +622,13 @@ function EngenhariaPage() {
                             className={campoClasse}
                           />
                         </td>
-                        <td className="px-2 py-2 text-slate-600 whitespace-nowrap">
-                          {num(consumo)} {ins.unidade}
-                        </td>
-                        <td className="px-2 py-2 text-right text-slate-700 whitespace-nowrap">
-                          {moeda(custo)}
+                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                          <div className="text-slate-700">{moeda(custo)}</div>
+                          <div className="text-[11px] text-slate-400">
+                            {kgUn === 1
+                              ? `${num(it.kg_por_m3)} kg × ${moeda(ins.valor_unitario)}`
+                              : `${num(it.kg_por_m3)} ÷ ${num(kgUn)} = ${num(consumo)} ${ins.unidade} × ${moeda(ins.valor_unitario)}`}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -527,12 +642,40 @@ function EngenhariaPage() {
                         ? " (densidade do laudo: " + num(traco.densidade_kg_m3, 2) + ")"
                         : ""}
                     </td>
-                    <td colSpan={3}></td>
+                    <td colSpan={2}></td>
                     <td className="px-2 py-2 text-right font-bold text-slate-900">{moeda(custoM3)}</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
+
+            {itensTraco.length > 0 && (
+              <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3">
+                <p className="text-xs text-slate-500 mb-2">Cálculo completo, do insumo até o custo de 1 m³:</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                  {itensTraco.map((it, idx) => {
+                    const ins = insumoPorId(it.insumo_id);
+                    if (!ins) return null;
+                    const kgUn = Number(ins.kg_por_unidade) || 1;
+                    const custo = ((Number(it.kg_por_m3) || 0) / kgUn) * (Number(ins.valor_unitario) || 0);
+                    return (
+                      <span key={it.id} className="contents">
+                        {idx > 0 && <span className="text-slate-400">+</span>}
+                        <span className="rounded-md bg-white border border-slate-200 px-2 py-1">
+                          <span className="text-slate-500">{ins.nome} </span>
+                          <b className="text-slate-800">{moeda(custo)}</b>
+                        </span>
+                      </span>
+                    );
+                  })}
+                  <span className="text-slate-400">=</span>
+                  <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-1">
+                    <span className="text-slate-500">Custo de 1 m³ </span>
+                    <b className="text-emerald-700">{moeda(custoM3)}</b>
+                  </span>
+                </div>
+              </div>
+            )}
             <button
               type="button"
               onClick={salvarTraco}
@@ -1230,6 +1373,218 @@ function EngenhariaPage() {
                 )}
               </div>
             )}
+          </div>
+
+          {/* ---------- 6. CALCULO DE PECAS ---------- */}
+          <div className={cardClasse}>
+            <p className="text-sm font-semibold text-slate-700 mb-1">Cálculo de peças</p>
+            <p className="text-xs text-slate-500 mb-4">
+              Custo sempre somado ao vivo da receita (nunca um número parado) — você só decide o
+              BDI de cada peça, e o preço sugerido sai da conta. Pilar já tem motor próprio acima
+              ↑ (faixa de armadura); os itens sem fórmula (Calha, Capote, Fundação, Montagem,
+              Telha) continuam em Preços.
+            </p>
+
+            <div className="space-y-5">
+              {PAPEIS_CARTAO.map(({ papel, titulo }) => {
+                const itens = composicoesPecas.filter((c) => c.papel === papel);
+                return (
+                  <div key={papel}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                        {titulo}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNovaPecaPapel((atual) => (atual === papel ? null : papel));
+                          setNovaPecaNome("");
+                        }}
+                        className="text-emerald-700 hover:text-emerald-900 text-xs font-medium flex items-center gap-1"
+                      >
+                        <Plus size={13} /> Cadastrar peça
+                      </button>
+                    </div>
+                    {novaPecaPapel === papel && (
+                      <div className="flex items-center gap-2 mb-2 rounded-lg border border-dashed border-emerald-300 bg-emerald-50/40 p-2">
+                        <input
+                          type="text"
+                          placeholder={`Nome da nova peça de ${titulo.toLowerCase()}`}
+                          value={novaPecaNome}
+                          onChange={(e) => setNovaPecaNome(e.target.value)}
+                          className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => adicionarPeca(papel)}
+                          disabled={salvandoNovaPeca}
+                          className="rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 transition whitespace-nowrap"
+                        >
+                          {salvandoNovaPeca ? "Salvando..." : "Adicionar"}
+                        </button>
+                      </div>
+                    )}
+                    {itens.length === 0 && novaPecaPapel !== papel && (
+                      <p className="text-xs text-slate-400 mb-2">Nenhuma peça cadastrada ainda.</p>
+                    )}
+                    <div className="space-y-2">
+                      {itens.map((c) => (
+                        <CartaoPeca
+                          key={c.id}
+                          composicao={c}
+                          insumos={insumos}
+                          maoDeObra={funcoes}
+                          souAdmin={true}
+                          onSalvo={buscarComposicoesPecas}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Laje: nao pensa em "tamanho de painel", pensa em R$/m2 por
+                        classe de carga — calculadora de area do cliente. */}
+                    {papel === "LAJE" && (
+                      <div className="mt-2 rounded-lg border border-dashed border-slate-300 p-3 flex flex-wrap items-end gap-3">
+                        <div className="w-56">
+                          <label className="block text-[11px] text-slate-500 mb-1">
+                            Peça de referência (define a taxa R$/m²)
+                          </label>
+                          <select
+                            value={lajeCargaId}
+                            onChange={(e) => setLajeCargaId(e.target.value)}
+                            className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                          >
+                            <option value="">Selecione</option>
+                            {itens.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.nome}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="w-32">
+                          <label className="block text-[11px] text-slate-500 mb-1">Área do cliente (m²)</label>
+                          <input
+                            type="text"
+                            value={lajeArea}
+                            onChange={(e) => setLajeArea(e.target.value)}
+                            className={campoClasse}
+                          />
+                        </div>
+                        {(() => {
+                          const ref = itens.find((c) => String(c.id) === String(lajeCargaId));
+                          const area = Number(String(lajeArea).replace(",", ".")) || 0;
+                          if (!ref || area <= 0) return null;
+                          const total = Math.round(Number(ref.preco || 0) * area * 100) / 100;
+                          return (
+                            <p className="text-sm text-slate-600">
+                              {num(area, 2)} m² × {moeda(ref.preco)}/m² ={" "}
+                              <b className="text-emerald-700">{moeda(total)}</b>
+                            </p>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* Terca: so 2 tamanhos reais cadastrados; medida avulsa (ex.
+                        5,5m) interpola linearmente entre os 2 pontos reais. */}
+                    {papel === "TERCA" && (() => {
+                      const comRef = itens.filter((c) => Number(c.comprimento_referencia) > 0);
+                      if (comRef.length < 2) return null;
+                      const ordenadas = [...comRef].sort(
+                        (a, b) => Number(a.comprimento_referencia) - Number(b.comprimento_referencia)
+                      );
+                      const p1 = ordenadas[0];
+                      const p2 = ordenadas[ordenadas.length - 1];
+                      const c1 = Number(p1.comprimento_referencia);
+                      const c2 = Number(p2.comprimento_referencia);
+                      const alvo = Number(String(tercaAvulsaComprimento).replace(",", ".")) || 0;
+                      const taxa = c2 !== c1 ? (Number(p2.preco) - Number(p1.preco)) / (c2 - c1) : 0;
+                      const precoEstimado =
+                        alvo > 0 ? Math.round((Number(p1.preco) + taxa * (alvo - c1)) * 100) / 100 : null;
+                      return (
+                        <div className="mt-2 rounded-lg border border-dashed border-slate-300 p-3 flex flex-wrap items-end gap-3">
+                          <div className="w-40">
+                            <label className="block text-[11px] text-slate-500 mb-1">
+                              Terça avulsa — comprimento (m)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="ex: 5,5"
+                              value={tercaAvulsaComprimento}
+                              onChange={(e) => setTercaAvulsaComprimento(e.target.value)}
+                              className={campoClasse}
+                            />
+                          </div>
+                          {precoEstimado !== null && (
+                            <p className="text-sm text-slate-600">
+                              Interpolado entre {c1}m ({moeda(p1.preco)}) e {c2}m ({moeda(p2.preco)}):{" "}
+                              <b className="text-emerald-700">{moeda(precoEstimado)}</b>
+                            </p>
+                          )}
+                          <p className="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1">
+                            Aproximação pra medida fora do padrão — peça reta e leve, risco baixo.
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Tesoura: nenhum orcamento real usa os 4 tamanhos fixos
+                        direto — todos usam essa mesma formula proporcional
+                        (a mesma de app/orcamentos-galpao/page.js). Fica visivel
+                        aqui como o que e: provisorio, nao e engenharia real. */}
+                    {papel === "TESOURA" && (() => {
+                      const comRef = itens.filter((c) => Number(c.comprimento_referencia) > 0);
+                      if (comRef.length === 0) return null;
+                      const ref = comRef.find((c) => String(c.id) === String(tesouraRefId)) || null;
+                      const vao = Number(String(tesouraVaoDesejado).replace(",", ".")) || 0;
+                      const precoEstimado =
+                        ref && vao > 0
+                          ? Math.round(
+                              (Number(ref.preco) / Number(ref.comprimento_referencia)) * vao * 100
+                            ) / 100
+                          : null;
+                      return (
+                        <div className="mt-2 rounded-lg border border-dashed border-slate-300 p-3 flex flex-wrap items-end gap-3">
+                          <div className="w-56">
+                            <label className="block text-[11px] text-slate-500 mb-1">Tesoura de referência</label>
+                            <select
+                              value={tesouraRefId}
+                              onChange={(e) => setTesouraRefId(e.target.value)}
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                            >
+                              <option value="">Selecione</option>
+                              {comRef.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.nome} ({moeda(Number(c.preco) / Number(c.comprimento_referencia))}/m)
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="w-32">
+                            <label className="block text-[11px] text-slate-500 mb-1">Vão desejado (m)</label>
+                            <input
+                              type="text"
+                              value={tesouraVaoDesejado}
+                              onChange={(e) => setTesouraVaoDesejado(e.target.value)}
+                              className={campoClasse}
+                            />
+                          </div>
+                          {precoEstimado !== null && (
+                            <p className="text-sm text-slate-600">
+                              <b className="text-emerald-700">{moeda(precoEstimado)}</b>
+                            </p>
+                          )}
+                          <p className="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1 w-full">
+                            Fórmula provisória (reta entre o vão da peça e a referência) — não é
+                            cálculo de engenharia real ainda. É a mesma usada hoje no orçamento.
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

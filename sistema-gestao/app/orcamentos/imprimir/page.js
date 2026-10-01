@@ -52,6 +52,11 @@ function formatarMoeda(valor) {
 
 function formatarDataHora(valor) {
   if (!valor) return "-";
+  // Data pura ("2026-09-29", ex.: data da proposta) é lida como meia-noite
+  // em UTC — no fuso do Brasil virava o dia ANTERIOR. Lida no horário local.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(valor))) {
+    return new Date(valor + "T00:00:00").toLocaleDateString("pt-BR");
+  }
   return new Date(valor).toLocaleDateString("pt-BR");
 }
 

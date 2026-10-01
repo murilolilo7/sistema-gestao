@@ -14,6 +14,17 @@ import {
   diariasDeMontagem,
   qtdTercasPorLinhaDeVao,
   decomporComprimentoEmModulos,
+  modulosDoComprimento,
+  modulosDoGalpao,
+  contarModulos,
+  tercasPorMedida,
+  precoTercaInterpolado,
+  vaosCobertosPelaLaje,
+  alturaVigaLaje,
+  posicoesDosPorticos,
+  vaoNaPosicao,
+  areaTrapezio,
+  tercasTrapezioPorMedida,
   trechosDaViga,
   chaveAutomatica,
   qtdCapote,
@@ -137,6 +148,133 @@ test("comprimento inválido: devolve null", () => {
 });
 
 // ---------------------------------------------------------------------------
+// FONTE ÚNICA DOS VÃOS — caso real: 32m, cliente quer vão de 4m (8 vãos)
+// ---------------------------------------------------------------------------
+
+test("vãos: sem nº informado (ou igual à sugestão), usa os módulos de 5m/6m", () => {
+  // 32 = 4x5 + 2x6 = 6 vãos
+  assert.equal(modulosDoGalpao(32).length, 6);
+  assert.equal(modulosDoGalpao(32, "").length, 6);
+  assert.deepEqual(modulosDoGalpao(32, 6), modulosDoComprimento(32));
+});
+
+test("vãos: nº diferente da sugestão vira vãos iguais (32m em 8 vãos = 4m)", () => {
+  const m = modulosDoGalpao(32, 8);
+  assert.equal(m.length, 8);
+  assert.ok(m.every((v) => v.medida === 4 && v.tamanho === 4));
+  assert.deepEqual(contarModulos(m, "tamanho"), [{ valor: 4, qtd: 8 }]);
+});
+
+test("vãos: 32m com 8 vãos — travamento 16 e vigas das 2 lajes 18", () => {
+  const m = modulosDoGalpao(32, 8);
+  // travamento: 1 viga por vão em cada linha de pilar (2 no galpão avulso)
+  assert.equal(m.length * 2, 16);
+  // viga de laje: uma por linha de pilar que a laje toca = vãos cobertos + 1
+  const linhasViga = vaosCobertosPelaLaje(m, 32) + 1;
+  assert.equal(linhasViga, 9);
+  assert.equal(linhasViga * 2, 18); // térreo + coberta
+});
+
+test("vãos: laje parcial cobre só os primeiros vãos", () => {
+  // 8 vãos de 4m, laje até 10m de profundidade -> cobre 3 vãos (0-12m) -> 4 vigas
+  assert.equal(vaosCobertosPelaLaje(modulosDoGalpao(32, 8), 10), 3);
+});
+
+test("vãos: pórticos acompanham o nº de vãos escolhido", () => {
+  assert.deepEqual(posicoesDosPorticos(32, 8), [0, 4, 8, 12, 16, 20, 24, 28, 32]);
+  // divisão que não fecha redondo: o último pórtico fica exatamente no fundo
+  const p = posicoesDosPorticos(30, 7);
+  assert.equal(p.length, 8);
+  assert.equal(p[p.length - 1], 30);
+});
+
+test("terças: somam pela medida dos vãos escolhidos (8 vãos de 4m)", () => {
+  // largura 18m -> 12 terças por vão
+  const totais = tercasPorMedida(modulosDoGalpao(32, 8), () => qtdTercasPorLinhaDeVao(18));
+  assert.deepEqual(totais, { 4: 96 });
+  // sem mudar o nº de vãos continua 5m/6m
+  const padrao = tercasPorMedida(modulosDoGalpao(32), () => qtdTercasPorLinhaDeVao(18));
+  assert.deepEqual(padrao, { 5: 48, 6: 24 });
+});
+
+test("altura da viga de laje: % do vão, pra cima no múltiplo de 5cm", () => {
+  assert.equal(alturaVigaLaje(10, 10), 1); // padrão de sempre
+  assert.equal(alturaVigaLaje(9, 10), 0.9);
+  assert.equal(alturaVigaLaje(5, 10), 0.5);
+  assert.equal(alturaVigaLaje(9, 7), 0.65); // 0,63 -> 0,65
+  assert.equal(alturaVigaLaje(8, 8), 0.65); // 0,64 -> 0,65
+  assert.equal(alturaVigaLaje(6, "7,5"), 0.45); // aceita vírgula, 0,45 exato
+  // vazio ou absurdo volta pros 10%
+  assert.equal(alturaVigaLaje(9, ""), 0.9);
+  assert.equal(alturaVigaLaje(9, 80), 0.9);
+  assert.equal(alturaVigaLaje(0, 7), 0);
+});
+
+test("terça fora do catálogo: preço pela reta entre as de 5m e 6m", () => {
+  const pontos = [{ medida: 5, preco: 230.35 }, { medida: 6, preco: 279.8 }];
+  assert.equal(precoTercaInterpolado(5, pontos), 230.35);
+  assert.equal(precoTercaInterpolado(6, pontos), 279.8);
+  assert.equal(precoTercaInterpolado(5.5, pontos), 255.08); // no meio
+  assert.equal(precoTercaInterpolado(4, pontos), 180.9); // estende para baixo
+  assert.equal(precoTercaInterpolado(4, []), 0);
+});
+
+// ---------------------------------------------------------------------------
+// GALPÃO TRAPEZOIDAL — caso real confirmado: 23m de frente, 16,5m de fundo
+// ---------------------------------------------------------------------------
+
+test("trapézio: módulos do comprimento vêm com o tamanho real de cada um", () => {
+  assert.deepEqual(modulosDoComprimento(30), [
+    { medida: 5, tamanho: 5 }, { medida: 5, tamanho: 5 }, { medida: 5, tamanho: 5 },
+    { medida: 5, tamanho: 5 }, { medida: 5, tamanho: 5 }, { medida: 5, tamanho: 5 },
+  ]);
+  // 27,4 = 2x5 + 2x6 + 1 quebrado de 5,4 (o quebrado sempre por último)
+  assert.deepEqual(modulosDoComprimento(27.4), [
+    { medida: 5, tamanho: 5 }, { medida: 5, tamanho: 5 },
+    { medida: 6, tamanho: 6 }, { medida: 6, tamanho: 6 },
+    { medida: 6, tamanho: 5.4 },
+  ]);
+  assert.equal(modulosDoComprimento(0), null);
+});
+
+test("trapézio: posições dos pórticos são sempre nº de módulos + 1, fechando no comprimento", () => {
+  assert.deepEqual(posicoesDosPorticos(30), [0, 5, 10, 15, 20, 25, 30]);
+  assert.deepEqual(posicoesDosPorticos(27.4), [0, 5, 10, 16, 22, 27.4]);
+  assert.equal(posicoesDosPorticos(0), null);
+});
+
+test("trapézio: vão na posição interpola entre frente e fundo", () => {
+  assert.equal(vaoNaPosicao(0, 30, 23, 16.5), 23); // frente
+  assert.equal(vaoNaPosicao(30, 30, 23, 16.5), 16.5); // fundo
+  assert.equal(vaoNaPosicao(15, 30, 23, 16.5), 19.75); // meio: média das duas
+});
+
+test("trapézio: sem vão de fundo (ou igual ao da frente), vão fica constante", () => {
+  assert.equal(vaoNaPosicao(15, 30, 23, ""), 23);
+  assert.equal(vaoNaPosicao(15, 30, 23, 0), 23);
+  assert.equal(vaoNaPosicao(15, 30, 23, 23), 23);
+  assert.equal(vaoNaPosicao(30, 30, 23, undefined), 23);
+});
+
+test("trapézio: área é a média das duas larguras vezes o comprimento", () => {
+  assert.equal(areaTrapezio(23, 16.5, 30), 592.5);
+  assert.equal(areaTrapezio(23, 0, 30), 0); // sem fundo válido, não é trapézio de verdade
+});
+
+test("trapézio: terças por medida variam por trecho (frente mais largo pede mais terça)", () => {
+  // 27m = 3 vãos de 5m (frente, mais largos) + 2 vãos de 6m (fundo, mais estreitos)
+  const totais = tercasTrapezioPorMedida(27, 23, 16.5);
+  assert.ok(totais[5] > 0 && totais[6] > 0);
+  assert.equal(totais[5] % 2, 0); // qtdTercasPorLinhaDeVao sempre devolve par
+  assert.equal(totais[6] % 2, 0);
+  // os vãos de 5m ficam mais perto da frente (mais largos) que os de 6m
+  // (mais perto do fundo) — soma por vão tem que refletir isso
+  const mediaPor5 = totais[5] / 3;
+  const mediaPor6 = totais[6] / 2;
+  assert.ok(mediaPor5 >= mediaPor6, `frente (${mediaPor5}) deveria pedir tanta terça quanto ou mais que o fundo (${mediaPor6})`);
+});
+
+// ---------------------------------------------------------------------------
 // VIGAS DA LAJE — nunca passam de 10m
 // ---------------------------------------------------------------------------
 
@@ -166,7 +304,17 @@ test("reconhece cada peça automática pelo nome", () => {
     ["VIGA PARA LAJE 0,25X0,90X9,00M", "laje", "viga-laje-auto"],
     ["VIGA DE TRAVAMENTO 0,15X0,30X5,00M", "estrutura", "travamento-auto-5"],
     ["VIGA DE TRAVAMENTO 0,15X0,30X6,00M", "estrutura", "travamento-auto-6"],
-    ["VIGA DE TRAVAMENTO 0,15X0,30X5,40M", "estrutura", "travamento-auto-6"],
+    // o vão quebrado tem viga do tamanho real, com chave própria
+    ["VIGA DE TRAVAMENTO 0,15X0,30X5,40M", "estrutura", "travamento-auto-5.4"],
+    // vãos iguais fora do padrão (cliente pediu vão de 4m)
+    ["VIGA DE TRAVAMENTO 0,15X0,30X4,00M", "estrutura", "travamento-auto-4"],
+    ["TERÇA 4,00M — avulsa (interpolada entre 5m e 6m)", "estrutura", "terca-auto-4"],
+    // peças da 2ª laje não se confundem com as da 1ª
+    ["VIGA PARA LAJE 0,25X1,00X9,00M — 2ª laje (8,00m)", "laje", "viga-laje2-auto"],
+    // descrição nova, com o nível e o % do vão
+    ["VIGA PARA LAJE 0,25X0,65X9,00M — 1º nível (laje a 3,50m) · altura 7% do vão", "laje", "viga-laje-auto"],
+    ["VIGA PARA LAJE 0,25X0,65X9,00M — 2º nível, topo dos pilares (2ª laje, 8,00m) · altura 7% do vão", "laje", "viga-laje2-auto"],
+    ["LAJE PI 5,99X1,24X0,25M — 7,43M² — 300 Kg/M² — 2ª laje (8,00m)", "laje", "laje2-auto"],
     ["FUNDAÇÃO", "laje", "fundacao-laje"],
     ["CONSOLO TESOURA (dente gerber)", "estrutura", "consolo-tesoura-auto"],
   ];
@@ -182,6 +330,31 @@ test("peças que NÃO são automáticas devolvem null", () => {
   assert.equal(chaveAutomatica("MONTAGEM", "estrutura"), null);
   // fundação da ESTRUTURA não é a da laje
   assert.equal(chaveAutomatica("FUNDAÇÃO", "estrutura"), null);
+});
+
+test("pilar avulso (calculado à mão) nunca é confundido com pilar automático", () => {
+  // Mesmo caso que colidiria com "pilar-auto-meio" (nome começa com PILAR
+  // + secao === "laje") se não fosse pelo marcador "avulso" no nome.
+  assert.equal(
+    chaveAutomatica("PILAR 0,25x0,40 - 6,50m (5,00 livre + 1,50 fundacao) — avulso", "laje"),
+    null
+  );
+  assert.equal(
+    chaveAutomatica("PILAR 0,25x0,40 - 6,50m (5,00 livre + 1,50 fundacao) — avulso", "estrutura"),
+    null
+  );
+});
+
+test("pilar do trapézio: chave é por posição do pórtico, sem duplicar ao reabrir", () => {
+  const nome = (i, n) =>
+    `PILAR 0,25x0,40 - 6,50m (5,00 livre + 1,50 fundacao) — Pórtico ${i}/${n} (vão 19,75m)`;
+  assert.equal(chaveAutomatica(nome(1, 6), "estrutura"), "pilar-trapezio-0");
+  assert.equal(chaveAutomatica(nome(6, 6), "estrutura"), "pilar-trapezio-5");
+  // continua reconhecendo o pilar avulso comum (sem "Pórtico" no nome)
+  assert.equal(
+    chaveAutomatica("PILAR 0,25x0,40 - 6,50m (5,00 livre + 1,50 fundacao) — avulso", "estrutura"),
+    null
+  );
 });
 
 test("papel deduzido pelo nome: peças calculadas não têm papel do catálogo", () => {

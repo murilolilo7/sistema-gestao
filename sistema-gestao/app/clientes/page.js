@@ -108,6 +108,8 @@ export default function ClientesPage() {
   const [mensagem, setMensagem] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [buscandoCep, setBuscandoCep] = useState(false);
+  // Consulta do CNPJ na Receita (BrasilAPI): { cnpj, estado, situacao, razao, texto }
+  const [consultaCnpj, setConsultaCnpj] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editingCodigo, setEditingCodigo] = useState(null);
   const [termoBusca, setTermoBusca] = useState("");
@@ -172,6 +174,72 @@ export default function ClientesPage() {
     setBuscandoCep(false);
   }
 
+  // CNPJ completo e válido: consulta na Receita (BrasilAPI, gratuita) pra
+  // conferir se a empresa existe e está ATIVA, e preenche só os campos que
+  // ainda estão VAZIOS — nunca apaga o que o usuário já digitou.
+  async function consultarCnpj(cnpj) {
+    setConsultaCnpj({ cnpj, estado: "buscando" });
+    try {
+      const resposta = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+      if (resposta.status === 404) {
+        setConsultaCnpj({
+          cnpj,
+          estado: "aviso",
+          texto: "CNPJ não encontrado na Receita — confira os números com o cliente.",
+        });
+        return;
+      }
+      if (!resposta.ok) throw new Error(String(resposta.status));
+      const d = await resposta.json();
+      const tel = String(d.ddd_telefone_1 || "").replace(/\D/g, "");
+      const telefone =
+        tel.length === 11
+          ? `(${tel.slice(0, 2)}) ${tel.slice(2, 7)}-${tel.slice(7)}`
+          : tel.length === 10
+            ? `(${tel.slice(0, 2)}) ${tel.slice(2, 6)}-${tel.slice(6)}`
+            : "";
+      const cep = String(d.cep || "").replace(/\D/g, "");
+      const preencher = (atual, novo) => (String(atual || "").trim() ? atual : novo || "");
+      setForm((f) => {
+        // O usuário pode ter trocado o documento enquanto a consulta rodava
+        if (f.cpf_cnpj.replace(/\D/g, "") !== cnpj) return f;
+        return {
+          ...f,
+          nome: preencher(f.nome, d.razao_social),
+          telefone: preencher(f.telefone, telefone),
+          email: preencher(f.email, (d.email || "").toLowerCase()),
+          cep: preencher(f.cep, cep.length === 8 ? formatarCep(cep) : ""),
+          endereco: preencher(
+            f.endereco,
+            [d.descricao_tipo_de_logradouro, d.logradouro].filter(Boolean).join(" ")
+          ),
+          numero: preencher(f.numero, d.numero),
+          complemento: preencher(f.complemento, d.complemento),
+          bairro: preencher(f.bairro, d.bairro),
+          cidade: preencher(f.cidade, d.municipio),
+          uf: preencher(f.uf, d.uf),
+        };
+      });
+      const situacao = String(d.descricao_situacao_cadastral || "").toUpperCase();
+      setConsultaCnpj({
+        cnpj,
+        estado: situacao === "ATIVA" ? "ok" : "aviso",
+        situacao,
+        razao: d.razao_social,
+        texto:
+          situacao === "ATIVA"
+            ? `Ativa na Receita — ${d.razao_social}${d.nome_fantasia ? ` (${d.nome_fantasia})` : ""}`
+            : `Atenção: situação na Receita é ${situacao || "desconhecida"} — ${d.razao_social || ""}`,
+      });
+    } catch {
+      setConsultaCnpj({
+        cnpj,
+        estado: "aviso",
+        texto: "Não foi possível consultar a Receita agora — os dígitos do CNPJ estão corretos.",
+      });
+    }
+  }
+
   function handleChange(e) {
     const { name, value } = e.target;
     if (name === "cep") {
@@ -183,10 +251,14 @@ export default function ClientesPage() {
       return;
     }
     if (name === "cpf_cnpj") {
-      setForm((f) => ({
-        ...f,
-        cpf_cnpj: formatarDocumento(value, f.tipo_pessoa),
-      }));
+      const formatado = formatarDocumento(value, form.tipo_pessoa);
+      setForm((f) => ({ ...f, cpf_cnpj: formatado }));
+      const digitos = formatado.replace(/\D/g, "");
+      if (form.tipo_pessoa === "juridica" && digitos.length === 14 && cnpjValido(digitos)) {
+        if (consultaCnpj?.cnpj !== digitos) consultarCnpj(digitos);
+      } else if (consultaCnpj) {
+        setConsultaCnpj(null);
+      }
       return;
     }
     setForm((f) => ({ ...f, [name]: value }));
@@ -196,10 +268,12 @@ export default function ClientesPage() {
     const tipo = e.target.value;
     // Limpa o documento ao trocar o tipo, já que a máscara é diferente.
     setForm((f) => ({ ...f, tipo_pessoa: tipo, cpf_cnpj: "" }));
+    setConsultaCnpj(null);
   }
 
   function abrirNovo() {
     setForm(FORM_VAZIO);
+    setConsultaCnpj(null);
     setEditingId(null);
     setEditingCodigo(null);
     setErro("");
@@ -208,6 +282,7 @@ export default function ClientesPage() {
   }
 
   function abrirEdicao(cliente) {
+    setConsultaCnpj(null);
     setEditingId(cliente.id);
     setEditingCodigo(cliente.codigo);
     setErro("");
@@ -470,6 +545,40 @@ export default function ClientesPage() {
                       números.
                     </p>
                   )}
+                {(() => {
+                  const dig = form.cpf_cnpj.replace(/\D/g, "");
+                  if (form.tipo_pessoa !== "juridica" || dig.length !== 14 || !cnpjValido(dig))
+                    return null;
+                  const c = consultaCnpj?.cnpj === dig ? consultaCnpj : null;
+                  if (!c)
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => consultarCnpj(dig)}
+                        className="mt-1 text-[11px] font-medium text-emerald-700 hover:underline"
+                      >
+                        Consultar na Receita
+                      </button>
+                    );
+                  if (c.estado === "buscando")
+                    return (
+                      <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                        <Loader2 size={12} className="animate-spin" /> Consultando na Receita...
+                      </p>
+                    );
+                  return (
+                    <p
+                      className={`text-[11px] mt-1 rounded px-1.5 py-0.5 ${
+                        c.estado === "ok"
+                          ? "text-emerald-700 bg-emerald-50"
+                          : "text-amber-800 bg-amber-50"
+                      }`}
+                    >
+                      {c.estado === "ok" ? "✓ " : "⚠ "}
+                      {c.texto}
+                    </p>
+                  );
+                })()}
               </div>
               <div>
                 <label className={labelClasse}>Nome do responsável</label>
