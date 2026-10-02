@@ -7,6 +7,7 @@ import { Copy, Eye, EyeOff, Pencil, Printer, ShoppingCart, MessageCircle, XCircl
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
 import DesenhoGalpao from "./desenho-galpao";
+import ComparacaoPilarForma4 from "./ComparacaoPilarForma4";
 // Regras de cálculo (testadas em calculos.test.js). Ficam num arquivo à parte
 // para que os testes protejam EXATAMENTE o que o sistema usa.
 import {
@@ -564,6 +565,9 @@ function OrcamentosGalpaoPageInterno() {
   // automática não tem ferragem cadastrada) — só vem preenchido no modo
   // detalhado; em modo m³ fica sempre null.
   const [avisoAcoPilar, setAvisoAcoPilar] = useState(null);
+  // Pilares calculados (retorno do calcular_pilar) para o quadro de comparação
+  // com o cálculo novo pelo vento — só leitura, não mexe nos itens.
+  const [pilaresComparacao, setPilaresComparacao] = useState([]);
   // Aviso do modo trapézio: combinações fora do escopo (laje/mezanino ou
   // galpão geminado junto com trapézio) recusam gerar pilar automático em
   // vez de arriscar número errado.
@@ -611,6 +615,7 @@ function OrcamentosGalpaoPageInterno() {
           : atual
       );
       setAvisoAcoPilar(null);
+      setPilaresComparacao([]);
       return;
     }
     const pe = Number(peDireito) || 0;
@@ -683,6 +688,12 @@ function OrcamentosGalpaoPageInterno() {
       // banco já retorna null pra esse campo.
       const avisos = [dPadrao?.aviso, dComLaje?.aviso, dReforcado?.aviso].filter(Boolean);
       setAvisoAcoPilar(avisos.length > 0 ? [...new Set(avisos)].join(" ") : null);
+      setPilaresComparacao(
+        [
+          qtdPadrao > 0 && { rotulo: "Pilar padrão", qtd: qtdPadrao, dados: dPadrao, comLaje: false },
+          qtdComLaje > 0 && { rotulo: "Pilar sob a laje", qtd: qtdComLaje, dados: dComLaje, comLaje: true },
+        ].filter(Boolean)
+      );
 
       // R$/m3 armado derivado do proprio pilar padrao (mesmo valor usado em
       // tudo), para precificar o pilar menor do meio (25x30, 5m).
@@ -3644,6 +3655,18 @@ function OrcamentosGalpaoPageInterno() {
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1.5 mb-3">
               ⚠ {avisoAcoPilar}
             </p>
+          )}
+          {comPilares && pilaresComparacao.length > 0 && nVaos > 0 && (
+            <ComparacaoPilarForma4
+              pilares={pilaresComparacao}
+              vao={Number(vao) || 0}
+              modulacao={(Number(comprimento) || 0) / nVaos}
+              cargaLaje={
+                /500/.test(lajesDisponiveis.find((l) => String(l.id) === String(tipoLajeId))?.nome || "")
+                  ? 500
+                  : 300
+              }
+            />
           )}
           <div className="lg:hidden">
             <PainelChecklist />
