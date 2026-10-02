@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Plus, Trash2, Calculator } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Calculator, FlaskConical } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import {
   useSouAdmin,
@@ -459,9 +459,15 @@ function EngenhariaPage() {
         <ArrowLeft size={15} /> Voltar para Precos
       </Link>
       <h1 className="text-2xl font-bold text-slate-900 mb-1">Engenharia de custos</h1>
-      <p className="text-sm text-slate-500 mb-6">
+      <p className="text-sm text-slate-500 mb-3">
         O traco vale para todas as pecas: mudou o preco de um insumo, o custo de tudo se ajusta.
       </p>
+      <Link
+        href="/engenharia/pilar-forma4"
+        className="mb-6 inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 hover:bg-violet-100"
+      >
+        <FlaskConical size={16} /> Laboratório do pilar (cálculo pelo vento — em teste)
+      </Link>
 
       {loading ? (
         <div className={cardClasse}>
