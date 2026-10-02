@@ -38,7 +38,6 @@ function LaboratorioPilar() {
   const [municipio, setMunicipio] = useState("Maceió");
   const [v0Manual, setV0Manual] = useState("");
   const [terreno, setTerreno] = useState("cidade");
-  const [semParedes, setSemParedes] = useState(false);
   const [secao, setSecao] = useState("40x25");
   const [altura, setAltura] = useState("8,5");
   const [vao, setVao] = useState("15");
@@ -91,11 +90,13 @@ function LaboratorioPilar() {
       modulacao: ler(modulacao),
       V0,
       terreno,
-      fechado: !semParedes,
+      // Sempre com paredes: o galpão pronto, fechado, é o caso que mais
+      // carrega o pilar (regra do Murilo, 2026-10-02).
+      fechado: true,
       secao,
       laje: comLaje ? { carga: Number(laje) } : null,
     });
-  }, [alturaN, vao, modulacao, V0, terreno, semParedes, secao, laje, comLaje]);
+  }, [alturaN, vao, modulacao, V0, terreno, secao, laje, comLaje]);
 
   const S = SECOES[secao];
   const comprimento = fundacao ? alturaN + fundacao : null;
@@ -226,10 +227,6 @@ function LaboratorioPilar() {
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={semParedes} onChange={(e) => setSemParedes(e.target.checked)} />
-            Galpão sem paredes (vento só nos pilares)
-          </label>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -359,7 +356,7 @@ function LaboratorioPilar() {
                       modulacao: g.m || 5.5,
                       V0,
                       terreno,
-                      fechado: !semParedes,
+                      fechado: true,
                       secao: g.s,
                       laje: g.l ? { carga: 300 } : null,
                     });
