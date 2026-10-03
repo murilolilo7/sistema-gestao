@@ -12,6 +12,7 @@ import {
   LinhasEsqueleto,
 } from "@/components/Ui";
 import CartaoPeca from "./CartaoPeca";
+import CustosComplementares from "./CustosComplementares";
 
 // Papeis com receita/preco proprios que ganham cartao na secao "Calculo de
 // pecas" — Pilar fica de fora (ja tem secao propria acima, com faixa de
@@ -564,6 +565,9 @@ function EngenhariaPage() {
               )}
             </div>
           )}
+
+          {/* ---------- CUSTOS COMPLEMENTARES (perdas, forma, energia, consolos, BDI) ---------- */}
+          <CustosComplementares param={param} salvarParametro={salvarParametro} />
 
           {/* ---------- 1. TRACO DO CONCRETO ---------- */}
           <div className={cardClasse}>

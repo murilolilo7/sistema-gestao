@@ -11,6 +11,7 @@ import {
 } from "../engenharia/pilar-forma4/calculo";
 import { V0_POR_UF, velocidadeBasica } from "../engenharia/pilar-forma4/vento";
 import MUNICIPIOS from "../engenharia/pilar-forma4/municipios.json";
+import { custoCompletoPilar } from "../engenharia/custos-complementares";
 
 // =====================================================================
 // COMPARAÇÃO — pilar pelo cálculo novo (Forma 4) x pilar de hoje (tabela).
@@ -46,6 +47,7 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
   const [municipio, setMunicipio] = useState("");
   const [terreno, setTerreno] = useState("cidade");
   const [precoAco, setPrecoAco] = useState(null);
+  const [param, setParam] = useState(null); // custos complementares (Engenharia)
 
   // Preço do aço por bitola (só leitura)
   useEffect(() => {
@@ -58,12 +60,18 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
         for (const a of data || []) p[bitolaDoInsumo(a.nome)] = Number(a.valor_unitario) || 0;
         setPrecoAco(p);
       });
+    supabase
+      .from("parametros_engenharia")
+      .select("*")
+      .order("id")
+      .limit(1)
+      .then(({ data }) => setParam(data?.[0] || {}));
   }, []);
 
   const vento = velocidadeBasica(uf, municipio);
 
   const cartoes = useMemo(() => {
-    if (!precoAco || !vao || !modulacao) return [];
+    if (!precoAco || !param || !vao || !modulacao) return [];
     return pilares
       .filter((p) => p.dados && !p.dados.erro)
       .map((p) => {
@@ -95,6 +103,19 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
         const kgHoje = hoje.reduce((s, l) => s + l.kg, 0);
         const kgNovo = novo.reduce((s, l) => s + l.kg, 0);
         const volume = Number(d.volume_m3) || Number(d.secao_altura_m) * Number(d.secao_largura_m) * comprimento;
+        // Custo completo (perdas, forma, energia, consolos e BDI da Engenharia)
+        const mo = d.mao_de_obra || {};
+        const baseCompleto = {
+          concreto,
+          maoDeObra,
+          volume,
+          comLaje: p.comLaje,
+          custoM3Concreto: Number(d.custo_m3_concreto) || 0,
+          precoAcoKg: precoAco[16] || 0,
+          custoHoraEquipe: Number(mo.horas_por_pessoa) > 0 ? Number(mo.custo) / Number(mo.horas_por_pessoa) : 0,
+        };
+        const completoHoje = custoCompletoPilar({ ...baseCompleto, aco: acoHoje }, param);
+        const completoNovo = r.armacao ? custoCompletoPilar({ ...baseCompleto, aco: acoNovo }, param) : null;
         return {
           ...p,
           secao,
@@ -111,12 +132,14 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
           acoNovo,
           kgHoje,
           kgNovo,
-          custoHoje: concreto + acoHoje + maoDeObra,
-          custoNovo: r.armacao ? concreto + acoNovo + maoDeObra : null,
+          completoHoje,
+          completoNovo,
+          custoHoje: completoHoje.custo,
+          custoNovo: completoNovo ? completoNovo.custo : null,
           precoOrcamento: Number(d.custo_total) || 0,
         };
       });
-  }, [pilares, precoAco, vao, modulacao, cargaLaje, vento.v0, terreno]);
+  }, [pilares, precoAco, param, vao, modulacao, cargaLaje, vento.v0, terreno]);
 
   if (cartoes.length === 0) return null;
 
@@ -246,19 +269,40 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
               <table className="mt-3 w-full text-xs">
                 <thead>
                   <tr className="text-left text-slate-500 border-b">
-                    <th className="py-1 pr-2">Custo de fábrica por pilar</th>
+                    <th className="py-1 pr-2">Custo por pilar</th>
                     <th className="py-1 pr-2 text-right">Hoje</th>
                     <th className="py-1 pr-2 text-right">Cálculo novo</th>
                     <th className="py-1 text-right">Diferença</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <LinhaCusto rotulo="Concreto" hoje={c.concreto} novo={c.concreto} />
-                  <LinhaCusto rotulo="Aço" hoje={c.acoHoje} novo={c.custoNovo !== null ? c.acoNovo : null} />
-                  <LinhaCusto rotulo="Mão de obra" hoje={c.maoDeObra} novo={c.maoDeObra} />
-                  <LinhaCusto rotulo="Total" hoje={c.custoHoje} novo={c.custoNovo} negrito />
+                  {c.completoHoje.linhas.map((l, i) => (
+                    <LinhaCusto
+                      key={l.rotulo}
+                      rotulo={l.rotulo}
+                      hoje={l.valor}
+                      novo={c.completoNovo ? c.completoNovo.linhas[i].valor : null}
+                      faltando={!l.informado ? l.dica : null}
+                    />
+                  ))}
+                  <LinhaCusto rotulo="Custo completo do pilar" hoje={c.custoHoje} novo={c.custoNovo} negrito />
+                  {c.completoHoje.preco !== null ? (
+                    <LinhaCusto
+                      rotulo={`Preço calculado (BDI ${num(c.completoHoje.bdiPct, 1)}%)`}
+                      hoje={c.completoHoje.preco}
+                      novo={c.completoNovo ? c.completoNovo.preco : null}
+                      negrito
+                    />
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="py-1 text-[11px] text-amber-700">
+                        Preço calculado aparece quando despesas fixas, faturamento, imposto e lucro forem
+                        preenchidos na Engenharia de custos.
+                      </td>
+                    </tr>
+                  )}
                   <LinhaCusto
-                    rotulo={`Total × ${c.qtd} pilares`}
+                    rotulo={`Custo completo × ${c.qtd} pilares`}
                     hoje={c.custoHoje * c.qtd}
                     novo={c.custoNovo !== null ? c.custoNovo * c.qtd : null}
                     negrito
@@ -266,13 +310,25 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
                 </tbody>
               </table>
               <p className="mt-1 text-[11px] text-slate-500">
-                Preço do pilar no orçamento (continua valendo): <b>{moeda(c.precoOrcamento)}</b> por peça.
+                Preço do pilar no orçamento (continua valendo, pelo m³): <b>{moeda(c.precoOrcamento)}</b> por peça
+                {c.completoNovo?.preco ? (
+                  <>
+                    {" "}· pelo cálculo novo com BDI sairia <b>{moeda(c.completoNovo.preco)}</b> (
+                    <span className={c.completoNovo.preco > c.precoOrcamento ? "text-rose-700" : "text-emerald-700"}>
+                      {c.completoNovo.preco > c.precoOrcamento ? "+" : ""}
+                      {moeda(c.completoNovo.preco - c.precoOrcamento)}
+                    </span>
+                    )
+                  </>
+                ) : null}
+                .
               </p>
             </div>
           ))}
 
           <p className="text-[11px] text-slate-500">
-            Custo de fábrica = concreto + aço + mão de obra (sem forma, consolos e BDI). No orçamento
+            Custo completo = concreto + aço + mão de obra + os custos complementares já preenchidos na
+            Engenharia de custos (perdas, forma, energia, consolos). No orçamento
             todo, o cálculo novo daria{" "}
             <b className={difTotal > 0 ? "text-rose-700" : "text-emerald-700"}>
               {difTotal > 0 ? "+" : ""}
@@ -349,11 +405,14 @@ function ListaAco({ titulo, linhas, kg, rs, destaque, vazio }) {
   );
 }
 
-function LinhaCusto({ rotulo, hoje, novo, negrito }) {
+function LinhaCusto({ rotulo, hoje, novo, negrito, faltando }) {
   const dif = novo !== null && novo !== undefined ? novo - hoje : null;
   return (
     <tr className={`border-b border-slate-100 ${negrito ? "font-semibold" : ""}`}>
-      <td className="py-1 pr-2">{rotulo}</td>
+      <td className="py-1 pr-2">
+        {rotulo}
+        {faltando && <span className="ml-1 text-[10px] text-amber-600">(a preencher: {faltando})</span>}
+      </td>
       <td className="py-1 pr-2 text-right">{moeda(hoje)}</td>
       <td className="py-1 pr-2 text-right">{novo !== null && novo !== undefined ? moeda(novo) : "—"}</td>
       <td
