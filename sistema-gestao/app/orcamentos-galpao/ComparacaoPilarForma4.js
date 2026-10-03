@@ -223,10 +223,8 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
                   rotulo="Aço necessário"
                   valor={c.r.asFace !== null ? `${num(c.r.asFace, 2)} cm²/face` : "—"}
                 />
-                {c.r.armacao && (
-                  <Chip rotulo="Armação escolhida tem" valor={`${num(c.r.armacao.area / 2, 2)} cm²/face`} />
-                )}
               </div>
+              {c.r.armacao && <BarraAproveitamento r={c.r} />}
               {c.r.avisos.map((a) => (
                 <p key={a} className="mt-1 text-[11px] text-amber-700">
                   ⚠ {a}
@@ -283,6 +281,32 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
             de custo nos pilares.
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Quanto da armação escolhida o pilar usa. Passou de 100%, o cálculo sobe
+// para o próximo degrau (a armação seguinte da fábrica).
+export function BarraAproveitamento({ r }) {
+  const p = Math.min(100, Math.max(0, r.aproveitamento || 0));
+  const cor = p >= 90 ? "bg-rose-500" : p >= 70 ? "bg-amber-500" : "bg-emerald-500";
+  const desc = (a) => a.descricao.replaceAll(".", ",");
+  return (
+    <div className="mt-2 text-[11px] text-slate-600">
+      <div className="flex items-center gap-2">
+        <span className="whitespace-nowrap">
+          Usa <b>{num(r.aproveitamento, 0)}%</b> da {desc(r.armacao)} ({num(r.asFace, 2)} de{" "}
+          {num(r.armacao.area / 2, 2)} cm²/face)
+        </span>
+        <div className="h-2 flex-1 min-w-[80px] rounded-full bg-slate-200 overflow-hidden">
+          <div className={`h-full ${cor}`} style={{ width: `${p}%` }} />
+        </div>
+      </div>
+      {r.proximaArmacao && (
+        <p className="mt-0.5 text-slate-400">
+          Acima de 100% passa para {desc(r.proximaArmacao)} ({num(r.proximaArmacao.area / 2, 2)} cm²/face).
+        </p>
       )}
     </div>
   );

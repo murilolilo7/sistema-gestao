@@ -248,7 +248,13 @@ export function calcularPilarForma4(entrada, parametros) {
     // H/150 com o vento de projeto: bem acima do usual em galpão (H/300 a H/400)
     avisos.push("Pilar muito flexível para essa altura: o topo desloca muito com o vento.");
   }
-  return { secao, ...esf, asFace, armacao: escolhida, avisos };
+  // Quanto da armação escolhida está sendo usado (100% = no limite; acima
+  // disso o cálculo já teria subido para a próxima) e qual é o próximo degrau
+  const lista = SECOES[secao].armacoes;
+  const i = escolhida ? lista.indexOf(escolhida) : -1;
+  const aproveitamento = escolhida ? arred((asFace / (escolhida.area / 2)) * 100, 0) : null;
+  const proximaArmacao = i >= 0 && i < lista.length - 1 ? lista[i + 1] : null;
+  return { secao, ...esf, asFace, armacao: escolhida, aproveitamento, proximaArmacao, avisos };
 }
 
 // Lista do aço do pilar (para custo e para comparar item a item):

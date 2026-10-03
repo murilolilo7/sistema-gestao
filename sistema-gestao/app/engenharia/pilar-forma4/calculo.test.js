@@ -95,6 +95,13 @@ test("galpão aberto (sem paredes) leva menos vento no pilar que fechado", () =>
   assert.ok(a.Mw < f.Mw);
 });
 
+test("aproveitamento: mostra quanto da armação é usado e o próximo degrau", () => {
+  const r = calcularPilarForma4({ ...base, altura: 8.5, vao: 15, modulacao: 5 });
+  assert.equal(r.armacao.descricao, "4ø16+2ø10");
+  assert.ok(r.aproveitamento > 50 && r.aproveitamento <= 100, `aproveitamento ${r.aproveitamento}`);
+  assert.equal(r.proximaArmacao.descricao, "4ø16+2ø12.5");
+});
+
 test("seção pequena demais avisa em vez de inventar armação", () => {
   const r = calcularPilarForma4({ ...base, secao: "25x25", altura: 9, vao: 20, modulacao: 6 });
   assert.equal(r.armacao, null);

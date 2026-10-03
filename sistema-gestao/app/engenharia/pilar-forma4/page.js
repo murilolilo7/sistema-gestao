@@ -15,6 +15,7 @@ import {
 } from "./calculo";
 import { V0_POR_UF, velocidadeBasica } from "./vento";
 import MUNICIPIOS from "./municipios.json";
+import { BarraAproveitamento } from "../../orcamentos-galpao/ComparacaoPilarForma4";
 import GABARITO from "./gabarito.json";
 
 // =====================================================================
@@ -293,6 +294,8 @@ function LaboratorioPilar() {
                 {resultado.Mlaje ? ` + laje no consolo ${num(resultado.Mlaje, 0)} kN·m` : ""} (característicos) ·
                 2ª ordem {num(resultado.M2d, 0)} kN·m
               </p>
+
+              {resultado.armacao && <BarraAproveitamento r={resultado} />}
 
               {resultado.avisos.map((a) => (
                 <p key={a} className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
