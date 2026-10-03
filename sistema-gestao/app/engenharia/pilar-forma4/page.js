@@ -5,7 +5,14 @@ import Link from "next/link";
 import { ArrowLeft, FlaskConical, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { useSouAdmin, AcessoRestrito } from "@/components/Ui";
-import { calcularPilarForma4, pesoAcoPilar, SECOES, TERRENOS, PARAMETROS_PADRAO } from "./calculo";
+import {
+  calcularPilarForma4,
+  pesoAcoPilar,
+  detalharAcoPilar,
+  SECOES,
+  TERRENOS,
+  PARAMETROS_PADRAO,
+} from "./calculo";
 import { V0_POR_UF, velocidadeBasica } from "./vento";
 import MUNICIPIOS from "./municipios.json";
 import GABARITO from "./gabarito.json";
@@ -103,24 +110,14 @@ function LaboratorioPilar() {
   const volume = comprimento ? S.b * S.h * comprimento : null;
   const kgAco = resultado && comprimento ? pesoAcoPilar(resultado, comprimento) : null;
 
-  // Custo de material: concreto + aço (preço médio ponderado das bitolas da armação)
+  // Custo de material: concreto + aço (cada barra pelo preço da sua bitola)
   const custo = useMemo(() => {
     if (!precos || !resultado?.armacao || !volume) return null;
-    const arm = resultado.armacao;
-    const kgLong = arm.barras.reduce(
-      (s, b) => s + b.n * ({ 10: 0.617, 12.5: 0.963, 16: 1.578, 20: 2.466 }[b.d] || 0) * comprimento,
-      0
-    );
-    const rsLong = arm.barras.reduce(
-      (s, b) =>
-        s + b.n * ({ 10: 0.617, 12.5: 0.963, 16: 1.578, 20: 2.466 }[b.d] || 0) * comprimento * (precos.aco[b.d] || 0),
-      0
-    );
-    const kgEstribo = Math.max(0, kgAco - kgLong);
-    const rsAco = rsLong + kgEstribo * (precos.aco[5] || 0);
+    const linhas = detalharAcoPilar(resultado, comprimento) || [];
+    const rsAco = linhas.reduce((s, l) => s + l.kg * (precos.aco[l.bitola] || 0), 0);
     const rsConcreto = volume * precos.concreto;
     return { rsAco, rsConcreto, material: rsAco + rsConcreto, precoHoje: volume * precos.m3Armado };
-  }, [precos, resultado, volume, comprimento, kgAco]);
+  }, [precos, resultado, volume, comprimento]);
 
   // Projetos reais parecidos (mesma seção e mesma condição de laje)
   const parecidos = useMemo(() => {

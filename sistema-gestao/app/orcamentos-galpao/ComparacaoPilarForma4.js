@@ -3,22 +3,42 @@
 import { useEffect, useMemo, useState } from "react";
 import { FlaskConical, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { calcularPilarForma4, pesoAcoPilar, SECOES, TERRENOS } from "../engenharia/pilar-forma4/calculo";
+import {
+  calcularPilarForma4,
+  detalharAcoPilar,
+  SECOES,
+  TERRENOS,
+} from "../engenharia/pilar-forma4/calculo";
 import { V0_POR_UF, velocidadeBasica } from "../engenharia/pilar-forma4/vento";
 import MUNICIPIOS from "../engenharia/pilar-forma4/municipios.json";
 
 // =====================================================================
-// COMPARAÇÃO — pilar pelo cálculo novo (Forma 4) x pilar de hoje.
+// COMPARAÇÃO — pilar pelo cálculo novo (Forma 4) x pilar de hoje (tabela).
 // SÓ MOSTRA: não muda quantidade, nome nem preço de nenhum item. O preço do
 // orçamento continua saindo do jeito atual (R$/m³ armado).
 // Município e terreno ficam só na tela (não são gravados no orçamento
 // enquanto o cálculo novo estiver em teste).
 // =====================================================================
 
-const KG_POR_M = { 5: 0.154, 10: 0.617, 12.5: 0.963, 16: 1.578, 20: 2.466 };
 const moeda = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const num = (v, c = 0) =>
   Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: c, maximumFractionDigits: c });
+const bitolaDoInsumo = (nome) => Number(String(nome || "").replace(/[^\d.]/g, ""));
+const fmtBitola = (d) => `ø${String(d).replace(".", ",")}`;
+
+// Aço de hoje (vem do calcular_pilar, já com kg e R$) no mesmo formato do novo
+function acoDeHoje(d) {
+  return (d.aco || []).map((a) => {
+    const bitola = bitolaDoInsumo(a.insumo);
+    let descricao;
+    if (a.tipo === "ESTRIBO") descricao = `Estribo ${fmtBitola(bitola)} c/15 (${num(a.quantidade)} un)`;
+    else if (a.tipo === "FIXA") descricao = `Alça de içamento ${num(a.quantidade)} ${fmtBitola(bitola)}`;
+    else descricao = `${num(a.quantidade)} ${fmtBitola(bitola)}`;
+    return { tipo: a.tipo, descricao, kg: Number(a.peso_kg) || 0, rs: Number(a.custo) || 0 };
+  });
+}
+
+const ORDEM = { LONGITUDINAL: 0, ESTRIBO: 1, FIXA: 2 };
 
 export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLaje }) {
   const [aberto, setAberto] = useState(true);
@@ -35,20 +55,21 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
       .ilike("nome", "AÇO %")
       .then(({ data }) => {
         const p = {};
-        for (const a of data || []) p[Number(a.nome.replace(/[^\d.]/g, ""))] = Number(a.valor_unitario) || 0;
+        for (const a of data || []) p[bitolaDoInsumo(a.nome)] = Number(a.valor_unitario) || 0;
         setPrecoAco(p);
       });
   }, []);
 
   const vento = velocidadeBasica(uf, municipio);
 
-  const linhas = useMemo(() => {
+  const cartoes = useMemo(() => {
     if (!precoAco || !vao || !modulacao) return [];
     return pilares
       .filter((p) => p.dados && !p.dados.erro)
       .map((p) => {
         const d = p.dados;
-        const secao = `${Math.round(Number(d.secao_altura_m) * 100)}x${Math.round(Number(d.secao_largura_m) * 100)}`;
+        const secaoReal = `${Math.round(Number(d.secao_altura_m) * 100)}x${Math.round(Number(d.secao_largura_m) * 100)}`;
+        const secao = SECOES[secaoReal] ? secaoReal : "40x25";
         const altura = Number(d.pe_direito_livre);
         const comprimento = Number(d.comprimento_total_m);
         const r = calcularPilarForma4({
@@ -58,51 +79,49 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
           V0: vento.v0,
           terreno,
           fechado: true,
-          secao: SECOES[secao] ? secao : "40x25",
+          secao,
           laje: p.comLaje ? { carga: cargaLaje } : null,
         });
-        const kgNovo = pesoAcoPilar(r, comprimento);
-        let rsAcoNovo = null;
-        if (r.armacao) {
-          const kgLong = r.armacao.barras.reduce((s, b) => s + b.n * (KG_POR_M[b.d] || 0) * comprimento, 0);
-          const rsLong = r.armacao.barras.reduce(
-            (s, b) => s + b.n * (KG_POR_M[b.d] || 0) * comprimento * (precoAco[b.d] || 0),
-            0
-          );
-          rsAcoNovo = rsLong + Math.max(0, kgNovo - kgLong) * (precoAco[5] || 0);
-        }
-        const armacaoHoje = (d.aco || [])
-          .filter((a) => a.tipo === "LONGITUDINAL")
-          .map((a) => a.rotulo)
-          .join(" + ")
-          .replace(/ x /g, "")
-          .replace(/Ø/g, "ø");
-        const custoHoje = Number(d.custo_detalhado) || 0;
-        const custoNovo =
-          rsAcoNovo !== null
-            ? (Number(d.custo_concreto) || 0) + rsAcoNovo + (Number(d.custo_mao_de_obra) || 0)
-            : null;
+
+        const hoje = acoDeHoje(d).sort((a, b) => ORDEM[a.tipo] - ORDEM[b.tipo]);
+        const novo = (detalharAcoPilar(r, comprimento) || []).map((l) => ({
+          ...l,
+          rs: l.kg * (precoAco[l.bitola] || 0),
+        }));
+        const concreto = Number(d.custo_concreto) || 0;
+        const maoDeObra = Number(d.custo_mao_de_obra) || 0;
+        const acoHoje = hoje.reduce((s, l) => s + l.rs, 0);
+        const acoNovo = novo.reduce((s, l) => s + l.rs, 0);
+        const kgHoje = hoje.reduce((s, l) => s + l.kg, 0);
+        const kgNovo = novo.reduce((s, l) => s + l.kg, 0);
+        const volume = Number(d.volume_m3) || Number(d.secao_altura_m) * Number(d.secao_largura_m) * comprimento;
         return {
-          rotulo: p.rotulo,
-          qtd: p.qtd,
+          ...p,
           secao,
           altura,
           comprimento,
+          fundacao: Number(d.fundacao_m) || comprimento - altura,
+          volume,
           r,
-          armacaoHoje: armacaoHoje || "—",
-          kgHoje: Number(d.peso_aco_kg) || 0,
+          hoje,
+          novo,
+          concreto,
+          maoDeObra,
+          acoHoje,
+          acoNovo,
+          kgHoje,
           kgNovo,
-          custoHoje,
-          custoNovo,
+          custoHoje: concreto + acoHoje + maoDeObra,
+          custoNovo: r.armacao ? concreto + acoNovo + maoDeObra : null,
           precoOrcamento: Number(d.custo_total) || 0,
         };
       });
   }, [pilares, precoAco, vao, modulacao, cargaLaje, vento.v0, terreno]);
 
-  if (linhas.length === 0) return null;
+  if (cartoes.length === 0) return null;
 
-  const difTotal = linhas.reduce(
-    (s, l) => (l.custoNovo !== null ? s + (l.custoNovo - l.custoHoje) * l.qtd : s),
+  const difTotal = cartoes.reduce(
+    (s, c) => (c.custoNovo !== null ? s + (c.custoNovo - c.custoHoje) * c.qtd : s),
     0
   );
 
@@ -120,13 +139,14 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
       </button>
 
       {aberto && (
-        <div className="px-3 pb-3">
-          <p className="text-[11px] text-violet-800/80 mb-2">
+        <div className="px-3 pb-3 space-y-3">
+          <p className="text-[11px] text-violet-800/80">
             Não muda nada no orçamento: o preço do pilar continua pelo valor do m³. Aqui aparece a
-            armação que o cálculo pelo vento pede e quanto o custo de fábrica mudaria.
+            ferragem de hoje (tabela do sistema) ao lado da que o cálculo pelo vento pede, item a item.
           </p>
 
-          <div className="mb-3 flex flex-wrap items-end gap-2 text-xs">
+          {/* -------- Local da obra -------- */}
+          <div className="flex flex-wrap items-end gap-2 text-xs">
             <div>
               <label className="block text-slate-500 mb-0.5">Estado</label>
               <select
@@ -157,87 +177,168 @@ export default function ComparacaoPilarForma4({ pilares, vao, modulacao, cargaLa
                 ))}
               </datalist>
             </div>
-            <div className="flex gap-1">
-              {Object.entries(TERRENOS).map(([k, t]) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => setTerreno(k)}
-                  className={`rounded border px-2 py-1 ${
-                    terreno === k ? "border-violet-400 bg-violet-100 text-violet-900" : "border-slate-300 bg-white text-slate-600"
-                  }`}
-                >
-                  {t.rotulo}
-                </button>
-              ))}
+            <div>
+              <label className="block text-slate-500 mb-0.5">Ao redor do terreno</label>
+              <div className="flex gap-1">
+                {Object.entries(TERRENOS).map(([k, t]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setTerreno(k)}
+                    className={`rounded border px-2 py-1 ${
+                      terreno === k
+                        ? "border-violet-400 bg-violet-100 text-violet-900 font-medium"
+                        : "border-slate-300 bg-white text-slate-600"
+                    }`}
+                  >
+                    {t.rotulo}
+                  </button>
+                ))}
+              </div>
             </div>
             <span className={vento.conferido ? "text-emerald-700" : "text-amber-700"}>
-              Vento {vento.v0} m/s{vento.conferido ? "" : " (a conferir)"}
+              Vento básico {vento.v0} m/s{vento.conferido ? "" : " (a conferir)"}
               {!vento.conferido && V0_POR_UF[uf]?.obs ? ` — ${V0_POR_UF[uf].obs}` : ""}
             </span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-slate-500 border-b border-violet-200">
-                  <th className="py-1 pr-2">Pilar</th>
-                  <th className="py-1 pr-2">Armação hoje (tabela)</th>
-                  <th className="py-1 pr-2">Cálculo novo</th>
-                  <th className="py-1 pr-2 text-right">Aço hoje → novo</th>
-                  <th className="py-1 pr-2 text-right">Custo de fábrica hoje → novo</th>
-                  <th className="py-1 text-right">Preço no orçamento</th>
-                </tr>
-              </thead>
-              <tbody>
-                {linhas.map((l) => (
-                  <tr key={l.rotulo} className="border-b border-violet-100 align-top">
-                    <td className="py-1.5 pr-2">
-                      <span className="font-medium text-slate-800">{l.rotulo}</span>
-                      <span className="block text-slate-400">
-                        {l.qtd} pç · {l.secao.replace("x", " x ")} · {num(l.comprimento, 2)} m
-                      </span>
-                    </td>
-                    <td className="py-1.5 pr-2 text-slate-600">{l.armacaoHoje}</td>
-                    <td className="py-1.5 pr-2">
-                      {l.r.armacao ? (
-                        <span className="font-semibold text-violet-900">
-                          {l.r.armacao.descricao.replaceAll(".", ",")}
-                        </span>
-                      ) : (
-                        <span className="font-semibold text-rose-700">seção não atende</span>
-                      )}
-                      {l.r.avisos.map((a) => (
-                        <span key={a} className="block text-amber-700">
-                          {a}
-                        </span>
-                      ))}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right whitespace-nowrap">
-                      {num(l.kgHoje, 0)} → <b>{l.kgNovo !== null ? num(l.kgNovo, 0) : "—"}</b> kg
-                    </td>
-                    <td className="py-1.5 pr-2 text-right whitespace-nowrap">
-                      {moeda(l.custoHoje)} → <b>{l.custoNovo !== null ? moeda(l.custoNovo) : "—"}</b>
-                    </td>
-                    <td className="py-1.5 text-right whitespace-nowrap text-slate-600">
-                      {moeda(l.precoOrcamento)}
-                    </td>
+          {/* -------- Um cartão por tipo de pilar -------- */}
+          {cartoes.map((c) => (
+            <div key={c.rotulo} className="rounded-lg border border-violet-200 bg-white p-3">
+              <p className="text-sm font-semibold text-slate-800">
+                {c.rotulo}{" "}
+                <span className="font-normal text-slate-500">
+                  — {c.qtd} pç · {c.secao.replace("x", " x ")} · {num(c.comprimento, 2)} m ({num(c.altura, 2)} m +{" "}
+                  {num(c.fundacao, 2)} m de fundação) · {num(c.volume, 3)} m³
+                </span>
+              </p>
+
+              {/* Por que o cálculo pede essa ferragem — muda com terreno/município
+                  mesmo quando a armação escolhida continua a mesma */}
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                <Chip rotulo="Pressão do vento" valor={`${num(c.r.q, 2)} kN/m²`} />
+                <Chip rotulo="Momento no pé" valor={`${num(c.r.Md, 0)} kN·m`} />
+                <Chip rotulo="Força no pilar" valor={`${num(c.r.Nd, 0)} kN`} />
+                <Chip
+                  rotulo="Aço necessário"
+                  valor={c.r.asFace !== null ? `${num(c.r.asFace, 2)} cm²/face` : "—"}
+                />
+                {c.r.armacao && (
+                  <Chip rotulo="Armação escolhida tem" valor={`${num(c.r.armacao.area / 2, 2)} cm²/face`} />
+                )}
+              </div>
+              {c.r.avisos.map((a) => (
+                <p key={a} className="mt-1 text-[11px] text-amber-700">
+                  ⚠ {a}
+                </p>
+              ))}
+
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <ListaAco titulo="Hoje (tabela do sistema)" linhas={c.hoje} kg={c.kgHoje} rs={c.acoHoje} />
+                <ListaAco
+                  titulo="Cálculo novo (vento + laje)"
+                  linhas={c.novo}
+                  kg={c.kgNovo}
+                  rs={c.acoNovo}
+                  destaque
+                  vazio={!c.r.armacao ? "A seção não atende — precisa de seção maior." : null}
+                />
+              </div>
+
+              <table className="mt-3 w-full text-xs">
+                <thead>
+                  <tr className="text-left text-slate-500 border-b">
+                    <th className="py-1 pr-2">Custo de fábrica por pilar</th>
+                    <th className="py-1 pr-2 text-right">Hoje</th>
+                    <th className="py-1 pr-2 text-right">Cálculo novo</th>
+                    <th className="py-1 text-right">Diferença</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-500">
-            Custo de fábrica = concreto + aço + mão de obra (sem forma, consolos e BDI). Diferença no
-            orçamento todo pelo cálculo novo:{" "}
+                </thead>
+                <tbody>
+                  <LinhaCusto rotulo="Concreto" hoje={c.concreto} novo={c.concreto} />
+                  <LinhaCusto rotulo="Aço" hoje={c.acoHoje} novo={c.custoNovo !== null ? c.acoNovo : null} />
+                  <LinhaCusto rotulo="Mão de obra" hoje={c.maoDeObra} novo={c.maoDeObra} />
+                  <LinhaCusto rotulo="Total" hoje={c.custoHoje} novo={c.custoNovo} negrito />
+                  <LinhaCusto
+                    rotulo={`Total × ${c.qtd} pilares`}
+                    hoje={c.custoHoje * c.qtd}
+                    novo={c.custoNovo !== null ? c.custoNovo * c.qtd : null}
+                    negrito
+                  />
+                </tbody>
+              </table>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Preço do pilar no orçamento (continua valendo): <b>{moeda(c.precoOrcamento)}</b> por peça.
+              </p>
+            </div>
+          ))}
+
+          <p className="text-[11px] text-slate-500">
+            Custo de fábrica = concreto + aço + mão de obra (sem forma, consolos e BDI). No orçamento
+            todo, o cálculo novo daria{" "}
             <b className={difTotal > 0 ? "text-rose-700" : "text-emerald-700"}>
               {difTotal > 0 ? "+" : ""}
               {moeda(difTotal)}
             </b>{" "}
-            de custo.
+            de custo nos pilares.
           </p>
         </div>
       )}
     </div>
+  );
+}
+
+function Chip({ rotulo, valor }) {
+  return (
+    <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5">
+      <span className="text-slate-500">{rotulo}: </span>
+      <b className="text-slate-800">{valor}</b>
+    </span>
+  );
+}
+
+function ListaAco({ titulo, linhas, kg, rs, destaque, vazio }) {
+  return (
+    <div className={`rounded border p-2 ${destaque ? "border-violet-300 bg-violet-50/60" : "border-slate-200 bg-slate-50"}`}>
+      <p className={`text-xs font-semibold mb-1 ${destaque ? "text-violet-900" : "text-slate-700"}`}>{titulo}</p>
+      {vazio ? (
+        <p className="text-xs text-rose-700">{vazio}</p>
+      ) : (
+        <table className="w-full text-xs">
+          <tbody>
+            {linhas.map((l, i) => (
+              <tr key={i} className="border-b border-slate-200/70">
+                <td className="py-0.5 pr-2">{l.descricao}</td>
+                <td className="py-0.5 pr-2 text-right whitespace-nowrap">{num(l.kg, 1)} kg</td>
+                <td className="py-0.5 text-right whitespace-nowrap">{moeda(l.rs)}</td>
+              </tr>
+            ))}
+            <tr className="font-semibold">
+              <td className="pt-1 pr-2">Aço total</td>
+              <td className="pt-1 pr-2 text-right whitespace-nowrap">{num(kg, 1)} kg</td>
+              <td className="pt-1 text-right whitespace-nowrap">{moeda(rs)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function LinhaCusto({ rotulo, hoje, novo, negrito }) {
+  const dif = novo !== null && novo !== undefined ? novo - hoje : null;
+  return (
+    <tr className={`border-b border-slate-100 ${negrito ? "font-semibold" : ""}`}>
+      <td className="py-1 pr-2">{rotulo}</td>
+      <td className="py-1 pr-2 text-right">{moeda(hoje)}</td>
+      <td className="py-1 pr-2 text-right">{novo !== null && novo !== undefined ? moeda(novo) : "—"}</td>
+      <td
+        className={`py-1 text-right ${
+          dif === null || Math.abs(dif) < 0.005 ? "text-slate-400" : dif > 0 ? "text-rose-700" : "text-emerald-700"
+        }`}
+      >
+        {dif === null ? "—" : Math.abs(dif) < 0.005 ? "igual" : `${dif > 0 ? "+" : ""}${moeda(dif)}`}
+      </td>
+    </tr>
   );
 }

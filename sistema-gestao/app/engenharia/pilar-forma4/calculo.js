@@ -63,6 +63,8 @@ export const SECOES = {
     h: 0.4,
     b: 0.25,
     perimetroEstribo: 1.21,
+    // Alças de içamento (puxador): 2ø16 de 1,08 m nos projetos 40x25
+    alca: { n: 2, d: 16, comprimento: 1.08 },
     armacoes: [
       "4ø16+2ø10",
       "4ø16+2ø12.5",
@@ -81,12 +83,14 @@ export const SECOES = {
     h: 0.3,
     b: 0.25,
     perimetroEstribo: 1.01,
+    alca: { n: 2, d: 12.5, comprimento: 0.88 },
     armacoes: ["4ø12.5+2ø10", "6ø12.5", "6ø12.5+2ø10", "4ø16+2ø10", "4ø16+2ø12.5", "6ø16"].map(armacao),
   },
   "25x25": {
     h: 0.25,
     b: 0.25,
     perimetroEstribo: 0.86,
+    alca: { n: 2, d: 12.5, comprimento: 0.79 },
     armacoes: ["4ø12.5+2ø10", "6ø12.5", "4ø16+2ø10"].map(armacao),
   },
 };
@@ -247,13 +251,47 @@ export function calcularPilarForma4(entrada, parametros) {
   return { secao, ...esf, asFace, armacao: escolhida, avisos };
 }
 
-// Aço longitudinal + estribos (kg), para custo. Comprimento total = altura + fundação.
-export function pesoAcoPilar(resultado, comprimentoTotal) {
+// Lista do aço do pilar (para custo e para comparar item a item):
+// barras longitudinais (comprimento total − 6 cm de cobrimento nas pontas),
+// estribos ø5 c/15 e alças de içamento. Comprimento total = altura + fundação.
+export function detalharAcoPilar(resultado, comprimentoTotal) {
   if (!resultado?.armacao) return null;
   const S = SECOES[resultado.secao];
-  const longitudinal = resultado.armacao.kgPorMetro * comprimentoTotal;
-  const estribos = (Math.floor((comprimentoTotal * 100) / 15) + 1) * S.perimetroEstribo * KG_POR_M[5];
-  return arred(longitudinal + estribos, 1);
+  const barra = Math.max(0, comprimentoTotal - 0.06);
+  const linhas = resultado.armacao.barras.map((b) => ({
+    tipo: "LONGITUDINAL",
+    descricao: `${b.n} ø${String(b.d).replace(".", ",")}`,
+    bitola: b.d,
+    quantidade: b.n,
+    metros: arred(b.n * barra, 2),
+    kg: arred(b.n * barra * (KG_POR_M[b.d] || 0), 2),
+  }));
+  const nEstribos = Math.floor((comprimentoTotal * 100) / 15) + 1;
+  linhas.push({
+    tipo: "ESTRIBO",
+    descricao: `Estribo ø5 c/15 (${nEstribos} un)`,
+    bitola: 5,
+    quantidade: nEstribos,
+    metros: arred(nEstribos * S.perimetroEstribo, 2),
+    kg: arred(nEstribos * S.perimetroEstribo * KG_POR_M[5], 2),
+  });
+  if (S.alca) {
+    linhas.push({
+      tipo: "FIXA",
+      descricao: `Alça de içamento ${S.alca.n} ø${String(S.alca.d).replace(".", ",")}`,
+      bitola: S.alca.d,
+      quantidade: S.alca.n,
+      metros: arred(S.alca.n * S.alca.comprimento, 2),
+      kg: arred(S.alca.n * S.alca.comprimento * (KG_POR_M[S.alca.d] || 0), 2),
+    });
+  }
+  return linhas;
+}
+
+// Peso total de aço (kg)
+export function pesoAcoPilar(resultado, comprimentoTotal) {
+  const linhas = detalharAcoPilar(resultado, comprimentoTotal);
+  return linhas ? arred(linhas.reduce((s, l) => s + l.kg, 0), 1) : null;
 }
 
 function arred(v, casas) {

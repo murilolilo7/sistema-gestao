@@ -131,9 +131,9 @@ for (const [nome, entrada, esperado] of casos) {
 // PESO DE AÇO (para o custo)
 // ---------------------------------------------------------------------------
 
-test("peso: pilar 40x25 de 10 m com 4ø16+2ø10 dá ~88 kg (longitudinal + estribos)", () => {
+test("peso: pilar 40x25 de 10 m com 4ø16+2ø10 dá ~91 kg (longitudinal + estribos + alças)", () => {
   const r = { secao: "40x25", armacao: escolherArmacao("40x25", 4.0) };
   const kg = pesoAcoPilar(r, 10);
-  // 4ø16 (63,1) + 2ø10 (12,3) + 67 estribos de 1,21 m ø5 (12,5) ≈ 88
+  // 4ø16 (62,7) + 2ø10 (12,3) + 67 estribos de 1,21 m ø5 (12,5) + alças 2ø16 (3,4) ≈ 91
   assert.ok(kg > 80 && kg < 95, `kg = ${kg}`);
 });
