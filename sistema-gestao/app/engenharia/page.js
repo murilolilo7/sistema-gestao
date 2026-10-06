@@ -47,7 +47,31 @@ const campoClasse =
   "w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
 const cardClasse = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";
 
+// Abas da tela: o que forma preço hoje, o cálculo novo em teste e o cálculo
+// antigo guardado só para consulta. A aba escolhida fica lembrada no navegador.
+const ABAS = [
+  { id: "uso", rotulo: "Em uso" },
+  { id: "testes", rotulo: "Testes — cálculo novo" },
+  { id: "arquivo", rotulo: "Cálculo antigo (arquivo)" },
+];
+const CHAVE_ABA = "engenharia-aba";
+
 function EngenhariaPage() {
+  // Só roda no navegador (a tela fica escondida até confirmar o administrador)
+  const [aba, setAba] = useState(() => {
+    try {
+      const salva = localStorage.getItem(CHAVE_ABA);
+      return ABAS.some((a) => a.id === salva) ? salva : "uso";
+    } catch {
+      return "uso";
+    }
+  });
+  function trocarAba(id) {
+    setAba(id);
+    try {
+      localStorage.setItem(CHAVE_ABA, id);
+    } catch {}
+  }
   const [loading, setLoading] = useState(true);
   const [insumos, setInsumos] = useState([]);
   const [traco, setTraco] = useState(null);
@@ -463,18 +487,22 @@ function EngenhariaPage() {
       <p className="text-sm text-slate-500 mb-3">
         O traco vale para todas as pecas: mudou o preco de um insumo, o custo de tudo se ajusta.
       </p>
-      <Link
-        href="/engenharia/pilar-forma4"
-        className="mb-6 inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 hover:bg-violet-100"
-      >
-        <FlaskConical size={16} /> Laboratório do pilar (cálculo pelo vento — em teste)
-      </Link>{" "}
-      <Link
-        href="/engenharia/tesoura"
-        className="mb-6 inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 hover:bg-violet-100"
-      >
-        <FlaskConical size={16} /> Laboratório da tesoura (em teste)
-      </Link>
+      <div className="mb-5 flex flex-wrap gap-1 border-b border-slate-200">
+        {ABAS.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => trocarAba(a.id)}
+            className={`-mb-px rounded-t-lg border px-4 py-2 text-sm ${
+              aba === a.id
+                ? "border-slate-200 border-b-white bg-white font-semibold text-slate-900"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {a.rotulo}
+          </button>
+        ))}
+      </div>
 
       {loading ? (
         <div className={cardClasse}>
@@ -483,6 +511,8 @@ function EngenhariaPage() {
       ) : (
         <div className="space-y-5">
           {/* ---------- MODO DE CALCULO ---------- */}
+          {aba === "uso" && (
+            <>
           {param && (
             <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-5">
               <p className="text-sm font-semibold text-slate-700 mb-1">Como o pilar e calculado</p>
@@ -571,11 +601,46 @@ function EngenhariaPage() {
               )}
             </div>
           )}
+            </>
+          )}
+
+          {/* ---------- LABORATÓRIOS (cálculo novo, em teste) ---------- */}
+          {aba === "testes" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                { href: "/engenharia/pilar-forma4", titulo: "Laboratório do pilar", texto: "Cálculo pelo vento e pela laje, comparado com os projetos reais." },
+                { href: "/engenharia/tesoura", titulo: "Laboratório da tesoura", texto: "Cálculo pelo formato real e pela carga, comparado com os projetos reais." },
+              ].map((l) => (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  className="rounded-xl border-2 border-violet-200 bg-violet-50/50 p-4 hover:bg-violet-50"
+                >
+                  <p className="flex items-center gap-2 text-sm font-semibold text-violet-900">
+                    <FlaskConical size={16} /> {l.titulo}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600">{l.texto}</p>
+                </Link>
+              ))}
+            </div>
+          )}
+          {aba === "arquivo" && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Cálculo antigo do pilar (modo detalhado por faixa) e itens que hoje não entram no preço. Fica
+              guardado só para consulta — nada aqui muda os orçamentos.
+            </p>
+          )}
 
           {/* ---------- CUSTOS COMPLEMENTARES (perdas, forma, energia, consolos, BDI) ---------- */}
+          {aba === "testes" && (
+            <>
           <CustosComplementares param={param} salvarParametro={salvarParametro} />
+            </>
+          )}
 
           {/* ---------- 1. TRACO DO CONCRETO ---------- */}
+          {aba === "testes" && (
+            <>
           <div className={cardClasse}>
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
               <p className="text-sm font-semibold text-slate-700">
@@ -701,8 +766,12 @@ function EngenhariaPage() {
               {salvando ? "Salvando..." : "Salvar traco"}
             </button>
           </div>
+            </>
+          )}
 
           {/* ---------- 2. FUNDACAO ---------- */}
+          {aba === "uso" && (
+            <>
           <div className={cardClasse}>
             <p className="text-sm font-semibold text-slate-700 mb-1">Fundacao do pilar</p>
             <p className="text-xs text-slate-500 mb-3">
@@ -739,7 +808,11 @@ function EngenhariaPage() {
               ))}
             </div>
           </div>
+            </>
+          )}
           {/* ---------- 3. MATRIZ DE FERRAGEM DO PILAR ---------- */}
+          {aba === "arquivo" && (
+            <>
           <div className={cardClasse}>
             <p className="text-sm font-semibold text-slate-700 mb-1">Ferragem do pilar por faixa</p>
             <p className="text-xs text-slate-500 mb-3">
@@ -1117,8 +1190,12 @@ function EngenhariaPage() {
                   </div>
                 ))}
           </div>
+            </>
+          )}
 
           {/* ---------- 3b. FAIXAS ESPECIAIS DO PILAR (fora da matriz) ---------- */}
+          {aba === "arquivo" && (
+            <>
           <div className={cardClasse}>
             <p className="text-sm font-semibold text-slate-700 mb-1">Faixas especiais do pilar</p>
             <p className="text-xs text-slate-500 mb-3">
@@ -1160,8 +1237,12 @@ function EngenhariaPage() {
               })}
             </div>
           </div>
+            </>
+          )}
 
           {/* ---------- 4. TESOURAS ---------- */}
+          {aba === "arquivo" && (
+            <>
           <div className={cardClasse}>
             <p className="text-sm font-semibold text-slate-700 mb-1">Ferragem da tesoura por vao</p>
             <p className="text-xs text-slate-500 mb-3">Clique para lancar a ferragem de cada vao.</p>
@@ -1192,8 +1273,12 @@ function EngenhariaPage() {
               })}
             </div>
           </div>
+            </>
+          )}
 
           {/* ---------- MAO DE OBRA ---------- */}
+          {aba === "arquivo" && (
+            <>
           <div className={cardClasse}>
             <p className="text-sm font-semibold text-slate-700 mb-1">Mao de obra do pilar</p>
             <p className="text-xs text-slate-500 mb-3">
@@ -1280,8 +1365,12 @@ function EngenhariaPage() {
               <b>{moeda((minutosDaPeca(8.5) / 60) * custoHoraEquipe)}</b> de mao de obra.
             </p>
           </div>
+            </>
+          )}
 
           {/* ---------- 5. SIMULADOR ---------- */}
+          {aba === "arquivo" && (
+            <>
           <div className={cardClasse}>
             <p className="text-sm font-semibold text-slate-700 mb-1">Simulador de custo do pilar</p>
             <p className="text-xs text-slate-500 mb-3">
@@ -1390,8 +1479,12 @@ function EngenhariaPage() {
               </div>
             )}
           </div>
+            </>
+          )}
 
           {/* ---------- 6. CALCULO DE PECAS ---------- */}
+          {aba === "uso" && (
+            <>
           <div className={cardClasse}>
             <p className="text-sm font-semibold text-slate-700 mb-1">Cálculo de peças</p>
             <p className="text-xs text-slate-500 mb-4">
@@ -1602,6 +1695,8 @@ function EngenhariaPage() {
               })}
             </div>
           </div>
+            </>
+          )}
         </div>
       )}
     </div>

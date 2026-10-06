@@ -9,6 +9,7 @@ import { notificar, confirmar } from "@/components/Ui";
 import DesenhoGalpao from "./desenho-galpao";
 import ComparacaoPilarForma4 from "./ComparacaoPilarForma4";
 import ComparacaoTesoura from "./ComparacaoTesoura";
+import PainelTestes from "./PainelTestes";
 // Regras de cálculo (testadas em calculos.test.js). Ficam num arquivo à parte
 // para que os testes protejam EXATAMENTE o que o sistema usa.
 import {
@@ -3657,25 +3658,27 @@ function OrcamentosGalpaoPageInterno() {
               ⚠ {avisoAcoPilar}
             </p>
           )}
-          {comPilares && pilaresComparacao.length > 0 && nVaos > 0 && (
-            <ComparacaoPilarForma4
-              pilares={pilaresComparacao}
-              vao={Number(vao) || 0}
-              modulacao={(Number(comprimento) || 0) / nVaos}
-              cargaLaje={
-                /500/.test(lajesDisponiveis.find((l) => String(l.id) === String(tipoLajeId))?.nome || "")
-                  ? 500
-                  : 300
-              }
-            />
-          )}
-          {nVaos > 0 && (
-            <ComparacaoTesoura
-              itens={itens}
-              modulacao={(Number(comprimento) || 0) / nVaos}
-              telhaNome={telhasDisponiveis.find((t) => String(t.id) === String(telhaId))?.nome}
-            />
-          )}
+          <PainelTestes>
+            {comPilares && pilaresComparacao.length > 0 && nVaos > 0 && (
+              <ComparacaoPilarForma4
+                pilares={pilaresComparacao}
+                vao={Number(vao) || 0}
+                modulacao={(Number(comprimento) || 0) / nVaos}
+                cargaLaje={
+                  /500/.test(lajesDisponiveis.find((l) => String(l.id) === String(tipoLajeId))?.nome || "")
+                    ? 500
+                    : 300
+                }
+              />
+            )}
+            {nVaos > 0 && (
+              <ComparacaoTesoura
+                itens={itens}
+                modulacao={(Number(comprimento) || 0) / nVaos}
+                telhaNome={telhasDisponiveis.find((t) => String(t.id) === String(telhaId))?.nome}
+              />
+            )}
+          </PainelTestes>
           <div className="lg:hidden">
             <PainelChecklist />
           </div>
