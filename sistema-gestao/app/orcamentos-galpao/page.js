@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
 import DesenhoGalpao from "./desenho-galpao";
 import ComparacaoPilarForma4 from "./ComparacaoPilarForma4";
+import ComparacaoTesoura from "./ComparacaoTesoura";
 // Regras de cálculo (testadas em calculos.test.js). Ficam num arquivo à parte
 // para que os testes protejam EXATAMENTE o que o sistema usa.
 import {
@@ -3666,6 +3667,13 @@ function OrcamentosGalpaoPageInterno() {
                   ? 500
                   : 300
               }
+            />
+          )}
+          {nVaos > 0 && (
+            <ComparacaoTesoura
+              itens={itens}
+              modulacao={(Number(comprimento) || 0) / nVaos}
+              telhaNome={telhasDisponiveis.find((t) => String(t.id) === String(telhaId))?.nome}
             />
           )}
           <div className="lg:hidden">

@@ -3,7 +3,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resumoComplementares, custoCompletoPilar } from "./custos-complementares.js";
+import { resumoComplementares, custoCompletoPilar, custoCompletoPeca } from "./custos-complementares.js";
+
+test("peça sem consolo (tesoura): perdas + energia + BDI sobre concreto, aço e mão de obra", () => {
+  const p = { perda_aco_pct: 5, energia_mensal: 3000, producao_m3_mes: 100, despesas_fixas_mensal: 15000, faturamento_mensal: 100000, impostos_pct: 8, lucro_pct: 10 };
+  const r = custoCompletoPeca({ concreto: 800, aco: 1500, maoDeObra: 120, volume: 1.5 }, p);
+  // 800 + 1500 + 120 + 75 (perda aço) + 45 (energia)
+  assert.ok(Math.abs(r.custo - 2540) < 0.01);
+  assert.ok(Math.abs(r.preco - 2540 / 0.67) < 0.01);
+});
 
 const base = {
   concreto: 530,

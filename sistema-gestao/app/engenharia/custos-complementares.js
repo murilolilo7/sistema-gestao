@@ -56,6 +56,30 @@ export function resumoComplementares(param = {}) {
   };
 }
 
+// Custo completo de uma peça sem consolos (ex.: tesoura): perdas, energia e
+// BDI. A forma da tesoura ainda não tem campo próprio (fica "a preencher").
+// base = { concreto, aco, maoDeObra, volume }
+export function custoCompletoPeca(base, param = {}) {
+  const r = resumoComplementares(param);
+  const linhas = [];
+  const add = (rotulo, valor, informado, dica) => linhas.push({ rotulo, valor, informado, dica });
+  add("Concreto", base.concreto, true);
+  add("Aço", base.aco, true);
+  add("Mão de obra", base.maoDeObra, base.maoDeObraInformada !== false, "tempo de fabricação da tesoura");
+  add(
+    "Perda de concreto",
+    base.concreto * (n(param.perda_concreto_pct) / 100),
+    n(param.perda_concreto_pct) > 0,
+    "% de perda de concreto"
+  );
+  add("Perda de aço", base.aco * (n(param.perda_aco_pct) / 100), n(param.perda_aco_pct) > 0, "% de perda de aço");
+  add("Forma e desmoldante", 0, false, "forma da tesoura (ainda sem campo)");
+  add("Energia", r.energiaPorM3 * base.volume, r.energiaPorM3 > 0, "conta de luz e produção do mês");
+  const custo = linhas.reduce((s, l) => s + l.valor, 0);
+  const preco = r.bdiValido ? custo / (1 - r.somaPct / 100) : null;
+  return { linhas, custo, bdiPct: r.bdiPct, preco, resumo: r };
+}
+
 // Custo completo de UM pilar a partir do custo de fábrica já calculado.
 // base = { concreto, aco, maoDeObra, volume, comLaje, custoM3Concreto, precoAcoKg, custoHoraEquipe }
 export function custoCompletoPilar(base, param = {}) {

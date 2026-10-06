@@ -468,6 +468,12 @@ function EngenhariaPage() {
         className="mb-6 inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 hover:bg-violet-100"
       >
         <FlaskConical size={16} /> Laboratório do pilar (cálculo pelo vento — em teste)
+      </Link>{" "}
+      <Link
+        href="/engenharia/tesoura"
+        className="mb-6 inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 hover:bg-violet-100"
+      >
+        <FlaskConical size={16} /> Laboratório da tesoura (em teste)
       </Link>
 
       {loading ? (

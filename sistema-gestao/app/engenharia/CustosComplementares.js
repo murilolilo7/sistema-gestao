@@ -55,6 +55,11 @@ const GRUPOS = [
     campos: [{ campo: "consolo_minutos", rotulo: "Tempo para fazer um consolo", unidade: "min" }],
   },
   {
+    titulo: "Tesoura",
+    explicacao: "Espessura da tesoura (padrão da fábrica 0,20 m). Mude aqui se a forma mudar — o concreto da tesoura no cálculo novo acompanha.",
+    campos: [{ campo: "tesoura_espessura", rotulo: "Espessura da tesoura", unidade: "m" }],
+  },
+  {
     titulo: "Administração, impostos e lucro (BDI)",
     explicacao:
       "Despesas fixas do mês (escritório, salários fora da produção, aluguel, veículos…) sobre o faturamento médio, mais o imposto e o lucro que você quer. Preço = custo ÷ (1 − despesas − imposto − lucro).",
@@ -78,7 +83,7 @@ export default function CustosComplementares({ param, salvarParametro }) {
   const r = resumoComplementares(param);
   return (
     <div className="rounded-xl border-2 border-violet-200 bg-violet-50/40 p-5">
-      <p className="text-sm font-semibold text-slate-700 mb-1">Custos complementares do pilar (em teste)</p>
+      <p className="text-sm font-semibold text-slate-700 mb-1">Custos complementares — pilar e tesoura (em teste)</p>
       <p className="text-xs text-slate-500 mb-4">
         O que ainda não entrava no custo de fábrica. Preencha aos poucos — cada campo salva ao sair dele e já
         aparece no quadro de comparação do pilar dentro do orçamento. Campo vazio = ainda não informado. O preço
