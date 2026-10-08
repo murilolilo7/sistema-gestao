@@ -32,6 +32,8 @@ import {
   qtdCalha,
   qtdTelha,
   valorPorExtenso,
+  fraseFormaPagamento,
+  trocarLinhaPagamento,
 } from "./calculos.js";
 
 // ---------------------------------------------------------------------------
@@ -489,5 +491,26 @@ test("chave automática: viga de laje adicionada à mão não vira a automática
   assert.equal(
     chaveAutomatica("VIGA PARA LAJE 0,25X0,70X10,00M — 1º nível (laje a 3,50m) · altura 0,70m definida (7,0% do vão)", "laje"),
     "viga-laje-auto"
+  );
+});
+
+test("frase de pagamento no jeito da MR7 (30% na assinatura, saldo em 4x)", () => {
+  assert.equal(
+    fraseFormaPagamento("30", "no ato da assinatura do contrato", "4"),
+    "Pagamento de 30% no ato da assinatura do contrato e saldo em 4x."
+  );
+  assert.equal(fraseFormaPagamento("100", "na assinatura do contrato", "4"), "Pagamento à vista na assinatura do contrato.");
+  assert.equal(fraseFormaPagamento("0", "", "6"), "Pagamento em 6x.");
+  assert.equal(fraseFormaPagamento("50", "", "1"), "Pagamento de 50% no ato da assinatura do contrato e saldo em parcela única.");
+  assert.equal(fraseFormaPagamento("12,5", "", "3"), "Pagamento de 12,5% no ato da assinatura do contrato e saldo em 3x.");
+});
+
+test("pôr a frase de pagamento troca a linha antiga e mantém o resto", () => {
+  const f = "Pagamento de 40% no ato da assinatura do contrato e saldo em 5x.";
+  assert.equal(trocarLinhaPagamento("", f), f);
+  assert.equal(trocarLinhaPagamento("Frete CIF.\n", f), "Frete CIF.\n" + f);
+  assert.equal(
+    trocarLinhaPagamento("Frete CIF.\nPagamento de 30% no ato e saldo em 4x.\nPrazo 60 dias.", f),
+    "Frete CIF.\n" + f + "\nPrazo 60 dias."
   );
 });

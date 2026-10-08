@@ -319,6 +319,33 @@ export function alturaENomeVigaLaje(vaoViga, pctDoVao, alturaDefinida, motivo) {
   };
 }
 
+// Frase da forma de pagamento que vai na observação do orçamento, no jeito
+// que a MR7 escreve: "Pagamento de 30% no ato da assinatura do contrato e
+// saldo em 4x." Entrada 100% = à vista; entrada 0 = só parcelado.
+export function fraseFormaPagamento(entradaPct, momento, parcelas) {
+  const e = Number(String(entradaPct ?? "").replace(",", ".")) || 0;
+  const n = Math.max(1, Math.floor(Number(parcelas) || 1));
+  const quando = String(momento || "").trim() || "no ato da assinatura do contrato";
+  const pctTxt = String(Math.round(e * 100) / 100).replace(".", ",");
+  if (e >= 100) return `Pagamento à vista ${quando}.`;
+  if (e <= 0) return n === 1 ? "Pagamento em parcela única." : `Pagamento em ${n}x.`;
+  const saldo = n === 1 ? "saldo em parcela única" : `saldo em ${n}x`;
+  return `Pagamento de ${pctTxt}% ${quando} e ${saldo}.`;
+}
+
+// Põe a frase de pagamento na observação: troca a linha que já começa com
+// "Pagamento" (se houver) e mantém o resto do texto como está.
+export function trocarLinhaPagamento(observacao, frase) {
+  const linhas = String(observacao || "").split("\n");
+  const i = linhas.findIndex((l) => /^\s*pagamento\b/i.test(l));
+  if (i >= 0) {
+    linhas[i] = frase;
+    return linhas.join("\n");
+  }
+  const texto = linhas.join("\n").replace(/\s+$/, "");
+  return texto ? texto + "\n" + frase : frase;
+}
+
 // A viga da laje nunca passa de 10m: acima disso ela se divide em trechos, e
 // cada trecho a mais exige uma fila de pilar no meio.
 // 12m → 2 trechos de 6m, 1 fila · 21m → 3 trechos de 7m, 2 filas.

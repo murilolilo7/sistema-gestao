@@ -28,6 +28,8 @@ import {
   vaosCobertosPelaLaje,
   alturaVigaLaje,
   alturaENomeVigaLaje,
+  fraseFormaPagamento,
+  trocarLinhaPagamento,
   qtdCalha,
   qtdCapote,
 } from "./calculos";
@@ -405,6 +407,11 @@ function OrcamentosGalpaoPageInterno() {
   const [margemComercial, setMargemComercial] = useState("25");
   const [observacao, setObservacao] = useState("");
   const [observacaoInterna, setObservacaoInterna] = useState("");
+  // Montador da forma de pagamento (só ajuda a escrever a observação; o que
+  // vale e vai pro PDF é o texto da observação).
+  const [pagEntrada, setPagEntrada] = useState("30");
+  const [pagMomento, setPagMomento] = useState("no ato da assinatura do contrato");
+  const [pagParcelas, setPagParcelas] = useState("4");
 
   const [vigaLargura, setVigaLargura] = useState("");
   const [vigaAltura, setVigaAltura] = useState("");
@@ -2080,6 +2087,21 @@ function OrcamentosGalpaoPageInterno() {
   const descontoNumerico = Math.min(Math.max(0, Number(desconto) || 0), totalComMargem);
   const totalFinal = totalComMargem - descontoNumerico;
 
+  const frasePagamento = fraseFormaPagamento(pagEntrada, pagMomento, pagParcelas);
+  // Valores de referência (não vão no texto: mudariam se o total mudar depois)
+  const valoresPagamento = (() => {
+    const e = Math.min(100, Math.max(0, Number(pagEntrada) || 0));
+    const n = Math.max(1, Math.floor(Number(pagParcelas) || 1));
+    if (!(totalFinal > 0)) return "";
+    const entrada = (totalFinal * e) / 100;
+    if (e >= 100) return formatarMoeda(totalFinal);
+    const parcela = (totalFinal - entrada) / n;
+    return (e > 0 ? `entrada ${formatarMoeda(entrada)} + ` : "") + `${n}x de ${formatarMoeda(parcela)}`;
+  })();
+  function inserirPagamento() {
+    setObservacao((obs) => trocarLinhaPagamento(obs, frasePagamento));
+  }
+
   // Seções separadas, como na planilha da empresa: a estrutura do galpão
   // tem valor/m² pela área do galpão; a laje/mezanino tem subtotal e
   // valor/m² próprios, pela área da laje.
@@ -3242,8 +3264,11 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
-          {modeloId && totalGalpoes <= 1 && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+          {/* Opções da estrutura: todas as marcações num quadro só, separadas por linha */}
+          {modeloId && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 mb-3 divide-y divide-slate-200">
+          {totalGalpoes <= 1 && (
+            <div className="py-2.5">
               <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
                 <input
                   type="checkbox"
@@ -3286,8 +3311,7 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
-          {modeloId && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+            <div className="py-2.5">
               <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
                 <input
                   type="checkbox"
@@ -3313,7 +3337,7 @@ function OrcamentosGalpaoPageInterno() {
                 </span>
               </label>
               {temTravamento && (
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <div className="mt-2 ml-6 flex flex-wrap items-center gap-x-6 gap-y-2">
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
                     <input
                       type="checkbox"
@@ -3323,24 +3347,22 @@ function OrcamentosGalpaoPageInterno() {
                     />
                     Duas vigas por vão (galpão alto)
                   </label>
-                  <div>
-                    <label className={labelClasse}>Valor do m³ do concreto (R$)</label>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                    Valor do m³ da viga (R$)
                     <input
                       type="number"
                       step="0.01"
                       min="0"
                       value={travamentoValorM3}
                       onChange={(e) => { descongelarLista(); setTravamentoValorM3(e.target.value); }}
-                      className={campoClasse}
+                      className={`${campoClasse} w-32`}
                     />
-                  </div>
+                  </label>
                 </div>
               )}
             </div>
-          )}
 
-          {modeloId && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+            <div className="py-2.5">
               <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
                 <input
                   type="checkbox"
@@ -3390,6 +3412,7 @@ function OrcamentosGalpaoPageInterno() {
                   )}
                 </>
               )}
+            </div>
             </div>
           )}
 
@@ -3888,52 +3911,42 @@ function OrcamentosGalpaoPageInterno() {
             {(tipoSelecionado === "laje" ||
               tipoSelecionado === "mezanino" ||
               tipoSelecionado === "editado") && (
-              <div className="rounded-lg border border-emerald-300 bg-emerald-50/40 p-3 mb-3">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 pb-3 mb-3">
                 <TituloEtapa numero="6">Laje / Mezanino</TituloEtapa>
-                <p className="text-xs font-semibold text-emerald-800 mb-2">
-                  Estrutura da laje/mezanino — seção separada, com subtotal e valor/m² próprios
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <select
-                    value={tipoLajeId}
-                    onChange={(e) => { descongelarLista(); setTipoLajeId(e.target.value); }}
-                    className={campoClasse}
-                  >
-                    <option value="">Selecione o tipo de laje</option>
-                    {lajesDisponiveis.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.nome} — {formatarMoeda(l.preco)}/m²
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Área da laje (m²)"
-                    value={areaLaje}
-                    onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAreaLaje)(e); }}
-                    className={campoClasse}
-                  />
-                </div>
-                <p className="text-xs text-slate-400 mt-1 mb-2">
-                  Escolha o tipo (capacidade em Kg/m² no nome) e a área — a linha entra sozinha na seção
-                  da laje. A viga (calculadora abaixo) e o pilar/montagem aqui também entram nessa seção.
+                <p className="text-xs text-slate-500 -mt-1 mb-3">
+                  Seção separada no orçamento, com subtotal e valor/m² próprios — a laje, as vigas,
+                  o pilar e a montagem daqui entram nela.
                 </p>
 
-                <label className="flex items-center gap-2 text-xs font-medium text-slate-600 mb-2">
-                  <input
-                    type="checkbox"
-                    checked={temVigaLajeAvulsa}
-                    onChange={(e) => { descongelarLista(); setTemVigaLajeAvulsa(e.target.checked); }}
-                    className="h-4 w-4"
-                  />
-                  Vigas do 1º nível — lançar mesmo sem a laje
-                  <span className="text-slate-400">
-                    (a laje acima é opcional; informe o tipo e a área só se ela entrar)
-                  </span>
-                </label>
-
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+                {/* 1º nível */}
+                <p className="text-xs font-semibold text-slate-700 mb-2">Laje do 1º nível</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                  <div className="col-span-2">
+                    <label className={labelClasse}>Tipo de laje (capacidade no nome)</label>
+                    <select
+                      value={tipoLajeId}
+                      onChange={(e) => { descongelarLista(); setTipoLajeId(e.target.value); }}
+                      className={campoClasse}
+                    >
+                      <option value="">Selecione o tipo de laje</option>
+                      {lajesDisponiveis.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.nome} — {formatarMoeda(l.preco)}/m²
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClasse}>Área (m²)</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="Ex: 200"
+                      value={areaLaje}
+                      onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAreaLaje)(e); }}
+                      className={campoClasse}
+                    />
+                  </div>
                   <div>
                     <label className={labelClasse}>Altura da laje (m)</label>
                     <input
@@ -3945,9 +3958,19 @@ function OrcamentosGalpaoPageInterno() {
                     />
                   </div>
                 </div>
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={temVigaLajeAvulsa}
+                    onChange={(e) => { descongelarLista(); setTemVigaLajeAvulsa(e.target.checked); }}
+                    className="h-4 w-4"
+                  />
+                  Lançar as vigas do 1º nível mesmo sem a laje
+                  <span className="text-slate-400">(aí tipo e área ficam em branco)</span>
+                </label>
 
-                {/* SEGUNDA LAJE: galpao de dois pavimentos */}
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+                {/* 2º nível */}
+                <div className="border-t border-slate-200 mt-3 pt-3">
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
                     <input
                       type="checkbox"
@@ -3956,38 +3979,43 @@ function OrcamentosGalpaoPageInterno() {
                       className="h-4 w-4"
                     />
                     Vigas do 2º nível (topo dos pilares) — dois pavimentos
-                    <span className="text-slate-400">
-                      {" "}(a 2ª laje é opcional)
-                    </span>
+                    <span className="text-slate-400">(a 2ª laje é opcional)</span>
                   </label>
                   {temSegundaLaje && (
                     <>
-                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <select
-                          value={tipoLajeId2}
-                          onChange={(e) => { descongelarLista(); setTipoLajeId2(e.target.value); }}
-                          className={campoClasse}
-                        >
-                          <option value="">Tipo da 2ª laje</option>
-                          {lajesDisponiveis.map((l) => (
-                            <option key={l.id} value={l.id}>
-                              {l.nome} — {formatarMoeda(l.preco)}/m²
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="Área da 2ª laje (m²)"
-                          value={areaLaje2}
-                          onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAreaLaje2)(e); }}
-                          className={campoClasse}
-                        />
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="col-span-2">
+                          <label className={labelClasse}>Tipo da 2ª laje</label>
+                          <select
+                            value={tipoLajeId2}
+                            onChange={(e) => { descongelarLista(); setTipoLajeId2(e.target.value); }}
+                            className={campoClasse}
+                          >
+                            <option value="">Sem laje (só as vigas)</option>
+                            {lajesDisponiveis.map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {l.nome} — {formatarMoeda(l.preco)}/m²
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         <div>
+                          <label className={labelClasse}>Área (m²)</label>
                           <input
                             type="text"
                             inputMode="decimal"
-                            placeholder="Altura da 2ª laje (m)"
+                            placeholder="Ex: 200"
+                            value={areaLaje2}
+                            onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAreaLaje2)(e); }}
+                            className={campoClasse}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClasse}>Altura do 2º nível (m)</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="= pé-direito"
                             value={alturaLaje2}
                             onChange={(e) => { descongelarLista(); aoDigitarDecimal(setAlturaLaje2)(e); }}
                             className={campoClasse}
@@ -4012,156 +4040,75 @@ function OrcamentosGalpaoPageInterno() {
                   )}
                 </div>
 
-                <p className="text-xs text-slate-500 mb-1">
-                  Pilar da laje/mezanino (quando necessário) — calculado na hora, com laje sempre marcada:
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-2" data-bloco="pilar-laje">
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Pé-direito (m)"
-                    value={pilarLajePe}
-                    onChange={aoDigitarDecimal(setPilarLajePe)}
-                    className={campoClasse}
-                  />
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Vão (m)"
-                    value={pilarLajeVao}
-                    onChange={aoDigitarDecimal(setPilarLajeVao)}
-                    className={campoClasse}
-                  />
-                  <select
-                    value={pilarLajeNivel}
-                    onChange={(e) => setPilarLajeNivel(e.target.value)}
-                    className={campoClasse}
-                  >
-                    {NIVEIS_PILAR.map((n) => (
-                      <option key={n.valor} value={n.valor}>{n.rotulo}</option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Qtd."
-                    value={pilarLajeQtd}
-                    onChange={(e) => setPilarLajeQtd(e.target.value)}
-                    className={campoClasse}
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      adicionarPilarCalculado({
-                        pe: pilarLajePe,
-                        vaoP: pilarLajeVao,
-                        comLaje: true,
-                        nivel: pilarLajeNivel,
-                        qtd: pilarLajeQtd,
-                        secao: "laje",
-                        limpar: () => {
-                          setPilarLajePe("");
-                          setPilarLajeVao("");
-                          setPilarLajeNivel("AUTO");
-                          setPilarLajeQtd("1");
-                        },
-                      })
-                    }
-                    disabled={!pilarLajePe || !pilarLajeVao}
-                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
-                  >
-                    Adicionar pilar
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="montagem-laje">
-                  <div className="sm:col-span-2 flex items-center text-xs text-slate-500">
-                    Montagem da laje/mezanino (separada da montagem do galpão)
+                {/* Vigas da laje */}
+                <div className="border-t border-slate-200 mt-3 pt-3">
+                  <p className="text-xs font-semibold text-slate-700 mb-2">Vigas da laje</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-2">
+                    <div>
+                      <label className={labelClasse}>Valor do m³ (R$)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="R$/m³"
+                        value={vigaValorM3}
+                        onChange={aoDigitarDecimal(setVigaValorM3)}
+                        className={`${campoClasse} ${Number(vigaValorM3) > 0 ? "" : "border-amber-400"}`}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClasse}>Altura (% do vão)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="10"
+                        value={vigaPctVao}
+                        onChange={(e) => { descongelarLista(); aoDigitarDecimal(setVigaPctVao)(e); }}
+                        className={campoClasse}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClasse}>ou altura definida (m)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="ex.: 0,70"
+                        value={vigaAlturaFixa}
+                        onChange={(e) => { descongelarLista(); aoDigitarDecimal(setVigaAlturaFixa)(e); }}
+                        className={campoClasse}
+                      />
+                    </div>
+                    <div className="col-span-2 sm:col-span-3">
+                      <label className={labelClasse}>Motivo (vai na descrição da viga)</label>
+                      <input
+                        type="text"
+                        placeholder="ex.: viga reforçada para ganhar pé-direito"
+                        value={vigaMotivo}
+                        onChange={(e) => { descongelarLista(); setVigaMotivo(e.target.value); }}
+                        className={campoClasse}
+                      />
+                    </div>
                   </div>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Qtd. (VB)"
-                    value={montagemLajeQtd}
-                    onChange={(e) => setMontagemLajeQtd(e.target.value)}
-                    className={campoClasse}
-                  />
-                  <button
-                    type="button"
-                    onClick={adicionarMontagemLaje}
-                    disabled={!montagemLajeQtd}
-                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
-                  >
-                    Adicionar montagem
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {(tipoSelecionado === "laje" ||
-              tipoSelecionado === "mezanino" ||
-              tipoSelecionado === "editado") && (
-              <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
-                <p className="text-xs font-medium text-slate-600 mb-2">
-                  Viga para laje/mezanino
-                </p>
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <label className="text-xs text-slate-600">Valor do m³ da viga:</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="R$/m³"
-                    value={vigaValorM3}
-                    onChange={aoDigitarDecimal(setVigaValorM3)}
-                    className={`${campoClasse} max-w-[140px]`}
-                  />
                   {!(Number(vigaValorM3) > 0) && (
-                    <span className="text-xs text-amber-700">
-                      informe o m³ para a viga entrar com preço no total
-                    </span>
+                    <p className="text-xs text-amber-700 mb-2">
+                      Informe o valor do m³ para as vigas entrarem com preço no total.
+                    </p>
                   )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <label className="text-xs text-slate-600">Altura da viga (% do vão):</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="10"
-                    value={vigaPctVao}
-                    onChange={(e) => { descongelarLista(); aoDigitarDecimal(setVigaPctVao)(e); }}
-                    className={`${campoClasse} max-w-[80px]`}
-                  />
-                  <span className="text-xs text-slate-500">
-                    {Number(vao) > 0
-                      ? (() => {
-                          const tr = Math.ceil(Number(vao) / 10);
-                          const vv = Math.round((Number(vao) / tr) * 100) / 100;
-                          return `vão da viga ${fmtM(vv)} × ${pctVigaTxt} = altura ${fmtM(
-                            alturaVigaLaje(vv, vigaPctVao)
-                          )} (arredonda pra cima de 5 em 5cm) — vale pros 2 níveis`;
-                        })()
-                      : "normalmente de 7 a 10% — vale pros 2 níveis"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <label className="text-xs text-slate-600">ou altura definida (m):</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="ex.: 0,70"
-                    value={vigaAlturaFixa}
-                    onChange={(e) => { descongelarLista(); aoDigitarDecimal(setVigaAlturaFixa)(e); }}
-                    className={`${campoClasse} max-w-[90px]`}
-                  />
-                  <label className="text-xs text-slate-600">motivo:</label>
-                  <input
-                    type="text"
-                    placeholder="ex.: viga reforçada para ganhar pé-direito"
-                    value={vigaMotivo}
-                    onChange={(e) => { descongelarLista(); setVigaMotivo(e.target.value); }}
-                    className={`${campoClasse} flex-1 min-w-[200px]`}
-                  />
-                </div>
+                  {!(Number(vigaAlturaFixa) > 0) && (
+                    <p className="text-xs text-slate-500 mb-2">
+                      {Number(vao) > 0
+                        ? (() => {
+                            const tr = Math.ceil(Number(vao) / 10);
+                            const vv = Math.round((Number(vao) / tr) * 100) / 100;
+                            return `Vão da viga ${fmtM(vv)} × ${pctVigaTxt} = altura ${fmtM(
+                              alturaVigaLaje(vv, vigaPctVao)
+                            )} (arredonda pra cima de 5 em 5cm). `;
+                          })()
+                        : "Normalmente de 7 a 10% do vão. "}
+                      Uma viga por linha de pilar que a laje cobre
+                      {Number(vao) > 10 ? ", já dividida (pilar no meio da largura)" : ""}; vale pros 2
+                      níveis. Quantidade e preço se editam na lista abaixo.
+                    </p>
+                  )}
                 {Number(vigaAlturaFixa) > 0 && Number(vao) > 0 && (() => {
                   const tr = Math.ceil(Number(vao) / 10);
                   const vv = Math.round((Number(vao) / tr) * 100) / 100;
@@ -4180,15 +4127,6 @@ function OrcamentosGalpaoPageInterno() {
                     </p>
                   );
                 })()}
-                <p className="text-xs text-slate-500 mb-2">
-                  A viga da laje entra automática no orçamento
-                  {Number(vao) > 10
-                    ? " já dividida (vão = metade da largura, por causa do pilar no meio)"
-                    : ""}
-                  , altura = {pctVigaTxt} do vão (campo acima), uma por linha de pilar que a laje
-                  cobre. A descrição de cada viga mostra o nível (1º ou topo dos pilares) e o %
-                  usado. Quantidade e preço você edita direto na linha, na lista abaixo.
-                </p>
                 {conferenciaVigasLaje && (
                   <div
                     className={`text-xs rounded px-2 py-1.5 mb-2 border ${
@@ -4210,12 +4148,10 @@ function OrcamentosGalpaoPageInterno() {
                     Ajuste avançado — adicionar uma viga manual (casos especiais)
                   </summary>
                 <p className="text-xs text-slate-400 mb-2">
-                  Sugestão automática: largura fixa de 0,25m; vão (comprimento da viga) = largura
-                  do galpão{temPilarNoMeioDaLaje ? " ÷ 2 (há pilar de laje no meio)" : ""} — com
-                  pilar no meio, a viga vira metade e a altura recalcula. Altura = {pctVigaTxt} do vão
-                  arredondada ao múltiplo de 5cm (pré-dimensionamento de viga biapoiada usado com
-                  a NBR 6118 — a norma em si não fixa pré-dimensionamento; o projeto estrutural
-                  final confirma). Tudo editável.
+                  Sugestão: largura 0,25m; comprimento = largura do galpão
+                  {temPilarNoMeioDaLaje ? " ÷ 2 (há pilar de laje no meio)" : ""}; altura ={" "}
+                  {pctVigaTxt} do vão arredondada de 5 em 5cm. Tudo editável — a descrição sai
+                  com a altura, o % do vão e o motivo.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-6 gap-2" data-bloco="viga-laje">
                   <div className="flex flex-col gap-0.5">
@@ -4315,6 +4251,96 @@ function OrcamentosGalpaoPageInterno() {
                   </p>
                 )}
                 </details>
+                </div>
+
+                {/* Pilar e montagem */}
+                <div className="border-t border-slate-200 mt-3 pt-3">
+                  <p className="text-xs font-semibold text-slate-700 mb-2">
+                    Pilar e montagem da laje{" "}
+                    <span className="font-normal text-slate-400">
+                      (quando necessário — o pilar é calculado na hora, sempre com laje)
+                    </span>
+                  </p>
+                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-2" data-bloco="pilar-laje">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Pé-direito (m)"
+                    value={pilarLajePe}
+                    onChange={aoDigitarDecimal(setPilarLajePe)}
+                    className={campoClasse}
+                  />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Vão (m)"
+                    value={pilarLajeVao}
+                    onChange={aoDigitarDecimal(setPilarLajeVao)}
+                    className={campoClasse}
+                  />
+                  <select
+                    value={pilarLajeNivel}
+                    onChange={(e) => setPilarLajeNivel(e.target.value)}
+                    className={`${campoClasse} col-span-2`}
+                  >
+                    {NIVEIS_PILAR.map((n) => (
+                      <option key={n.valor} value={n.valor}>{n.rotulo}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qtd."
+                    value={pilarLajeQtd}
+                    onChange={(e) => setPilarLajeQtd(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      adicionarPilarCalculado({
+                        pe: pilarLajePe,
+                        vaoP: pilarLajeVao,
+                        comLaje: true,
+                        nivel: pilarLajeNivel,
+                        qtd: pilarLajeQtd,
+                        secao: "laje",
+                        limpar: () => {
+                          setPilarLajePe("");
+                          setPilarLajeVao("");
+                          setPilarLajeNivel("AUTO");
+                          setPilarLajeQtd("1");
+                        },
+                      })
+                    }
+                    disabled={!pilarLajePe || !pilarLajeVao}
+                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
+                  >
+                    Adicionar pilar
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="montagem-laje">
+                  <div className="sm:col-span-2 flex items-center text-xs text-slate-600">
+                    Montagem da laje (separada da montagem do galpão):
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qtd. (VB)"
+                    value={montagemLajeQtd}
+                    onChange={(e) => setMontagemLajeQtd(e.target.value)}
+                    className={campoClasse}
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarMontagemLaje}
+                    disabled={!montagemLajeQtd}
+                    className="w-full rounded-lg bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition"
+                  >
+                    Adicionar montagem
+                  </button>
+                </div>
+                </div>
               </div>
             )}
 
@@ -4586,7 +4612,7 @@ function OrcamentosGalpaoPageInterno() {
           )}
 
           <TituloEtapa numero="7">Condições e finalização</TituloEtapa>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className={labelClasse}>Data da proposta</label>
               <input
@@ -4595,12 +4621,10 @@ function OrcamentosGalpaoPageInterno() {
                 onChange={(e) => setDataProposta(e.target.value)}
                 className={campoClasse}
               />
-              <p className="text-xs text-slate-500 mt-1">
-                É a data que sai no impresso e de onde conta a validade.
-              </p>
+              <p className="text-[11px] text-slate-500 mt-1">Sai no impresso; a validade conta daqui.</p>
             </div>
             <div>
-              <label className={labelClasse}>Validade da proposta (dias)</label>
+              <label className={labelClasse}>Validade (dias)</label>
               <input
                 type="number"
                 min="1"
@@ -4610,22 +4634,11 @@ function OrcamentosGalpaoPageInterno() {
                 className={campoClasse}
               />
               {diasValidade && Number(diasValidade) > 0 && (
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-[11px] text-slate-500 mt-1">
                   Válido até{" "}
                   {formatarDataSimples(calcularDataFuturaDe(dataProposta, diasValidade))}
                 </p>
               )}
-            </div>
-            <div>
-              <label className={labelClasse}>Desconto (R$)</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={desconto}
-                onChange={aoDigitarDecimal(setDesconto)}
-                placeholder="0,00"
-                className={campoClasse}
-              />
             </div>
             <div>
               <label className={labelClasse}>BDI (%)</label>
@@ -4638,32 +4651,90 @@ function OrcamentosGalpaoPageInterno() {
                 className={campoClasse}
               />
             </div>
+            <div>
+              <label className={labelClasse}>Desconto (R$)</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={desconto}
+                onChange={aoDigitarDecimal(setDesconto)}
+                placeholder="0,00"
+                className={campoClasse}
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div>
               <label className={labelClasse}>Observações (aparece no PDF do cliente)</label>
-              <input
-                type="text"
+              <textarea
+                rows={3}
                 value={observacao}
                 onChange={(e) => setObservacao(e.target.value)}
-                placeholder="Ex: Frete CIF, forma de pagamento..."
-                className={campoClasse}
+                placeholder="Ex: forma de pagamento, frete, prazo de entrega..."
+                className={`${campoClasse} resize-y`}
               />
+              {/* Monta a frase da forma de pagamento e põe na observação */}
+              <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                  <span className="font-medium">Pagamento:</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={pagEntrada}
+                    onChange={aoDigitarDecimal(setPagEntrada)}
+                    className="w-12 rounded border border-slate-300 px-1.5 py-1 text-xs text-center"
+                    aria-label="Entrada em %"
+                  />
+                  <span>%</span>
+                  <input
+                    type="text"
+                    value={pagMomento}
+                    onChange={(e) => setPagMomento(e.target.value)}
+                    className="flex-1 min-w-[180px] rounded border border-slate-300 px-1.5 py-1 text-xs"
+                    aria-label="Quando paga a entrada"
+                  />
+                  <span>e saldo em</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={pagParcelas}
+                    onChange={(e) => setPagParcelas(e.target.value)}
+                    className="w-12 rounded border border-slate-300 px-1.5 py-1 text-xs text-center"
+                    aria-label="Parcelas do saldo"
+                  />
+                  <span>x</span>
+                  <button
+                    type="button"
+                    onClick={inserirPagamento}
+                    className="ml-auto rounded bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium px-2.5 py-1 transition"
+                  >
+                    Pôr na observação
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  “{frasePagamento}”
+                  {valoresPagamento && (
+                    <span className="text-slate-400">
+                      {" "}— hoje dá {valoresPagamento}
+                    </span>
+                  )}
+                </p>
+              </div>
             </div>
             <div>
               <label className={labelClasse}>Observação interna (só você vê, não vai pro PDF)</label>
-              <input
-                type="text"
+              <textarea
+                rows={3}
                 value={observacaoInterna}
                 onChange={(e) => setObservacaoInterna(e.target.value)}
                 placeholder="Ex: cliente pediu desconto extra, aguardando aprovação..."
-                className={campoClasse}
+                className={`${campoClasse} resize-y`}
               />
             </div>
           </div>
 
-          <div className="flex items-center justify-between mt-4">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="text-sm space-y-0.5">
               <p className="text-slate-500">Subtotal (peças): {formatarMoeda(subtotal)}</p>
               {margemNumerica > 0 && (
