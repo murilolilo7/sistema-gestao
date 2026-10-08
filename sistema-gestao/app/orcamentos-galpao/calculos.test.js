@@ -21,6 +21,7 @@ import {
   precoTercaInterpolado,
   vaosCobertosPelaLaje,
   alturaVigaLaje,
+  alturaENomeVigaLaje,
   posicoesDosPorticos,
   vaoNaPosicao,
   areaTrapezio,
@@ -455,4 +456,38 @@ test("galpão 18x27: as quantidades batem com a planilha do Murilo", () => {
   assert.equal(v.trechos, 2);
   assert.equal(v.filasMeio, 1);
   assert.equal((vaos + 1) * v.trechos, 12, "12 vigas de laje");
+});
+
+// ---------------------------------------------------------------------------
+// VIGA DE LAJE — altura definida em metros (viga reforçada) e motivo no nome
+// ---------------------------------------------------------------------------
+
+test("viga de laje: sem altura definida usa o % e diz no nome", () => {
+  const r = alturaENomeVigaLaje(10, "10", "", "");
+  assert.equal(r.altura, 1);
+  assert.equal(r.definida, false);
+  assert.equal(r.texto, "altura 10% do vão");
+});
+
+test("viga de laje: altura definida (0,70 num vão de 10 m) vale no lugar do % e diz o motivo", () => {
+  const r = alturaENomeVigaLaje(10, "10", "0,70", "viga reforçada para ganhar pé-direito");
+  assert.equal(r.altura, 0.7);
+  assert.equal(r.definida, true);
+  assert.equal(r.texto, "altura 0,70m definida (7,0% do vão) · motivo: viga reforçada para ganhar pé-direito");
+});
+
+test("viga de laje: motivo também aparece quando usa o %", () => {
+  const r = alturaENomeVigaLaje(8.5, "8", "", "padrão do cliente");
+  assert.equal(r.texto, "altura 8% do vão · motivo: padrão do cliente");
+});
+
+test("chave automática: viga de laje adicionada à mão não vira a automática ao reabrir", () => {
+  assert.equal(
+    chaveAutomatica("VIGA PARA LAJE 0,25X0,70X10,00M — adicionada à mão · altura 0,70m definida (7,0% do vão)", "laje"),
+    null
+  );
+  assert.equal(
+    chaveAutomatica("VIGA PARA LAJE 0,25X0,70X10,00M — 1º nível (laje a 3,50m) · altura 0,70m definida (7,0% do vão)", "laje"),
+    "viga-laje-auto"
+  );
 });

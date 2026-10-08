@@ -290,6 +290,35 @@ export function alturaVigaLaje(vaoViga, pctDoVao) {
   return Math.round(Math.ceil((v * pct) / 100 / 0.05 - 1e-9) * 0.05 * 100) / 100;
 }
 
+// Altura da viga de laje + o texto que vai no nome da peça. Se a altura for
+// DEFINIDA em metros (ex.: 0,70 num vão de 10 m, viga reforçada), ela vale no
+// lugar do %, e o nome diz a altura, o % que ela representa e o motivo — assim
+// quem lê o orçamento sabe por que a viga saiu daquele jeito.
+export function alturaENomeVigaLaje(vaoViga, pctDoVao, alturaDefinida, motivo) {
+  const v = Number(vaoViga) || 0;
+  const fixa = Number(String(alturaDefinida ?? "").replace(",", "."));
+  const mot = String(motivo || "").trim();
+  const virgula = (x, c) => x.toFixed(c).replace(".", ",");
+  const sufixoMotivo = mot ? ` · motivo: ${mot}` : "";
+  if (fixa > 0 && v > 0) {
+    const pct = (fixa / v) * 100;
+    return {
+      altura: Math.round(fixa * 100) / 100,
+      definida: true,
+      pct,
+      texto: `altura ${virgula(fixa, 2)}m definida (${virgula(pct, 1)}% do vão)${sufixoMotivo}`,
+    };
+  }
+  const p = Number(String(pctDoVao ?? "").replace(",", "."));
+  const pctUsado = p >= 1 && p <= 30 ? p : 10;
+  return {
+    altura: alturaVigaLaje(v, pctDoVao),
+    definida: false,
+    pct: pctUsado,
+    texto: `altura ${String(pctUsado).replace(".", ",")}% do vão${sufixoMotivo}`,
+  };
+}
+
 // A viga da laje nunca passa de 10m: acima disso ela se divide em trechos, e
 // cada trecho a mais exige uma fila de pilar no meio.
 // 12m → 2 trechos de 6m, 1 fila · 21m → 3 trechos de 7m, 2 filas.
@@ -316,8 +345,12 @@ export function chaveAutomatica(nome, secao) {
   // Peças da 2ª laje (dois pavimentos) têm chave própria — sem isso a viga
   // de cima era confundida com a de baixo e a laje de cima virava peça
   // solta, duplicando ao mexer nas medidas.
-  if (n.startsWith("VIGA PARA LAJE"))
+  if (n.startsWith("VIGA PARA LAJE")) {
+    // Viga lançada à mão (ajuste avançado) não é a automática: fica solta,
+    // senão ao reabrir o orçamento ela seria trocada pela automática.
+    if (n.includes("ADICIONADA À MÃO") || n.includes("ADICIONADA A MAO")) return null;
     return n.includes("2ª LAJE") || n.includes("2º NÍVEL") ? "viga-laje2-auto" : "viga-laje-auto";
+  }
   if (n.startsWith("LAJE") && n.includes("2ª LAJE")) return "laje2-auto";
   // Travamento e terça: chave pela MEDIDA da peça (5, 6, 5.4, 4...), a
   // mesma que o cálculo automático usa — vãos iguais fora do padrão

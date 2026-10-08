@@ -27,6 +27,7 @@ import {
   precoTercaInterpolado,
   vaosCobertosPelaLaje,
   alturaVigaLaje,
+  alturaENomeVigaLaje,
   qtdCalha,
   qtdCapote,
 } from "./calculos";
@@ -412,6 +413,11 @@ function OrcamentosGalpaoPageInterno() {
   // Altura da viga de laje = este % do vão da viga (na prática 7 a 10%).
   // Padrão 10% — o mesmo que o sistema sempre usou.
   const [vigaPctVao, setVigaPctVao] = useState("10");
+  // Altura da viga de laje DEFINIDA em metros (ex.: 0,70 num vão de 10 m —
+  // viga reforçada). Preenchida, vale no lugar do %. O motivo vai no nome.
+  const [vigaAlturaFixa, setVigaAlturaFixa] = useState("");
+  const [vigaMotivo, setVigaMotivo] = useState("");
+  const [vigaMotivoManual, setVigaMotivoManual] = useState("");
   // Viga de travamento: uma por vao em cada linha de pilar. Vem marcada a
   // partir de 12m de largura (padrao da obra), mas o usuario decide sempre.
   const [temTravamento, setTemTravamento] = useState(false);
@@ -1535,17 +1541,17 @@ function OrcamentosGalpaoPageInterno() {
     }
     const trechos = larguraGalpao > 0 ? Math.ceil(larguraGalpao / 10) : 1;
     const vaoViga = Math.round((larguraGalpao / trechos) * 100) / 100;
-    const alturaViga = alturaVigaLaje(vaoViga, vigaPctVao);
+    const { altura: alturaViga, texto: textoAltura } = alturaENomeVigaLaje(vaoViga, vigaPctVao, vigaAlturaFixa, vigaMotivo);
     const m3 = Number(vigaValorM3) || 0;
     const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
-    // A descrição diz o NÍVEL e o % usado — dá pra saber qual viga é qual
-    // mesmo depois de mudar a altura.
+    // A descrição diz o NÍVEL, a altura (% ou definida) e o motivo — dá pra
+    // saber qual viga é qual e por quê, mesmo depois de mudar a altura.
     const nivel1 =
       Number(alturaLaje) > 0 ? `1º nível (laje a ${doisDec(Number(alturaLaje), 2)}m)` : "1º nível";
     const nome =
       "VIGA PARA LAJE " +
       doisDec(0.25, 2) + "X" + doisDec(alturaViga, 2) + "X" + doisDec(vaoViga, 2) + "M" +
-      " — " + nivel1 + " · altura " + pctVigaTxt + " do vão" +
+      " — " + nivel1 + " · " + textoAltura +
       (trechos > 1 ? " — dividida em " + trechos + " (pilar no meio)" : "");
     setItens((atual) => {
       const ant = atual.find((i) => i.chave === "viga-laje-auto");
@@ -1565,7 +1571,7 @@ function OrcamentosGalpaoPageInterno() {
       ];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tipoSelecionado, vao, comprimento, areaLaje, temVigaLajeAvulsa, numeroVaos, vigaValorM3, vigaPctVao, alturaLaje, totalGalpoes]);
+  }, [tipoSelecionado, vao, comprimento, areaLaje, temVigaLajeAvulsa, numeroVaos, vigaValorM3, vigaPctVao, vigaAlturaFixa, vigaMotivo, alturaLaje, totalGalpoes]);
 
   // SEGUNDA LAJE (galpao de dois pavimentos): lanca a peca da laje de cima e
   // as vigas dela. Mesma regra da primeira: a viga nunca passa de 10m, entao
@@ -1607,7 +1613,7 @@ function OrcamentosGalpaoPageInterno() {
       if (qtdViga > 0) {
         const trechos = Math.ceil(larguraGalpao / 10);
         const vaoViga = Math.round((larguraGalpao / trechos) * 100) / 100;
-        const alturaViga = alturaVigaLaje(vaoViga, vigaPctVao);
+        const { altura: alturaViga, texto: textoAltura } = alturaENomeVigaLaje(vaoViga, vigaPctVao, vigaAlturaFixa, vigaMotivo);
         const m3 = Number(vigaValorM3) || 0;
         const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
         const antV = atual.find((i) => i.chave === CH_VIGA2);
@@ -1617,7 +1623,7 @@ function OrcamentosGalpaoPageInterno() {
           nome:
             "VIGA PARA LAJE " + doisDec(0.25, 2) + "X" + doisDec(alturaViga, 2) + "X" +
             doisDec(vaoViga, 2) + "M — 2º nível, topo dos pilares (2ª laje, " +
-            doisDec(Number(alturaLaje2) || 0, 2) + "m) · altura " + pctVigaTxt + " do vão" +
+            doisDec(Number(alturaLaje2) || 0, 2) + "m) · " + textoAltura +
             (trechos > 1 ? " — dividida em " + trechos : ""),
           unidade: "UND",
           papel: "VIGA_LAJE",
@@ -1630,7 +1636,7 @@ function OrcamentosGalpaoPageInterno() {
       return recalcularMontagem([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...sem]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, vigaPctVao, composicoes, totalGalpoes]);
+  }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, vigaPctVao, vigaAlturaFixa, vigaMotivo, composicoes, totalGalpoes]);
 
   // Nº de vãos AUTOMÁTICO: vem do comprimento (dividido em módulos de 5m e 6m).
   // Preenche o campo pra ficar visível junto com a sugestão. Editável: se o
@@ -1836,7 +1842,10 @@ function OrcamentosGalpaoPageInterno() {
       {
         chave: proximaChave.current++,
         composicao_id: null,
-        nome: `VIGA PARA LAJE ${l.toFixed(2)}X${a.toFixed(2)}X${v.toFixed(2)}M`,
+        // Mesma descrição das automáticas: altura, % do vão e motivo
+        nome:
+          "VIGA PARA LAJE " + doisDec(l, 2) + "X" + doisDec(a, 2) + "X" + doisDec(v, 2) + "M" +
+          " — adicionada à mão · " + alturaENomeVigaLaje(v, null, a, vigaMotivoManual).texto,
         unidade: "UND",
         papel: "VIGA_LAJE",
         quantidade: qtd,
@@ -1848,6 +1857,7 @@ function OrcamentosGalpaoPageInterno() {
     setVigaAltura("");
     setVigaVao("");
     setVigaQtd("1");
+    setVigaMotivoManual("");
     setErro("");
   }
 
@@ -2478,6 +2488,8 @@ function OrcamentosGalpaoPageInterno() {
     ["travamento_valor_m3",  travamentoValorM3, setTravamentoValorM3, "1300",  "num"],
     ["viga_valor_m3",        vigaValorM3,       setVigaValorM3,       "",      "num"],
     ["viga_pct_vao",         vigaPctVao,        setVigaPctVao,        "10",    "num"],
+    ["viga_altura_m",        vigaAlturaFixa,    setVigaAlturaFixa,    "",      "num"],
+    ["viga_motivo",          vigaMotivo,        setVigaMotivo,        "",      "texto"],
     ["viga_laje_avulsa",     temVigaLajeAvulsa, setTemVigaLajeAvulsa, false,   "bool"],
     ["altura_laje",          alturaLaje,        setAlturaLaje,        "3.50",  "num"],
     ["tem_segunda_laje",     temSegundaLaje,    setTemSegundaLaje,    false,   "bool"],
@@ -4131,6 +4143,43 @@ function OrcamentosGalpaoPageInterno() {
                       : "normalmente de 7 a 10% — vale pros 2 níveis"}
                   </span>
                 </div>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <label className="text-xs text-slate-600">ou altura definida (m):</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="ex.: 0,70"
+                    value={vigaAlturaFixa}
+                    onChange={(e) => { descongelarLista(); aoDigitarDecimal(setVigaAlturaFixa)(e); }}
+                    className={`${campoClasse} max-w-[90px]`}
+                  />
+                  <label className="text-xs text-slate-600">motivo:</label>
+                  <input
+                    type="text"
+                    placeholder="ex.: viga reforçada para ganhar pé-direito"
+                    value={vigaMotivo}
+                    onChange={(e) => { descongelarLista(); setVigaMotivo(e.target.value); }}
+                    className={`${campoClasse} flex-1 min-w-[200px]`}
+                  />
+                </div>
+                {Number(vigaAlturaFixa) > 0 && Number(vao) > 0 && (() => {
+                  const tr = Math.ceil(Number(vao) / 10);
+                  const vv = Math.round((Number(vao) / tr) * 100) / 100;
+                  const pct = (Number(vigaAlturaFixa) / vv) * 100;
+                  return (
+                    <p className={`text-xs rounded px-2 py-1.5 mb-2 border ${pct < 8 ? "text-amber-800 bg-amber-50 border-amber-300" : "text-slate-600 bg-slate-50 border-slate-200"}`}>
+                      Altura definida {fmtM(Number(vigaAlturaFixa))} = {pct.toFixed(1).replace(".", ",")}% do vão da viga ({fmtM(vv)}) — vale no lugar do %, pros 2 níveis.
+                      {pct < 8 && (
+                        <>
+                          {" "}Abaixo de ~8% a viga precisa de bem mais aço e de conferência de flecha pelo
+                          engenheiro (ex.: viga de 11,36 m com 0,70 m do Mesanino Sinaldo levou 3ø25 + 3ø20
+                          embaixo). O preço pelo m³ fica MENOR com a viga mais baixa e não cobre esse aço
+                          extra — confira o valor.
+                        </>
+                      )}
+                    </p>
+                  );
+                })()}
                 <p className="text-xs text-slate-500 mb-2">
                   A viga da laje entra automática no orçamento
                   {Number(vao) > 10
@@ -4223,6 +4272,15 @@ function OrcamentosGalpaoPageInterno() {
                     className={campoClasse}
                   />
                   <span className="text-[10px] text-slate-500 text-center">Qtd. vigas</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5 sm:col-span-6 order-last">
+                  <input
+                    type="text"
+                    placeholder="Motivo desta viga (opcional) — vai na descrição"
+                    value={vigaMotivoManual}
+                    onChange={(e) => setVigaMotivoManual(e.target.value)}
+                    className={campoClasse}
+                  />
                   </div>
                   <button
                     type="button"
