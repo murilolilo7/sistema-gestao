@@ -2087,6 +2087,10 @@ function OrcamentosGalpaoPageInterno() {
   const descontoNumerico = Math.min(Math.max(0, Number(desconto) || 0), totalComMargem);
   const totalFinal = totalComMargem - descontoNumerico;
 
+  // Numeração das etapas: a laje (6) só aparece em galpão com laje/mezanino
+  const numEtapaLista =
+    tipoSelecionado === "laje" || tipoSelecionado === "mezanino" || tipoSelecionado === "editado" ? 7 : 6;
+
   const frasePagamento = fraseFormaPagamento(pagEntrada, pagMomento, pagParcelas);
   // Valores de referência (não vão no texto: mudariam se o total mudar depois)
   const valoresPagamento = (() => {
@@ -3920,7 +3924,7 @@ function OrcamentosGalpaoPageInterno() {
 
                 {/* 1º nível */}
                 <p className="text-xs font-semibold text-slate-700 mb-2">Laje do 1º nível</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 items-end">
                   <div className="col-span-2">
                     <label className={labelClasse}>Tipo de laje (capacidade no nome)</label>
                     <select
@@ -3983,7 +3987,7 @@ function OrcamentosGalpaoPageInterno() {
                   </label>
                   {temSegundaLaje && (
                     <>
-                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
                         <div className="col-span-2">
                           <label className={labelClasse}>Tipo da 2ª laje</label>
                           <select
@@ -4011,7 +4015,7 @@ function OrcamentosGalpaoPageInterno() {
                           />
                         </div>
                         <div>
-                          <label className={labelClasse}>Altura do 2º nível (m)</label>
+                          <label className={`${labelClasse} whitespace-nowrap`}>Altura 2º nível (m)</label>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -4043,9 +4047,9 @@ function OrcamentosGalpaoPageInterno() {
                 {/* Vigas da laje */}
                 <div className="border-t border-slate-200 mt-3 pt-3">
                   <p className="text-xs font-semibold text-slate-700 mb-2">Vigas da laje</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-2 items-end">
                     <div>
-                      <label className={labelClasse}>Valor do m³ (R$)</label>
+                      <label className={`${labelClasse} whitespace-nowrap`}>Valor m³ (R$)</label>
                       <input
                         type="text"
                         inputMode="decimal"
@@ -4056,7 +4060,7 @@ function OrcamentosGalpaoPageInterno() {
                       />
                     </div>
                     <div>
-                      <label className={labelClasse}>Altura (% do vão)</label>
+                      <label className={`${labelClasse} whitespace-nowrap`}>Altura (% vão)</label>
                       <input
                         type="text"
                         inputMode="decimal"
@@ -4067,7 +4071,9 @@ function OrcamentosGalpaoPageInterno() {
                       />
                     </div>
                     <div>
-                      <label className={labelClasse}>ou altura definida (m)</label>
+                      <label className={`${labelClasse} whitespace-nowrap`} title="Preenchida, vale no lugar do %">
+                        ou altura (m)
+                      </label>
                       <input
                         type="text"
                         inputMode="decimal"
@@ -4078,7 +4084,7 @@ function OrcamentosGalpaoPageInterno() {
                       />
                     </div>
                     <div className="col-span-2 sm:col-span-3">
-                      <label className={labelClasse}>Motivo (vai na descrição da viga)</label>
+                      <label className={`${labelClasse} whitespace-nowrap`}>Motivo (vai na descrição da viga)</label>
                       <input
                         type="text"
                         placeholder="ex.: viga reforçada para ganhar pé-direito"
@@ -4344,6 +4350,13 @@ function OrcamentosGalpaoPageInterno() {
               </div>
             )}
 
+            {/* Lista de peças: etapa própria, separada da laje */}
+            <TituloEtapa numero={numEtapaLista}>
+              Peças do orçamento{" "}
+              <span className="font-normal text-xs text-slate-400">
+                — quantidade e valor se editam direto na linha
+              </span>
+            </TituloEtapa>
             {itens.length === 0 ? (
               <p className="text-xs text-slate-400">Nenhuma peça adicionada ainda.</p>
             ) : (
@@ -4611,7 +4624,7 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
-          <TituloEtapa numero="7">Condições e finalização</TituloEtapa>
+          <TituloEtapa numero={numEtapaLista + 1}>Condições e finalização</TituloEtapa>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className={labelClasse}>Data da proposta</label>
@@ -4674,53 +4687,6 @@ function OrcamentosGalpaoPageInterno() {
                 placeholder="Ex: forma de pagamento, frete, prazo de entrega..."
                 className={`${campoClasse} resize-y`}
               />
-              {/* Monta a frase da forma de pagamento e põe na observação */}
-              <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
-                <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-                  <span className="font-medium">Pagamento:</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={pagEntrada}
-                    onChange={aoDigitarDecimal(setPagEntrada)}
-                    className="w-12 rounded border border-slate-300 px-1.5 py-1 text-xs text-center"
-                    aria-label="Entrada em %"
-                  />
-                  <span>%</span>
-                  <input
-                    type="text"
-                    value={pagMomento}
-                    onChange={(e) => setPagMomento(e.target.value)}
-                    className="flex-1 min-w-[180px] rounded border border-slate-300 px-1.5 py-1 text-xs"
-                    aria-label="Quando paga a entrada"
-                  />
-                  <span>e saldo em</span>
-                  <input
-                    type="number"
-                    min="1"
-                    value={pagParcelas}
-                    onChange={(e) => setPagParcelas(e.target.value)}
-                    className="w-12 rounded border border-slate-300 px-1.5 py-1 text-xs text-center"
-                    aria-label="Parcelas do saldo"
-                  />
-                  <span>x</span>
-                  <button
-                    type="button"
-                    onClick={inserirPagamento}
-                    className="ml-auto rounded bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium px-2.5 py-1 transition"
-                  >
-                    Pôr na observação
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  “{frasePagamento}”
-                  {valoresPagamento && (
-                    <span className="text-slate-400">
-                      {" "}— hoje dá {valoresPagamento}
-                    </span>
-                  )}
-                </p>
-              </div>
             </div>
             <div>
               <label className={labelClasse}>Observação interna (só você vê, não vai pro PDF)</label>
@@ -4733,8 +4699,55 @@ function OrcamentosGalpaoPageInterno() {
               />
             </div>
           </div>
+          {/* Monta a frase da forma de pagamento e põe na observação */}
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+              <span className="font-medium">Forma de pagamento:</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={pagEntrada}
+                onChange={aoDigitarDecimal(setPagEntrada)}
+                className="w-12 rounded border border-slate-300 px-1.5 py-1 text-xs text-center"
+                aria-label="Entrada em %"
+              />
+              <span>%</span>
+              <input
+                type="text"
+                value={pagMomento}
+                onChange={(e) => setPagMomento(e.target.value)}
+                className="flex-1 min-w-[220px] max-w-md rounded border border-slate-300 px-1.5 py-1 text-xs"
+                aria-label="Quando paga a entrada"
+              />
+              <span>e saldo em</span>
+              <input
+                type="number"
+                min="1"
+                value={pagParcelas}
+                onChange={(e) => setPagParcelas(e.target.value)}
+                className="w-12 rounded border border-slate-300 px-1.5 py-1 text-xs text-center"
+                aria-label="Parcelas do saldo"
+              />
+              <span>x</span>
+              <button
+                type="button"
+                onClick={inserirPagamento}
+                className="ml-auto rounded bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium px-2.5 py-1 transition"
+              >
+                Pôr na observação
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              “{frasePagamento}”
+              {valoresPagamento && (
+                <span className="text-slate-400">
+                  {" "}— hoje dá {valoresPagamento}
+                </span>
+              )}
+            </p>
+          </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="text-sm space-y-0.5">
               <p className="text-slate-500">Subtotal (peças): {formatarMoeda(subtotal)}</p>
               {margemNumerica > 0 && (
