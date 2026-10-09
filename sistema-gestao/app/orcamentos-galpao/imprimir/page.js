@@ -171,6 +171,13 @@ function simplificarNome(nome, prefixo) {
   return nome.replace(new RegExp(`^${prefixo}S?\\s+`, "i"), "").trim();
 }
 
+// No impresso a calha diz só o material: "FIBRA" ou "ZINCO" (sem metragem)
+function tipoDaCalha(nome) {
+  if (/fibra/i.test(nome)) return "FIBRA";
+  if (/zinco|galvaniz/i.test(nome)) return "ZINCO";
+  return simplificarNome(nome, "CALHA");
+}
+
 // Papel da peça. As peças CALCULADAS (viga de travamento, viga de laje,
 // tesoura proporcional, consolo) não vêm do catálogo — entram com nome
 // livre e sem papel. Por isso o papel também é deduzido pelo nome, senão
@@ -361,14 +368,10 @@ function ConteudoImpressao() {
   const areaNivel1 = somaM2(pecasLaje.filter((i) => !ehNivel2(i)));
   const areaNivel2 = somaM2(pecasLaje.filter(ehNivel2));
   const areaLajes = areaNivel1 + areaNivel2;
-  const naAltura = (h) => (Number(h) > 0 ? ` A ${formatarMedida(h)}M` : "");
+  // Só o nível e a área — a altura de cada nível não vai pro cliente.
   const partesLaje = [];
-  if (areaNivel1 > 0)
-    partesLaje.push(`1º NÍVEL ${formatarMedida(areaNivel1)}M²${naAltura(orcamento.altura_laje)}`);
-  if (areaNivel2 > 0)
-    partesLaje.push(
-      `2º NÍVEL (TOPO DOS PILARES) ${formatarMedida(areaNivel2)}M²${naAltura(orcamento.altura_laje2)}`
-    );
+  if (areaNivel1 > 0) partesLaje.push(`1º NÍVEL ${formatarMedida(areaNivel1)}M²`);
+  if (areaNivel2 > 0) partesLaje.push(`2º NÍVEL ${formatarMedida(areaNivel2)}M²`);
   // Sem a peça da laje, mas com as vigas: só avisa que vão as vigas.
   const textoLajes =
     partesLaje.join(" + ") ||
@@ -416,7 +419,7 @@ function ConteudoImpressao() {
       rotulo: "Calha",
       valor:
         itemCalha && Number(itemCalha.quantidade) > 0
-          ? `${simplificarNome(nomeDaPeca(itemCalha), "CALHA")} — ${formatarMedida(itemCalha.quantidade)}M`
+          ? tipoDaCalha(nomeDaPeca(itemCalha))
           : "NÃO CONTEMPLA",
     },
     {
