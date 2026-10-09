@@ -368,14 +368,8 @@ function ConteudoImpressao() {
   const areaNivel1 = somaM2(pecasLaje.filter((i) => !ehNivel2(i)));
   const areaNivel2 = somaM2(pecasLaje.filter(ehNivel2));
   const areaLajes = areaNivel1 + areaNivel2;
-  // Só o nível e a área — a altura de cada nível não vai pro cliente.
-  const partesLaje = [];
-  if (areaNivel1 > 0) partesLaje.push(`1º NÍVEL ${formatarMedida(areaNivel1)}M²`);
-  if (areaNivel2 > 0) partesLaje.push(`2º NÍVEL ${formatarMedida(areaNivel2)}M²`);
-  // Sem a peça da laje, mas com as vigas: só avisa que vão as vigas.
-  const textoLajes =
-    partesLaje.join(" + ") ||
-    (possuiPapel(itensOrcamento, "VIGA_LAJE") ? "SOMENTE AS VIGAS PARA LAJE" : "NÃO CONTEMPLA");
+  // Pro cliente: "SIM — área total das lajes" ou só "NÃO" (sem nível nem altura).
+  const textoLajes = areaLajes > 0 ? `SIM — ${formatarMedida(areaLajes)}M²` : "NÃO";
   const textoArea = !areaTotal
     ? "-"
     : areaLajes > 0
