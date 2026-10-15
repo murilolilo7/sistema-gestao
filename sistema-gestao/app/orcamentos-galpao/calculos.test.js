@@ -33,6 +33,7 @@ import {
   qtdTelha,
   valorPorExtenso,
   fraseFormaPagamento,
+  volumeVigaLaje,
   trocarLinhaPagamento,
 } from "./calculos.js";
 
@@ -513,4 +514,30 @@ test("pôr a frase de pagamento troca a linha antiga e mantém o resto", () => {
     trocarLinhaPagamento("Frete CIF.\nPagamento de 30% no ato e saldo em 4x.\nPrazo 60 dias.", f),
     "Frete CIF.\n" + f + "\nPrazo 60 dias."
   );
+});
+
+// Gabarito: vigas de laje BIPADAS na fábrica (out/25–out/26), [vão, m³ real, qtd]
+const VIGAS_BIPADAS = [
+  [9.68, 1.533, 1], [2.08, 0.166, 3], [6.18, 0.598, 6], [6.98, 0.938, 4], [7.18, 0.968, 2],
+  [4.6, 0.368, 7], [4.81, 0.385, 3], [5.13, 0.41, 2], [2.3, 0.184, 1], [1.48, 0.118, 1],
+];
+
+test("volume da viga de laje bate com as vigas produzidas (total ±5%, cada ±20%)", () => {
+  let real = 0, calc = 0;
+  for (const [v, m3, n] of VIGAS_BIPADAS) {
+    const { volume } = volumeVigaLaje(v, alturaVigaLaje(v, 10));
+    assert.ok(Math.abs(volume / m3 - 1) <= 0.2, `vão ${v}: ${volume} x real ${m3}`);
+    real += m3 * n; calc += volume * n;
+  }
+  assert.ok(Math.abs(calc / real - 1) <= 0.05, `total ${calc} x real ${real}`);
+});
+
+test("volume da viga de laje: retângulo de referência, aproveitamento e mínimo", () => {
+  const r = volumeVigaLaje(10, 1);
+  assert.equal(r.retangulo, 2.5);
+  assert.equal(r.volume, 1.625); // 65% do retângulo
+  assert.equal(volumeVigaLaje(10, 1, "0,8").volume, 2); // aproveitamento editável
+  assert.equal(volumeVigaLaje(10, 1, 0).volume, 1.625); // inválido -> padrão
+  assert.equal(volumeVigaLaje(2, 0.2).volume, 0.16); // seção mínima 0,08 m²
+  assert.equal(volumeVigaLaje(0, 1).volume, 0);
 });

@@ -28,6 +28,7 @@ import {
   vaosCobertosPelaLaje,
   alturaVigaLaje,
   alturaENomeVigaLaje,
+  volumeVigaLaje,
   fraseFormaPagamento,
   trocarLinhaPagamento,
   qtdCalha,
@@ -1532,8 +1533,9 @@ function OrcamentosGalpaoPageInterno() {
   // Viga da laje AUTOMÁTICA no orçamento: entra já dividida (vão = metade da
   // largura) quando a largura passa de 10m — que é quando existe o pilar no
   // meio pra dividir a viga —, ou inteira até 10m. Altura = % do vão (múltiplo
-  // de 5cm). Quantidade = linhas de pilar que a laje cobre. Preço = 0,25 ×
-  // altura × vão × valor do m³ que o usuário informa; enquanto o m³ estiver em
+  // de 5cm). Quantidade = linhas de pilar que a laje cobre. Preço = concreto
+  // REAL da viga (volumeVigaLaje: ~65% do retângulo 0,25 × altura × vão, viga
+  // em "L") × valor do m³ que o usuário informa; enquanto o m³ estiver em
   // branco a viga aparece com preço 0 (a definir) e não soma no total.
   useEffect(() => {
     // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
@@ -1562,7 +1564,9 @@ function OrcamentosGalpaoPageInterno() {
     const vaoViga = Math.round((larguraGalpao / trechos) * 100) / 100;
     const { altura: alturaViga, texto: textoAltura } = alturaENomeVigaLaje(vaoViga, vigaPctVao, vigaAlturaFixa, vigaMotivo);
     const m3 = Number(vigaValorM3) || 0;
-    const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
+    // Preço pelo concreto REAL da viga (em "L", ~65% do retângulo do nome)
+    const { volume: volViga } = volumeVigaLaje(vaoViga, alturaViga, paramEng?.viga_laje_aproveitamento);
+    const preco = m3 > 0 ? Math.round(volViga * m3 * 100) / 100 : 0;
     // A descrição diz o NÍVEL, a altura (% ou definida) e o motivo — dá pra
     // saber qual viga é qual e por quê, mesmo depois de mudar a altura.
     const nivel1 =
@@ -1590,7 +1594,7 @@ function OrcamentosGalpaoPageInterno() {
       ];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tipoSelecionado, vao, comprimento, areaLaje, temVigaLajeAvulsa, numeroVaos, vigaValorM3, vigaPctVao, vigaAlturaFixa, vigaMotivo, alturaLaje, totalGalpoes]);
+  }, [tipoSelecionado, vao, comprimento, areaLaje, temVigaLajeAvulsa, numeroVaos, vigaValorM3, vigaPctVao, vigaAlturaFixa, vigaMotivo, alturaLaje, totalGalpoes, paramEng]);
 
   // SEGUNDA LAJE (galpao de dois pavimentos): lanca a peca da laje de cima e
   // as vigas dela. Mesma regra da primeira: a viga nunca passa de 10m, entao
@@ -1634,7 +1638,8 @@ function OrcamentosGalpaoPageInterno() {
         const vaoViga = Math.round((larguraGalpao / trechos) * 100) / 100;
         const { altura: alturaViga, texto: textoAltura } = alturaENomeVigaLaje(vaoViga, vigaPctVao, vigaAlturaFixa, vigaMotivo);
         const m3 = Number(vigaValorM3) || 0;
-        const preco = m3 > 0 ? Math.round(0.25 * alturaViga * vaoViga * m3 * 100) / 100 : 0;
+        const { volume: volViga } = volumeVigaLaje(vaoViga, alturaViga, paramEng?.viga_laje_aproveitamento);
+        const preco = m3 > 0 ? Math.round(volViga * m3 * 100) / 100 : 0;
         const antV = atual.find((i) => i.chave === CH_VIGA2);
         novos.push({
           chave: CH_VIGA2,
@@ -1655,7 +1660,7 @@ function OrcamentosGalpaoPageInterno() {
       return recalcularMontagem([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...sem]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, vigaPctVao, vigaAlturaFixa, vigaMotivo, composicoes, totalGalpoes]);
+  }, [temSegundaLaje, areaLaje2, tipoLajeId2, alturaLaje2, vao, comprimento, numeroVaos, vigaValorM3, vigaPctVao, vigaAlturaFixa, vigaMotivo, composicoes, totalGalpoes, paramEng]);
 
   // Nº de vãos AUTOMÁTICO: vem do comprimento (dividido em módulos de 5m e 6m).
   // Preenche o campo pra ficar visível junto com a sugestão. Editável: se o
@@ -4117,6 +4122,27 @@ function OrcamentosGalpaoPageInterno() {
                       níveis. Quantidade e preço se editam na lista abaixo.
                     </p>
                   )}
+                  {Number(vao) > 0 && (() => {
+                    // Concreto real (viga em "L") x retângulo do nome
+                    const tr = Math.ceil(Number(vao) / 10);
+                    const vv = Math.round((Number(vao) / tr) * 100) / 100;
+                    const { altura } = alturaENomeVigaLaje(vv, vigaPctVao, vigaAlturaFixa, "");
+                    const r = volumeVigaLaje(vv, altura, paramEng?.viga_laje_aproveitamento);
+                    const m3 = Number(vigaValorM3) || 0;
+                    const pct = Math.round(r.aproveitamento * 100);
+                    return (
+                      <p className="text-xs text-slate-600 bg-white border border-slate-200 rounded px-2 py-1.5 mb-2">
+                        Concreto por viga: <b>{String(r.volume).replace(".", ",")} m³</b> — a viga é feita
+                        em &quot;L&quot;, com ~{pct}% do retângulo 0,25 × {fmtM(altura)} × {fmtM(vv)} (
+                        {String(r.retangulo).replace(".", ",")} m³), medido nas vigas bipadas na fábrica.
+                        {m3 > 0 && (
+                          <>
+                            {" "}Preço por viga: <b>{formatarMoeda(Math.round(r.volume * m3 * 100) / 100)}</b>.
+                          </>
+                        )}
+                      </p>
+                    );
+                  })()}
                 {Number(vigaAlturaFixa) > 0 && Number(vao) > 0 && (() => {
                   const tr = Math.ceil(Number(vao) / 10);
                   const vv = Math.round((Number(vao) / tr) * 100) / 100;

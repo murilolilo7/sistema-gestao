@@ -319,6 +319,28 @@ export function alturaENomeVigaLaje(vaoViga, pctDoVao, alturaDefinida, motivo) {
   };
 }
 
+// Concreto REAL da viga de laje. O nome da peça mostra o retângulo de
+// referência (0,25 × altura × vão), mas a fábrica faz a viga em "L": nas 30
+// vigas bipadas (out/25–out/26) o concreto ficou em ~65% desse retângulo
+// (4,6 m: 0,080 m³/m; 7 m: 0,134; 9,7 m: 0,158). Viga curta tem um mínimo de
+// seção (0,08 m², as de 1,5–2,3 m também saem com 0,080 m³/m).
+export const VIGA_LAJE = { largura: 0.25, aproveitamento: 0.65, areaMinima: 0.08 };
+
+export function volumeVigaLaje(vaoViga, altura, aproveitamento) {
+  const v = Number(vaoViga) || 0;
+  const h = Number(altura) || 0;
+  const a = Number(String(aproveitamento ?? "").replace(",", "."));
+  const ap = a > 0 && a <= 1 ? a : VIGA_LAJE.aproveitamento;
+  const retangulo = VIGA_LAJE.largura * h * v;
+  if (v <= 0 || h <= 0) return { volume: 0, retangulo: 0, aproveitamento: ap };
+  const area = Math.max(VIGA_LAJE.largura * h * ap, VIGA_LAJE.areaMinima);
+  return {
+    volume: Math.round(area * v * 1000) / 1000,
+    retangulo: Math.round(retangulo * 1000) / 1000,
+    aproveitamento: ap,
+  };
+}
+
 // Frase da forma de pagamento que vai na observação do orçamento, no jeito
 // que a MR7 escreve: "Pagamento de 30% no ato da assinatura do contrato e
 // saldo em 4x." Entrada 100% = à vista; entrada 0 = só parcelado.

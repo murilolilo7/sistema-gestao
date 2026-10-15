@@ -601,6 +601,34 @@ function EngenhariaPage() {
               )}
             </div>
           )}
+          {param && (
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-sm font-semibold text-slate-700 mb-1">Viga de laje — concreto real</p>
+              <p className="text-xs text-slate-500 mb-3">
+                O nome da viga no orçamento mostra o retângulo 0,25 × altura × vão, mas a fábrica faz a
+                viga em &quot;L&quot;. Nas 30 vigas de laje bipadas (out/25 a out/26) o concreto ficou em
+                ~65% desse retângulo. O preço da viga sai desse concreto real × o valor do m³ informado
+                no orçamento. Viga curta tem seção mínima de 0,08 m².
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Concreto real (fração do retângulo)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    defaultValue={txt(param.viga_laje_aproveitamento ?? 0.65)}
+                    onBlur={(e) => salvarParametro("viga_laje_aproveitamento", e.target.value)}
+                    className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 pb-2">
+                  Ex.: viga de 7 m com 0,70 m de altura = retângulo 1,225 m³ →{" "}
+                  <b>{num(1.225 * (Number(param.viga_laje_aproveitamento) || 0.65), 3)} m³</b> de concreto
+                  (real medido: 0,94 m³ na Pell Transportes).
+                </p>
+              </div>
+            </div>
+          )}
             </>
           )}
 
