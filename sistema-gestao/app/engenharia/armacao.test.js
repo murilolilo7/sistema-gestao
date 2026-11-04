@@ -30,6 +30,7 @@ test("todas as peças com armação são reconhecidas", () => {
     [{ nome: "PILAR 0,25x0,40 - 9,00m (7,50 livre + 1,50 fundacao)" }, "PILAR_SEM_CONSOLO"],
     [{ nome: "PILAR 0,25x0,40 - 9,00m (7,50 livre + 1,50 fundacao) — sob a laje" }, "PILAR_COM_CONSOLO"],
     [{ nome: "PILAR 0,25x0,40 - 9,00m — avulso", secao: "laje" }, "PILAR_COM_CONSOLO"],
+    [{ nome: "PILAR 0,25x0,40 - 9,00m — reforçado (2 tesouras)" }, "PILAR_COM_CONSOLO"],
     [{ nome: "LAJE PI 5,99X1,24X0,25M", papel: "LAJE" }, "LAJE"],
     [{ nome: "VIGA PARA LAJE 0,25X0,70X7,00M — 1º nível" }, "VIGA_LAJE"],
     [{ nome: "VIGA DE TRAVAMENTO 0,15X0,30X5,00M" }, "VIGA_TRAVAMENTO"],
