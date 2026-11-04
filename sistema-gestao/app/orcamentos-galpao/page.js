@@ -10,6 +10,7 @@ import DesenhoGalpao from "./desenho-galpao";
 import ComparacaoPilarForma4 from "./ComparacaoPilarForma4";
 import ComparacaoTesoura from "./ComparacaoTesoura";
 import PainelTestes from "./PainelTestes";
+import MaoDeObraArmacao from "./MaoDeObraArmacao";
 // Regras de cálculo (testadas em calculos.test.js). Ficam num arquivo à parte
 // para que os testes protejam EXATAMENTE o que o sistema usa.
 import {
@@ -3724,6 +3725,7 @@ function OrcamentosGalpaoPageInterno() {
                 telhaNome={telhasDisponiveis.find((t) => String(t.id) === String(telhaId))?.nome}
               />
             )}
+            <MaoDeObraArmacao itens={itens} subtotal={subtotal} />
           </PainelTestes>
           <div className="lg:hidden">
             <PainelChecklist />
