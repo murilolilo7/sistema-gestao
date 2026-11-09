@@ -11,6 +11,9 @@ import ComparacaoPilarForma4 from "./ComparacaoPilarForma4";
 import ComparacaoTesoura from "./ComparacaoTesoura";
 import PainelTestes from "./PainelTestes";
 import MaoDeObraArmacao from "./MaoDeObraArmacao";
+import PainelProjeto, { PROJETO_VAZIO } from "./PainelProjeto";
+import { useUrlImagemProjeto } from "./imagem-projeto";
+import { areaLajeDoProjeto } from "./projeto";
 // Regras de cálculo (testadas em calculos.test.js). Ficam num arquivo à parte
 // para que os testes protejam EXATAMENTE o que o sistema usa.
 import {
@@ -403,6 +406,10 @@ function OrcamentosGalpaoPageInterno() {
   // Pilar automatico: normalmente sim, mas o cliente pode ja ter a estrutura
   // pronta e querer so a coberta. Ai o usuario desmarca e os pilares saem.
   const [comPilares, setComPilares] = useState(true);
+  // Orçar por projeto (só no galpão editado): as peças vêm da folha de
+  // compatibilização, e não das medidas. Os cálculos automáticos ficam parados.
+  const [projetoLigado, setProjetoLigado] = useState(false);
+  const [projeto, setProjeto] = useState(PROJETO_VAZIO);
   const [nivelPadrao, setNivelPadrao] = useState("AUTO");
   const [nivelReforcado, setNivelReforcado] = useState("PESADO");
   const [nivelComLaje, setNivelComLaje] = useState("COM_LAJE");
@@ -570,6 +577,8 @@ function OrcamentosGalpaoPageInterno() {
 
   const modeloSelecionado = modelos.find((m) => String(m.id) === String(modeloId));
   const tipoSelecionado = modeloSelecionado?.tipo || "";
+  const modoProjeto = projetoLigado && tipoSelecionado === "editado";
+  const urlImagemProjeto = useUrlImagemProjeto(modoProjeto ? projeto.imagem_path : null);
   // GEMINADO: a largura lançada é a de CADA galpão. Galpões podem ter
   // larguras diferentes — o galpão 1 usa o campo principal e os demais
   // usam os campos extras (vazio = repete a largura do galpão 1).
@@ -944,7 +953,10 @@ function OrcamentosGalpaoPageInterno() {
   const somaLarguras = listaLarguras
     ? listaLarguras.reduce((s, n) => s + n, 0)
     : Number(vao) || 0;
-  const areaCalculada = trapezioAtivo
+  const areaProjeto = modoProjeto ? Number(String(projeto.area_coberta).replace(",", ".")) || 0 : 0;
+  const areaCalculada = areaProjeto > 0
+    ? areaProjeto
+    : trapezioAtivo
     ? areaTrapezio(vao, vaoFundo, comprimento) || null
     : vao && comprimento
     ? somaLarguras * Number(comprimento)
@@ -955,6 +967,7 @@ function OrcamentosGalpaoPageInterno() {
   useEffect(() => {
     // Lista congelada (orçamento salvo recém-aberto): não mexe em nada.
     if (listaCongelada.current) return;
+    if (modoProjeto) return;
     if (!vao || !comprimento) return;
     // O campo é "quantos galpões germinados A MAIS" (0 = avulso, sem
     // germinação). +1 converte pro total de unidades físicas coladas.
@@ -1072,6 +1085,7 @@ function OrcamentosGalpaoPageInterno() {
     areaLaje,
     tipoLajeId,
     composicoes,
+    modoProjeto,
   ]);
 
   // Realce visual da última peça adicionada (some sozinho em 2,5s)
@@ -1108,7 +1122,7 @@ function OrcamentosGalpaoPageInterno() {
             temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber,
             numeroGalpoesGerminados, largurasExtras, telhaId, perdaTelha,
             areaLaje, tipoLajeId, diasValidade, desconto, margemComercial,
-            observacao, observacaoInterna, itens,
+            observacao, observacaoInterna, itens, projetoLigado, projeto,
           })
         );
       } catch (e) { /* armazenamento indisponível: segue sem rascunho */ }
@@ -1118,7 +1132,7 @@ function OrcamentosGalpaoPageInterno() {
       temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber,
       numeroGalpoesGerminados, largurasExtras, telhaId, perdaTelha, areaLaje,
       tipoLajeId, diasValidade, desconto, margemComercial, observacao,
-      observacaoInterna, itens, editingId, editingCodigo]);
+      observacaoInterna, itens, editingId, editingCodigo, projetoLigado, projeto]);
 
   // Ao abrir a tela, verifica se ficou um rascunho não salvo
   useEffect(() => {
@@ -1159,6 +1173,8 @@ function OrcamentosGalpaoPageInterno() {
     setMargemComercial(r.margemComercial || "25");
     setObservacao(r.observacao || "");
     setObservacaoInterna(r.observacaoInterna || "");
+    setProjetoLigado(!!r.projetoLigado);
+    setProjeto({ ...PROJETO_VAZIO, ...(r.projeto || {}) });
     const itensRestaurados = Array.isArray(r.itens) ? r.itens : [];
     const maiorChave = itensRestaurados.reduce((m, i) => Math.max(m, i.chave || 0), 0);
     proximaChave.current = maiorChave + 1;
@@ -1701,6 +1717,7 @@ function OrcamentosGalpaoPageInterno() {
   // 12m, desmarcada abaixo. So muda quando a largura CRUZA esse limite, para
   // nao desfazer a escolha do usuario enquanto ele trabalha no orcamento.
   useEffect(() => {
+    if (modoProjeto) return;
     const larg = somaLarguras || Number(vao) || 0;
     if (larg <= 0) return;
     const deveMarcar = larg >= 12;
@@ -1709,7 +1726,7 @@ function OrcamentosGalpaoPageInterno() {
       setTemTravamento(deveMarcar);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vao, somaLarguras]);
+  }, [vao, somaLarguras, modoProjeto]);
 
   // Lanca as vigas de travamento acompanhando os vaos: uma viga por vao em
   // cada linha de pilar (2 linhas no galpao avulso, +1 por geminado).
@@ -2041,6 +2058,37 @@ function OrcamentosGalpaoPageInterno() {
     setErro("");
   }
 
+  // Ligar: tira da lista o que veio do cálculo automático, para a obra começar
+  // só com o que for lançado. Desligar: os cálculos voltam a valer.
+  function alternarModoProjeto(ligado) {
+    descongelarLista();
+    setProjetoLigado(ligado);
+    if (!ligado) {
+      setComPilares(true);
+      return;
+    }
+    setComPilares(false);
+    setTemTravamento(false);
+    setTemVigaLajeAvulsa(false);
+    setTemSegundaLaje(false);
+    setTemPlatibanda(false);
+    setTemDenteGerber(false);
+    setAreaLaje("");
+    setTipoLajeId("");
+    setTelhaId("");
+    setVaoFundo("");
+    setNumeroGalpoesGerminados("0");
+    setLargurasExtras([]);
+    setItens((atual) => atual.filter((i) => typeof i.chave !== "string" && !i.automatico));
+  }
+
+  function adicionarPecaDoProjeto(peca) {
+    setItens((atual) => {
+      const lista = [...atual, { chave: proximaChave.current++, ...peca }];
+      return peca.papel === "PILAR" ? recalcularFundacao(lista) : recalcularMontagem(lista);
+    });
+  }
+
   function removerItem(chave) {
     // Chave fixa = peça automática. Anota para o cálculo não trazer de volta.
     if (typeof chave === "string") removidasNaMao.current.add(chave);
@@ -2106,8 +2154,11 @@ function OrcamentosGalpaoPageInterno() {
   const totalFinal = totalComMargem - descontoNumerico;
 
   // Numeração das etapas: a laje (6) só aparece em galpão com laje/mezanino
-  const numEtapaLista =
-    tipoSelecionado === "laje" || tipoSelecionado === "mezanino" || tipoSelecionado === "editado" ? 7 : 6;
+  const numEtapaLista = modoProjeto
+    ? 4
+    : tipoSelecionado === "laje" || tipoSelecionado === "mezanino" || tipoSelecionado === "editado"
+      ? 7
+      : 6;
 
   const frasePagamento = fraseFormaPagamento(pagEntrada, pagMomento, pagParcelas);
   // Valores de referência (não vão no texto: mudariam se o total mudar depois)
@@ -2146,8 +2197,9 @@ function OrcamentosGalpaoPageInterno() {
   // Laje: pela área das lajes informadas (1ª + 2ª). Sem área informada (só
   // as vigas, ex.: laje de coberta), pela área da planta — é a área que
   // as vigas cobrem.
-  const areaLajeTotal =
-    areaLajeNumerica + (temSegundaLaje ? Number(areaLaje2) || 0 : 0);
+  const areaLajeTotal = modoProjeto
+    ? areaLajeDoProjeto(itens)
+    : areaLajeNumerica + (temSegundaLaje ? Number(areaLaje2) || 0 : 0);
   const areaDivisorLaje = areaLajeTotal > 0 ? areaLajeTotal : areaCalculada || 0;
   const valorPorM2Laje =
     itensLaje.length > 0 && subtotalLaje > 0 && areaDivisorLaje > 0
@@ -2623,6 +2675,8 @@ function OrcamentosGalpaoPageInterno() {
     setPerdaTelha("10");
     setChaveRecente(null);
     setExpandidoId(null);
+    setProjetoLigado(false);
+    setProjeto(PROJETO_VAZIO);
   }
 
   function abrirNovo() {
@@ -2676,11 +2730,15 @@ function OrcamentosGalpaoPageInterno() {
     // ajustou para a mesma altura) NÃO podem receber a mesma chave: o sistema
     // deixa de distinguir uma da outra e uma delas não some ao ser removida.
     const chavesUsadas = new Set();
+    // Orçamento por projeto: nenhuma peça é automática ao reabrir.
+    const porProjeto = !!orcamento.projeto?.ativo;
+    setProjetoLigado(porProjeto);
+    setProjeto({ ...PROJETO_VAZIO, ...(orcamento.projeto || {}) });
     const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => {
       const nomeItem =
         item.composicoes_galpao?.nome || item.descricao_livre || "Item removido";
       const secaoItem = item.secao === "laje" ? "laje" : "estrutura";
-      let chaveAuto = chaveAutomatica(nomeItem, secaoItem);
+      let chaveAuto = porProjeto ? null : chaveAutomatica(nomeItem, secaoItem);
       if (chaveAuto && chavesUsadas.has(chaveAuto)) chaveAuto = null; // a 2ª ganha chave própria
       if (chaveAuto) chavesUsadas.add(chaveAuto);
       // A MONTAGEM salva tambem e respeitada: se o usuario ajustou as
@@ -2859,6 +2917,15 @@ function OrcamentosGalpaoPageInterno() {
         data_proposta_input: dataProposta || null,
         dias_validade_input: Number(diasValidade) || null,
       });
+      // Mesmo desligado, grava: um orçamento que saiu do modo projeto não pode
+      // reabrir nele. A área informada substitui a calculada pelas medidas.
+      const { error: erroProjeto } = await supabase.rpc("salvar_projeto_orcamento_galpao", {
+        orcamento_id_input: Number(idSalvo),
+        projeto_input: modoProjeto
+          ? { ...projeto, ativo: true, area_coberta: areaProjeto > 0 ? areaProjeto : null }
+          : null,
+      });
+      if (erroProjeto) notificar("Os dados do projeto não foram salvos: " + erroProjeto.message, "erro");
     }
 
     setMensagem(
@@ -3189,8 +3256,25 @@ function OrcamentosGalpaoPageInterno() {
               </select>
             </div>
           </div>
+          {tipoSelecionado === "editado" && (
+            <label className="mb-3 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={modoProjeto}
+                onChange={(e) => alternarModoProjeto(e.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                Orçar por projeto
+                <span className="block font-normal text-slate-500">
+                  Para obra fora do padrão, como prédio com vãos diferentes e castelo: as peças vêm do quadro da folha de
+                  compatibilização, e a imagem da obra sai no impresso.
+                </span>
+              </span>
+            </label>
+          )}
 
-          <TituloEtapa numero="2">Medidas do galpão</TituloEtapa>
+          <TituloEtapa numero="2">{modoProjeto ? "Medidas gerais da obra" : "Medidas do galpão"}</TituloEtapa>
           {(
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
               <div>
@@ -3222,7 +3306,7 @@ function OrcamentosGalpaoPageInterno() {
                 />
                 {(() => {
                   const d = decomporComprimentoEmModulos(comprimento);
-                  if (!d) return null;
+                  if (!d || modoProjeto) return null;
                   const totalVaos = d.vaos5 + d.vaos6;
                   const partes = [];
                   if (d.vaos5) partes.push(d.vaos5 + " de 5m");
@@ -3251,6 +3335,8 @@ function OrcamentosGalpaoPageInterno() {
                   className={campoClasse}
                 />
               </div>
+              {!modoProjeto && (
+              <>
               <div>
                 <label className={labelClasse}>Nº de vãos (tesouras)</label>
                 <input
@@ -3273,11 +3359,13 @@ function OrcamentosGalpaoPageInterno() {
                   className={campoClasse}
                 />
               </div>
+              </>
+              )}
             </div>
           )}
 
           {/* Opções da estrutura: todas as marcações num quadro só, separadas por linha */}
-          {modeloId && (
+          {modeloId && !modoProjeto && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 mb-3 divide-y divide-slate-200">
           {totalGalpoes <= 1 && (
             <div className="py-2.5">
@@ -3428,7 +3516,7 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
-          {modeloId && avisoVaos && (
+          {modeloId && !modoProjeto && avisoVaos && (
             <p className="text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded px-2 py-1.5 mb-3">
               {avisoVaos}
             </p>
@@ -3503,7 +3591,7 @@ function OrcamentosGalpaoPageInterno() {
                   </div>
                 </>
               )}
-              {peDireito && (
+              {peDireito && !modoProjeto && (
                 <div className="ml-auto bg-white/70 rounded-lg border border-emerald-100 px-2 py-1">
                   <DesenhoGalpao
                     vao={vao}
@@ -3542,6 +3630,26 @@ function OrcamentosGalpaoPageInterno() {
             </div>
           )}
 
+          {modoProjeto && (
+            <>
+              <TituloEtapa numero="3">Peças da obra</TituloEtapa>
+              <PainelProjeto
+                projeto={projeto}
+                aoMudarProjeto={(parte) => setProjeto((a) => ({ ...a, ...parte }))}
+                composicoes={composicoes}
+                itens={itens}
+                valorM3Armado={paramEng?.valor_m3_armado}
+                aproveitamentoViga={paramEng?.viga_laje_aproveitamento}
+                travamentoValorM3={travamentoValorM3}
+                setTravamentoValorM3={setTravamentoValorM3}
+                vigaValorM3={vigaValorM3}
+                setVigaValorM3={setVigaValorM3}
+                aoAdicionar={adicionarPecaDoProjeto}
+              />
+            </>
+          )}
+          {!modoProjeto && (
+          <>
           <TituloEtapa numero="3">Tesoura</TituloEtapa>
             {tesourasComReferencia.length > 0 && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
@@ -3705,6 +3813,8 @@ function OrcamentosGalpaoPageInterno() {
               ⚠ {avisoAcoPilar}
             </p>
           )}
+          </>
+          )}
           <PainelTestes>
             {comPilares && pilaresComparacao.length > 0 && nVaos > 0 && (
               <ComparacaoPilarForma4
@@ -3731,7 +3841,9 @@ function OrcamentosGalpaoPageInterno() {
             <PainelChecklist />
           </div>
           <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
-            <p className="text-xs font-medium text-slate-600 mb-2">Adicionar peça</p>
+            <p className="text-xs font-medium text-slate-600 mb-2">
+              {modoProjeto ? "Outras peças do catálogo (capitel, poste, base...)" : "Adicionar peça"}
+            </p>
             <div className="flex items-center gap-2 mb-2">
               <input
                 type="text"
@@ -3807,6 +3919,8 @@ function OrcamentosGalpaoPageInterno() {
               </button>
             </div>
 
+            {!modoProjeto && (
+            <>
             <div className="rounded-lg border border-slate-200 bg-white p-3 mb-3">
               <p className="text-xs font-medium text-slate-600 mb-2">
                 Pilar calculado (avulso) — pé-direito e vão próprios, fora da grade automática
@@ -4380,6 +4494,9 @@ function OrcamentosGalpaoPageInterno() {
               </div>
             )}
 
+            </>
+            )}
+
             {/* Lista de peças: etapa própria, separada da laje */}
             <TituloEtapa numero={numEtapaLista}>
               Peças do orçamento{" "}
@@ -4835,7 +4952,17 @@ function OrcamentosGalpaoPageInterno() {
           {/* ---------- PAINEL LATERAL FIXO (telas grandes) ---------- */}
           <aside className="hidden lg:block lg:w-[330px] shrink-0">
             <div className="sticky top-4 space-y-3">
-              {vao && comprimento && peDireito ? (
+              {modoProjeto ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-center">
+                  {urlImagemProjeto ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={urlImagemProjeto} alt="Imagem da obra" className="w-full rounded" />
+                  ) : (
+                    <p className="p-3 text-xs text-slate-400">A imagem enviada aparece aqui.</p>
+                  )}
+                  <p className="text-[10px] text-slate-500">Prévia — igual sairá no orçamento impresso</p>
+                </div>
+              ) : vao && comprimento && peDireito ? (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-center">
                   <DesenhoGalpao
                     vao={vao}

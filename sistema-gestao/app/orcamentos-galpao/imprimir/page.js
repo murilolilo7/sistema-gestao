@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { calcularDesenhoGalpao } from "../desenho-galpao";
+import { useUrlImagemProjeto } from "../imagem-projeto";
 import { modulosDoGalpao, contarModulos } from "../calculos";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -226,6 +227,9 @@ function ConteudoImpressao() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
+  // Orçamento por projeto: medidas em texto e a imagem da própria obra.
+  const projeto = orcamento?.projeto?.ativo ? orcamento.projeto : null;
+  const urlImagem = useUrlImagemProjeto(projeto?.imagem_path || null);
 
   useEffect(() => {
     let ativo = true;
@@ -395,11 +399,17 @@ function ConteudoImpressao() {
     },
     {
       rotulo: "Altura",
-      valor: orcamento.pe_direito ? `${formatarMedida(orcamento.pe_direito)}M` : "-",
+      valor: projeto?.altura_texto
+        ? String(projeto.altura_texto).toUpperCase()
+        : orcamento.pe_direito
+          ? `${formatarMedida(orcamento.pe_direito)}M`
+          : "-",
     },
     {
       rotulo: "Modulação",
-      valor: calcularModulacao(orcamento),
+      valor: projeto
+        ? String(projeto.modulacao_texto || "VARIÁVEL").toUpperCase()
+        : calcularModulacao(orcamento),
     },
     {
       rotulo: "Telhas",
@@ -490,7 +500,11 @@ function ConteudoImpressao() {
         </div>
       </div>
 
-      <div className="border border-slate-300 rounded-md p-4 mb-6 grid grid-cols-[1fr_auto] gap-4 items-center">
+      <div
+        className={`border border-slate-300 rounded-md p-4 mb-6 grid gap-4 items-center ${
+          projeto ? "grid-cols-1" : "grid-cols-[1fr_auto]"
+        }`}
+      >
         <div className="text-xs leading-relaxed">
           {especificacoes.map((e) => (
             <p key={e.rotulo}>
@@ -498,6 +512,12 @@ function ConteudoImpressao() {
             </p>
           ))}
         </div>
+        {projeto ? (
+          urlImagem && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={urlImagem} alt="Imagem da obra" className="mx-auto max-h-[360px] max-w-full object-contain" />
+          )
+        ) : (
         <svg
           width="250"
           viewBox={`0 0 ${desenho.viewBoxLargura} ${desenho.viewBoxAltura}`}
@@ -546,6 +566,7 @@ function ConteudoImpressao() {
             );
           })}
         </svg>
+        )}
       </div>
 
       <table className="w-full border-collapse text-xs mb-2">

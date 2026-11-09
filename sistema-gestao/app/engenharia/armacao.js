@@ -58,7 +58,7 @@ export function tipoArmacao(item) {
       return papel;
     case "PILAR":
       // Consolo: recebe viga de laje ou, na cabeça, duas tesouras (galpão germinado)
-      return item.secao === "laje" || nome.includes("SOB A LAJE") || nome.includes("2 TESOURAS")
+      return item.secao === "laje" || nome.includes("SOB A LAJE") || nome.includes("2 TESOURAS") || nome.includes("COM CONSOLO")
         ? "PILAR_COM_CONSOLO"
         : "PILAR_SEM_CONSOLO";
     case "POSTE":
