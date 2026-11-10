@@ -12,6 +12,8 @@ import {
   LinhasEsqueleto,
 } from "@/components/Ui";
 import CartaoPeca from "./CartaoPeca";
+import PrecosDesatualizados from "./PrecosDesatualizados";
+import { precoTesouraPorTamanho } from "../orcamentos-galpao/calculos";
 import CustosComplementares from "./CustosComplementares";
 
 // Papeis com receita/preco proprios que ganham cartao na secao "Calculo de
@@ -95,7 +97,6 @@ function EngenhariaPage() {
   // ---------- Calculo de pecas (Terca/Laje/Tesoura/Viga/Poste/Capitel/Base) ----------
   const [composicoesPecas, setComposicoesPecas] = useState([]);
   const [tercaAvulsaComprimento, setTercaAvulsaComprimento] = useState("");
-  const [tesouraRefId, setTesouraRefId] = useState("");
   const [tesouraVaoDesejado, setTesouraVaoDesejado] = useState("");
   const [lajeCargaId, setLajeCargaId] = useState("");
   const [lajeArea, setLajeArea] = useState("");
@@ -1522,6 +1523,8 @@ function EngenhariaPage() {
               Telha) continuam em Preços.
             </p>
 
+            <PrecosDesatualizados composicoes={composicoesPecas} onSalvo={buscarComposicoesPecas} />
+
             <div className="space-y-5">
               {PAPEIS_CARTAO.map(({ papel, titulo }) => {
                 const itens = composicoesPecas.filter((c) => c.papel === papel);
@@ -1665,38 +1668,16 @@ function EngenhariaPage() {
                       );
                     })()}
 
-                    {/* Tesoura: nenhum orcamento real usa os 4 tamanhos fixos
-                        direto — todos usam essa mesma formula proporcional
-                        (a mesma de app/orcamentos-galpao/page.js). Fica visivel
-                        aqui como o que e: provisorio, nao e engenharia real. */}
+                    {/* Tesoura: o orcamento calcula qualquer tamanho na reta
+                        entre as duas tesouras de referencia vizinhas (a mesma
+                        conta de app/orcamentos-galpao/calculos.js). */}
                     {papel === "TESOURA" && (() => {
                       const comRef = itens.filter((c) => Number(c.comprimento_referencia) > 0);
                       if (comRef.length === 0) return null;
-                      const ref = comRef.find((c) => String(c.id) === String(tesouraRefId)) || null;
-                      const vao = Number(String(tesouraVaoDesejado).replace(",", ".")) || 0;
-                      const precoEstimado =
-                        ref && vao > 0
-                          ? Math.round(
-                              (Number(ref.preco) / Number(ref.comprimento_referencia)) * vao * 100
-                            ) / 100
-                          : null;
+                      const estimado = precoTesouraPorTamanho(tesouraVaoDesejado, comRef);
+                      const precoEstimado = estimado ? estimado.preco : null;
                       return (
                         <div className="mt-2 rounded-lg border border-dashed border-slate-300 p-3 flex flex-wrap items-end gap-3">
-                          <div className="w-56">
-                            <label className="block text-[11px] text-slate-500 mb-1">Tesoura de referência</label>
-                            <select
-                              value={tesouraRefId}
-                              onChange={(e) => setTesouraRefId(e.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                            >
-                              <option value="">Selecione</option>
-                              {comRef.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.nome} ({moeda(Number(c.preco) / Number(c.comprimento_referencia))}/m)
-                                </option>
-                              ))}
-                            </select>
-                          </div>
                           <div className="w-32">
                             <label className="block text-[11px] text-slate-500 mb-1">Vão desejado (m)</label>
                             <input
@@ -1709,11 +1690,17 @@ function EngenhariaPage() {
                           {precoEstimado !== null && (
                             <p className="text-sm text-slate-600">
                               <b className="text-emerald-700">{moeda(precoEstimado)}</b>
+                              {estimado.de !== estimado.ate && (
+                                <span className="text-xs text-slate-500">
+                                  {" "}— entre a de {String(estimado.de).replace(".", ",")} m e a de{" "}
+                                  {String(estimado.ate).replace(".", ",")} m
+                                </span>
+                              )}
                             </p>
                           )}
                           <p className="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1 w-full">
-                            Fórmula provisória (reta entre o vão da peça e a referência) — não é
-                            cálculo de engenharia real ainda. É a mesma usada hoje no orçamento.
+                            Preço de qualquer tamanho = reta entre as duas tesouras de referência vizinhas;
+                            abaixo da menor e acima da maior, o R$/m da ponta. É a mesma conta do orçamento.
                           </p>
                         </div>
                       );

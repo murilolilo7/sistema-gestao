@@ -4,10 +4,10 @@ import { useMemo, useState } from "react";
 import { ImagePlus, Trash2 } from "lucide-react";
 import { notificar } from "@/components/Ui";
 import { enviarImagemProjeto, useUrlImagemProjeto } from "./imagem-projeto";
+import { precoTesouraPorTamanho } from "./calculos";
 import {
   lajeDoProjeto,
   pilarDoProjeto,
-  referenciaMaisProxima,
   resumoProjeto,
   telhaDoProjeto,
   tercaDoProjeto,
@@ -131,33 +131,27 @@ function GrupoPilares({ valorM3, aoAdicionar }) {
 }
 
 function GrupoTesouras({ referencias, aoAdicionar }) {
-  const [f, setF] = useState({ qtd: "", comprimento: "", refId: "" });
+  const [f, setF] = useState({ qtd: "", comprimento: "" });
   const mudar = (campo) => (v) => setF((a) => ({ ...a, [campo]: v }));
-  const referencia =
-    referencias.find((r) => String(r.id) === String(f.refId)) || referenciaMaisProxima(f.comprimento, referencias);
+  const previa = precoTesouraPorTamanho(f.comprimento, referencias);
   return (
-    <Grupo titulo="Tesouras" dica="— preço proporcional ao metro da referência">
+    <Grupo titulo="Tesouras" dica="— preço pelo tamanho, entre as tesouras de referência">
       <Campo rotulo="Qtd."><Numero valor={f.qtd} aoMudar={mudar("qtd")} placeholder="4" /></Campo>
       <Campo rotulo="Comprimento (m)"><Numero valor={f.comprimento} aoMudar={mudar("comprimento")} placeholder="13,76" /></Campo>
-      <Campo rotulo="Referência" className="col-span-2 sm:col-span-3">
-        <select value={f.refId} onChange={(e) => mudar("refId")(e.target.value)} className={CAMPO}>
-          <option value="">
-            {referencia && !f.refId ? `Mais próxima: ${referencia.nome}` : "Mais próxima (automática)"}
-          </option>
-          {referencias.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.nome} — {moeda(Number(r.preco) / Number(r.comprimento_referencia))}/m
-            </option>
-          ))}
-        </select>
-      </Campo>
+      <p className="col-span-2 self-center text-xs text-slate-600 sm:col-span-3">
+        {previa ? (
+          <>
+            <b className="text-slate-800">{moeda(previa.preco)}</b> por peça
+          </>
+        ) : (
+          <span className="text-slate-400">O preço aparece ao informar o comprimento</span>
+        )}
+      </p>
       <button
         type="button"
         className={BOTAO}
         onClick={() =>
-          enviar(tesouraDoProjeto({ ...f, referencia }), aoAdicionar, () =>
-            setF({ qtd: "", comprimento: "", refId: "" })
-          )
+          enviar(tesouraDoProjeto({ ...f, referencias }), aoAdicionar, () => setF({ qtd: "", comprimento: "" }))
         }
       >
         Adicionar

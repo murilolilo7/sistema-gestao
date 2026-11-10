@@ -29,6 +29,7 @@ import {
   contarModulos,
   tercasPorMedida,
   precoTercaInterpolado,
+  precoTesouraPorTamanho,
   vaosCobertosPelaLaje,
   alturaVigaLaje,
   alturaENomeVigaLaje,
@@ -473,7 +474,6 @@ function OrcamentosGalpaoPageInterno() {
   const removidasNaMao = useRef(new Set());
   const [vigaQtd, setVigaQtd] = useState("1");
 
-  const [tesouraRefId, setTesouraRefId] = useState("");
   const [tesouraTamanho, setTesouraTamanho] = useState("");
   const [tesouraQtd, setTesouraQtd] = useState("1");
 
@@ -1903,30 +1903,27 @@ function OrcamentosGalpaoPageInterno() {
     setErro("");
   }
 
-  // Insere UMA tesoura calculada proporcionalmente — usada tanto pelo botão
-  // manual (lê tesouraRefId/tamanho/qtd do estado) quanto pelo gerador em
-  // lote do trapézio (recebe os parâmetros direto, um por pórtico).
-  // Fórmula provisória (reta entre o vão da peça e a referência) — não é
-  // engenharia real ainda, é a mesma usada hoje em todo orçamento.
-  function inserirTesouraProporcional({ refId, tamanho, qtd, sufixoNome, origemTrapezio }) {
-    const ref = tesourasComReferencia.find((t) => String(t.id) === String(refId));
-    const tam = Number(tamanho) || 0;
+  // Insere UMA tesoura de qualquer tamanho — usada tanto pelo botão manual
+  // (lê tamanho/qtd do estado) quanto pelo gerador em lote do trapézio
+  // (recebe os parâmetros direto, um por pórtico). O preço sai da reta entre
+  // as duas tesouras de referência vizinhas (precoTesouraPorTamanho), cujas
+  // receitas usam o aço real dos projetos.
+  function inserirTesouraProporcional({ tamanho, qtd, sufixoNome, origemTrapezio }) {
+    const tam = Number(String(tamanho ?? "").replace(",", ".")) || 0;
     const quantidade = Math.max(1, Number(qtd) || 1);
-    if (!ref || tam <= 0) return { erro: "Selecione uma tesoura de referência e informe o tamanho desejado." };
-    const precoProporcional =
-      Math.round((Number(ref.preco) / Number(ref.comprimento_referencia)) * tam * 100) / 100;
+    if (tam <= 0) return { erro: "Informe o tamanho da tesoura." };
+    const calculo = precoTesouraPorTamanho(tam, tesourasComReferencia);
+    if (!calculo) return { erro: "Não há tesoura de referência com preço no catálogo." };
     setItens((atual) => [
       ...atual,
       {
         chave: proximaChave.current++,
         composicao_id: null,
-        nome:
-          `Tesoura ${tam}M de vão livre (calculada proporcionalmente a partir da ${ref.nome})` +
-          (sufixoNome ? " — " + sufixoNome : ""),
+        nome: `Tesoura ${tam}M de vão livre (preço pelo tamanho)` + (sufixoNome ? " — " + sufixoNome : ""),
         unidade: "PÇ",
         papel: "TESOURA",
         quantidade,
-        preco_unitario: precoProporcional,
+        preco_unitario: calculo.preco,
         secao: "estrutura",
         ...(origemTrapezio ? { origemTrapezio: true } : {}),
       },
@@ -1935,14 +1932,11 @@ function OrcamentosGalpaoPageInterno() {
   }
 
   function adicionarTesouraProporcional() {
-    const { erro } = inserirTesouraProporcional({
-      refId: tesouraRefId, tamanho: tesouraTamanho, qtd: tesouraQtd,
-    });
+    const { erro } = inserirTesouraProporcional({ tamanho: tesouraTamanho, qtd: tesouraQtd });
     if (erro) {
       setErro(erro);
       return;
     }
-    setTesouraRefId("");
     setTesouraTamanho("");
     setTesouraQtd("1");
     setErro("");
@@ -1953,8 +1947,8 @@ function OrcamentosGalpaoPageInterno() {
   // tesoura hoje. Clicar de novo (ex.: depois de mudar o vão do fundo)
   // refaz do zero em vez de duplicar, graças à flag "origemTrapezio".
   function gerarTesourasDoTrapezio() {
-    if (!trapezioAtivo || !tesouraRefId) {
-      setErro("Ative o modo trapézio e escolha a tesoura de referência antes de gerar em lote.");
+    if (!trapezioAtivo) {
+      setErro("Ative o modo trapézio antes de gerar as tesouras em lote.");
       return;
     }
     const posicoes = posicoesDosPorticos(comprimento, numeroVaos);
@@ -1967,7 +1961,6 @@ function OrcamentosGalpaoPageInterno() {
     posicoes.forEach((pos, i) => {
       const vaoAtual = vaoNaPosicao(pos, comprimento, vao, vaoFundo);
       const { erro } = inserirTesouraProporcional({
-        refId: tesouraRefId,
         tamanho: vaoAtual,
         qtd: 1,
         sufixoNome: `pórtico ${i + 1}/${posicoes.length}`,
@@ -2669,7 +2662,6 @@ function OrcamentosGalpaoPageInterno() {
     setVigaAltura("");
     setVigaVao("");
     setVigaQtd("1");
-    setTesouraRefId("");
     setTesouraTamanho("");
     setTesouraQtd("1");
     setPerdaTelha("10");
@@ -3653,36 +3645,29 @@ function OrcamentosGalpaoPageInterno() {
           <TituloEtapa numero="3">Tesoura</TituloEtapa>
             {tesourasComReferencia.length > 0 && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
-                <p className="text-xs font-medium text-slate-600 mb-2">
-                  Calculadora: Tesoura de tamanho variado (proporcional a uma peça de referência)
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="tesoura">
-                  <select
-                    value={tesouraRefId}
-                    onChange={(e) => {
-                      setTesouraRefId(e.target.value);
-                      // Sugestão automática: tamanho = largura do galpão
-                      // e quantidade = (nº de vãos + 1) x galpões dessa
-                      // largura. Geminados de larguras diferentes vão
-                      // por etapa: depois de adicionar as tesouras do
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-slate-600">Tesoura de qualquer tamanho — preço pelo tamanho</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Tamanho = largura do galpão e quantidade = (nº de vãos
+                      // + 1) x galpões dessa largura. Geminados de larguras
+                      // diferentes vão por etapa: depois de adicionar as do
                       // galpão 1, sugere as do galpão 2, e assim vai.
-                      if (e.target.value) {
-                        const s = sugestaoTesoura();
-                        if (s) {
-                          setTesouraTamanho(String(s.tamanho));
-                          setTesouraQtd(String(s.qtd));
-                        }
+                      const s = sugestaoTesoura();
+                      if (!s) {
+                        setErro("Informe a largura e o comprimento do galpão para sugerir as tesouras.");
+                        return;
                       }
+                      setTesouraTamanho(String(s.tamanho));
+                      setTesouraQtd(String(s.qtd));
                     }}
-                    className={campoClasse}
+                    className="text-xs font-medium text-emerald-700 hover:underline"
                   >
-                    <option value="">Tesoura de referência</option>
-                    {tesourasComReferencia.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.nome} ({formatarMoeda(Number(t.preco) / Number(t.comprimento_referencia))}/m)
-                      </option>
-                    ))}
-                  </select>
+                    Sugerir pela largura do galpão
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="tesoura">
                   <input
                     type="number"
                     step="0.01"
@@ -3699,6 +3684,18 @@ function OrcamentosGalpaoPageInterno() {
                     onChange={(e) => setTesouraQtd(e.target.value)}
                     className={campoClasse}
                   />
+                  <div className="flex items-center text-sm text-slate-600">
+                    {(() => {
+                      const p = precoTesouraPorTamanho(tesouraTamanho, tesourasComReferencia);
+                      return p ? (
+                        <span>
+                          <b className="text-slate-800">{formatarMoeda(p.preco)}</b> por peça
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Preço aparece ao informar o tamanho</span>
+                      );
+                    })()}
+                  </div>
                   <button
                     type="button"
                     onClick={adicionarTesouraProporcional}
@@ -3708,10 +3705,12 @@ function OrcamentosGalpaoPageInterno() {
                   </button>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  Ao escolher a referência, o tamanho (largura do galpão) e a quantidade
-                  ((nº de vãos + 1) por galpão) preenchem sozinhos — é só uma sugestão, ajuste à
-                  vontade. Estimativa proporcional (preço da referência ÷ tamanho dela × tamanho
-                  desejado); vale para tamanhos próximos da referência — vãos muito maiores podem
+                  O preço fica na reta entre as tesouras de referência vizinhas (
+                  {[...tesourasComReferencia]
+                    .sort((a, b) => Number(a.comprimento_referencia) - Number(b.comprimento_referencia))
+                    .map((t) => `${Number(t.comprimento_referencia).toLocaleString("pt-BR")} m ${formatarMoeda(t.preco)}`)
+                    .join(" · ")}
+                  ). Abaixo da menor e acima da maior vale o R$/m da ponta. Vãos muito maiores podem
                   exigir seção estrutural diferente.
                 </p>
                 {trapezioAtivo && (
@@ -3719,15 +3718,14 @@ function OrcamentosGalpaoPageInterno() {
                     <button
                       type="button"
                       onClick={gerarTesourasDoTrapezio}
-                      disabled={!tesouraRefId}
                       className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 transition"
                     >
                       Gerar tesouras do trapézio ({posicoesDosPorticos(comprimento, numeroVaos)?.length || 0} pórticos)
                     </button>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Usa a tesoura de referência escolhida acima e gera uma peça por pórtico, com o
-                      vão de cada um interpolado entre {vao || "?"}m e {vaoFundo}m. Clicar de novo
-                      substitui as que já foram geradas em vez de duplicar.
+                      Gera uma peça por pórtico, com o vão de cada um interpolado entre {vao || "?"}m e{" "}
+                      {vaoFundo}m, e o preço de cada uma pelo tamanho dela. Clicar de novo substitui as que
+                      já foram geradas em vez de duplicar.
                     </p>
                   </div>
                 )}

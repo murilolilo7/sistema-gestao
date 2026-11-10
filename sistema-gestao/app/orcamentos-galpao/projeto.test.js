@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   pilarDoProjeto,
-  referenciaMaisProxima,
   tesouraDoProjeto,
   tercaDoProjeto,
   travamentoDoProjeto,
@@ -17,9 +16,10 @@ import { tipoArmacao } from "../engenharia/armacao.js";
 const LAJE_300 = { id: 24, nome: "LAJE PI 300 Kg/M²", unidade: "M2", papel: "LAJE", preco: "135" };
 const TELHA = { id: 3, nome: "TELHA FIBROCIMENTO 5MM", unidade: "M2", papel: "TELHA", preco: "50" };
 const REFS = [
-  { nome: "TESOURA 11,50M", preco: "1774.15", comprimento_referencia: "11.5" },
-  { nome: "TESOURA 16M", preco: "3123.61", comprimento_referencia: "16" },
-  { nome: "TESOURA 20M", preco: "4045.45", comprimento_referencia: "20" },
+  { nome: "TESOURA 11,50M", preco: "2173.30", comprimento_referencia: "11.5" },
+  { nome: "TESOURA 16M", preco: "3358.54", comprimento_referencia: "16" },
+  { nome: "TESOURA 18M", preco: "3945.28", comprimento_referencia: "18" },
+  { nome: "TESOURA 20M", preco: "4594.44", comprimento_referencia: "20" },
 ];
 const TERCAS = [
   { medida: 5, preco: 230.35 },
@@ -61,14 +61,16 @@ test("pilar recusa dados incompletos", () => {
   assert.ok(pilarDoProjeto({ qtd: 1, comprimento: 1, platibanda: 2 }).erro);
 });
 
-test("tesoura proporcional à referência mais próxima", () => {
-  const ref = referenciaMaisProxima(13.76, REFS);
-  assert.equal(ref.nome, "TESOURA 16M");
-  const t = tesouraDoProjeto({ qtd: 4, comprimento: 13.76, referencia: ref });
-  assert.equal(t.preco_unitario, 2686.3);
+test("tesoura pelo tamanho, entre as referências vizinhas", () => {
+  const t = tesouraDoProjeto({ qtd: 4, comprimento: 13.76, referencias: REFS });
+  // 2.173,30 + (13,76 − 11,5) × (3.358,54 − 2.173,30) ÷ 4,5
+  assert.equal(t.preco_unitario, 2768.55);
+  assert.equal(t.quantidade, 4);
   assert.equal(papelDoItem(t), "TESOURA");
-  assert.equal(referenciaMaisProxima(5.3, REFS).nome, "TESOURA 11,50M");
-  assert.ok(tesouraDoProjeto({ qtd: 1, comprimento: 5, referencia: null }).erro);
+  assert.equal(t.nome, "Tesoura 13.76M de vão livre (preço pelo tamanho)");
+  // abaixo da menor referência: R$/m da 11,50
+  assert.equal(tesouraDoProjeto({ qtd: 1, comprimento: 5.3, referencias: REFS }).preco_unitario, 1001.61);
+  assert.ok(tesouraDoProjeto({ qtd: 1, comprimento: 5, referencias: [] }).erro);
 });
 
 test("terça fora da medida do catálogo sai pela reta entre 5 m e 6 m", () => {
@@ -129,9 +131,9 @@ test("obra do Cláudio: os totais lançados batem com a folha e a montagem conta
     pilarDoProjeto({ qtd: 14, comprimento: 10.5, platibanda: 1, valorM3: 3000 }),
     pilarDoProjeto({ qtd: 2, comprimento: 9.5, valorM3: 3000 }),
     pilarDoProjeto({ qtd: 7, comprimento: 5.5, deLaje: true, valorM3: 3000 }),
-    tesouraDoProjeto({ qtd: 4, comprimento: 13.76, referencia: REFS[1] }),
-    tesouraDoProjeto({ qtd: 1, comprimento: 5.67, referencia: REFS[0] }),
-    tesouraDoProjeto({ qtd: 1, comprimento: 5.3, referencia: REFS[0] }),
+    tesouraDoProjeto({ qtd: 4, comprimento: 13.76, referencias: REFS }),
+    tesouraDoProjeto({ qtd: 1, comprimento: 5.67, referencias: REFS }),
+    tesouraDoProjeto({ qtd: 1, comprimento: 5.3, referencias: REFS }),
     tercaDoProjeto({ qtd: 30, comprimento: 5, pontos: TERCAS }),
     tercaDoProjeto({ qtd: 12, comprimento: 5.57, pontos: TERCAS }),
     travamentoDoProjeto({ qtd: 12, comprimento: 5, valorM3: 1300 }),

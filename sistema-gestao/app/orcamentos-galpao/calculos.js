@@ -259,6 +259,28 @@ export function precoTercaInterpolado(medida, pontos) {
   return Math.max(0, Math.round((p1.preco + taxa * (alvo - p1.medida)) * 100) / 100);
 }
 
+// Tesoura de qualquer tamanho: preço na reta entre as duas tesouras de
+// referência vizinhas (11,50 · 16 · 18 · 20 m), assim não há salto de preço ao
+// trocar de referência. Abaixo da menor e acima da maior, mantém o R$/m da
+// ponta. Devolve { preco, de, ate } (de/ate = referências usadas) ou null.
+export function precoTesouraPorTamanho(comprimento, referencias) {
+  const L = Number(String(comprimento ?? "").replace(",", ".")) || 0;
+  const pts = (referencias || [])
+    .map((r) => ({ L: Number(r.comprimento_referencia) || 0, preco: Number(r.preco) || 0 }))
+    .filter((r) => r.L > 0 && r.preco > 0)
+    .sort((a, b) => a.L - b.L);
+  if (L <= 0 || pts.length === 0) return null;
+  const centavos = (v) => Math.round(v * 100) / 100;
+  const menor = pts[0];
+  const maior = pts[pts.length - 1];
+  if (L <= menor.L) return { preco: centavos((menor.preco / menor.L) * L), de: menor.L, ate: menor.L };
+  if (L >= maior.L) return { preco: centavos((maior.preco / maior.L) * L), de: maior.L, ate: maior.L };
+  const i = pts.findIndex((p) => p.L >= L);
+  const a = pts[i - 1];
+  const b = pts[i];
+  return { preco: centavos(a.preco + ((L - a.L) * (b.preco - a.preco)) / (b.L - a.L)), de: a.L, ate: b.L };
+}
+
 // ---------------------------------------------------------------------------
 // VIGAS E PILARES DA LAJE
 // ---------------------------------------------------------------------------

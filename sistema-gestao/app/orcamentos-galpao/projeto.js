@@ -2,7 +2,7 @@
 // em que as quantidades vêm do quadro "Informações importantes" da folha de
 // compatibilização, e não das medidas do galpão. Cada função devolve a peça
 // pronta para entrar na lista do orçamento, ou { erro }. Só contas, sem tela.
-import { papelDoItem, precoTercaInterpolado, volumeVigaLaje } from "./calculos.js";
+import { papelDoItem, precoTercaInterpolado, precoTesouraPorTamanho, volumeVigaLaje } from "./calculos.js";
 
 const num = (v) => Number(String(v ?? "").replace(",", ".")) || 0;
 const inteiro = (v) => Math.floor(num(v));
@@ -48,28 +48,21 @@ export function pilarDoProjeto({
   };
 }
 
-export function referenciaMaisProxima(comprimento, referencias) {
-  const L = num(comprimento);
-  const validas = (referencias || []).filter((r) => num(r.comprimento_referencia) > 0 && num(r.preco) > 0);
-  if (L <= 0 || validas.length === 0) return null;
-  return [...validas].sort(
-    (a, b) => Math.abs(num(a.comprimento_referencia) - L) - Math.abs(num(b.comprimento_referencia) - L)
-  )[0];
-}
-
-// Mesma conta da tesoura proporcional do orçamento: R$ por metro da referência.
-export function tesouraDoProjeto({ qtd, comprimento, referencia }) {
+// Mesma conta da tesoura do orçamento: reta entre as tesouras de referência
+// vizinhas (referencias = tesouras do catálogo com comprimento_referencia).
+export function tesouraDoProjeto({ qtd, comprimento, referencias }) {
   const q = inteiro(qtd);
   const L = num(comprimento);
   if (q <= 0 || L <= 0) return { erro: "Informe a quantidade e o comprimento da tesoura." };
-  if (!referencia) return { erro: "Escolha a tesoura de referência." };
+  const calculo = precoTesouraPorTamanho(L, referencias);
+  if (!calculo) return { erro: "Não há tesoura de referência com preço no catálogo." };
   return {
     composicao_id: null,
-    nome: `Tesoura ${L}M de vão livre (calculada proporcionalmente a partir da ${referencia.nome})`,
+    nome: `Tesoura ${L}M de vão livre (preço pelo tamanho)`,
     unidade: "PÇ",
     papel: "TESOURA",
     quantidade: q,
-    preco_unitario: centavos((num(referencia.preco) / num(referencia.comprimento_referencia)) * L),
+    preco_unitario: calculo.preco,
     secao: "estrutura",
   };
 }

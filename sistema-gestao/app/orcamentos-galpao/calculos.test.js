@@ -35,7 +35,42 @@ import {
   fraseFormaPagamento,
   volumeVigaLaje,
   trocarLinhaPagamento,
+  precoTesouraPorTamanho,
 } from "./calculos.js";
+
+// ---------------------------------------------------------------------------
+// PREÇO DA TESOURA PELO TAMANHO — reta entre as referências vizinhas
+// ---------------------------------------------------------------------------
+
+// Preços das referências depois da correção pelo aço real (10/11/2026)
+const TESOURAS_REF = [
+  { comprimento_referencia: "20", preco: "4594.44" },
+  { comprimento_referencia: "11.5", preco: "2173.30" },
+  { comprimento_referencia: "16", preco: "3358.54" },
+  { comprimento_referencia: "18", preco: "3945.28" },
+];
+
+test("tesoura no tamanho da referência sai com o preço dela", () => {
+  assert.equal(precoTesouraPorTamanho(16, TESOURAS_REF).preco, 3358.54);
+  assert.equal(precoTesouraPorTamanho("11,50", TESOURAS_REF).preco, 2173.3);
+});
+
+test("tesoura entre duas referências fica na reta entre elas, sem salto", () => {
+  const t = precoTesouraPorTamanho(15, TESOURAS_REF);
+  // 2.173,30 + (15 − 11,5) × (3.358,54 − 2.173,30) ÷ 4,5
+  assert.equal(t.preco, 3095.15);
+  assert.deepEqual([t.de, t.ate], [11.5, 16]);
+  const antes = precoTesouraPorTamanho(13.74, TESOURAS_REF).preco;
+  const depois = precoTesouraPorTamanho(13.76, TESOURAS_REF).preco;
+  assert.ok(depois - antes < 6, "2 cm a mais não podem mudar o preço em centenas de reais");
+});
+
+test("tesoura fora da faixa mantém o R$/m da ponta", () => {
+  assert.equal(precoTesouraPorTamanho(10, TESOURAS_REF).preco, 1889.83); // 2.173,30 ÷ 11,5 × 10
+  assert.equal(precoTesouraPorTamanho(23, TESOURAS_REF).preco, 5283.61); // 4.594,44 ÷ 20 × 23
+  assert.equal(precoTesouraPorTamanho(0, TESOURAS_REF), null);
+  assert.equal(precoTesouraPorTamanho(10, []), null);
+});
 
 // ---------------------------------------------------------------------------
 // MONTAGEM DA TESOURA — quanto maior o vão, menos peças por dia

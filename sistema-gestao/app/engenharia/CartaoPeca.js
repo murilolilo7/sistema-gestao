@@ -4,26 +4,13 @@ import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
+import { custoAoVivo } from "./receita";
 
 const moeda = (v) =>
   Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-// Custo somado ao vivo da receita (nunca o campo `custo` gravado, que é só
-// um cache que fica pra trás sempre que um insumo/salário muda de valor).
-// Se area_referencia > 0, o custo vira "por m²" (caso da Laje).
-export function custoAoVivo(c) {
-  const itens = c.composicao_itens || [];
-  if (itens.length === 0) return Number(c.custo) || 0;
-  const soma = itens.reduce(
-    (total, item) =>
-      total +
-      Number(item.quantidade || 0) *
-        Number(item.insumos?.valor_unitario ?? item.mao_de_obra?.valor_hora ?? 0),
-    0
-  );
-  const area = Number(c.area_referencia) || 0;
-  return Math.round((area > 0 ? soma / area : soma) * 100) / 100;
-}
+// Custo ao vivo da receita: a conta fica em receita.js (testada)
+export { custoAoVivo };
 
 function mapearItens(composicaoItens) {
   return (composicaoItens || []).map((item, idx) => ({
