@@ -405,6 +405,58 @@ export function trechosDaViga(larguraGalpao) {
 }
 
 // ---------------------------------------------------------------------------
+// CONSOLOS DO PILAR
+// ---------------------------------------------------------------------------
+
+// Cada viga de laje apoia as duas pontas num consolo de pilar: 2 por viga,
+// venha a viga do cálculo automático, do ajuste à mão ou do orçar por projeto.
+export function qtdConsolosDeViga(listaItens) {
+  const vigas = (listaItens || []).reduce(
+    (soma, i) => (papelDoItem(i) === "VIGA_LAJE" ? soma + (Number(i.quantidade) || 0) : soma),
+    0
+  );
+  return Math.round(vigas * 2);
+}
+
+// Consolo de tesoura: com dente gerber (platibanda), um em cada pilar da
+// estrutura; sem ele, só nos pilares do meio do galpão germinado, que recebem
+// duas tesouras na cabeça.
+export function qtdConsolosDeTesoura({ pilaresPorFileira, fileirasDoMeio, comDenteGerber }) {
+  const porFileira = Math.max(0, Number(pilaresPorFileira) || 0);
+  const meio = Math.max(0, Number(fileirasDoMeio) || 0);
+  return comDenteGerber ? porFileira * (2 + meio) : porFileira * meio;
+}
+
+// Põe, atualiza ou tira uma peça automática de catálogo (ex.: consolo) na
+// lista, respeitando o que o usuário fez à mão: quantidade editada fica, e
+// peça removida à mão não volta.
+export function aplicarPecaAutomatica(lista, { chave, composicao, quantidade, secao, removidas }) {
+  const atual = lista.find((i) => i.chave === chave);
+  const qtd = Math.max(0, Number(quantidade) || 0);
+  if (!composicao || qtd === 0) {
+    return atual && !atual.quantidadeEditada ? lista.filter((i) => i.chave !== chave) : lista;
+  }
+  if (atual) {
+    if (atual.quantidadeEditada || Number(atual.quantidade) === qtd) return lista;
+    return lista.map((i) => (i.chave === chave ? { ...i, quantidade: qtd } : i));
+  }
+  if (removidas && removidas.has(chave)) return lista;
+  return [
+    ...lista,
+    {
+      chave,
+      composicao_id: composicao.id,
+      nome: composicao.nome,
+      unidade: composicao.unidade,
+      papel: composicao.papel,
+      quantidade: qtd,
+      preco_unitario: Number(composicao.preco) || 0,
+      secao,
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // PEÇAS AUTOMÁTICAS
 // ---------------------------------------------------------------------------
 
@@ -413,6 +465,7 @@ export function trechosDaViga(larguraGalpao) {
 export function chaveAutomatica(nome, secao) {
   const n = (nome || "").toUpperCase();
   if (n.startsWith("CONSOLO TESOURA")) return "consolo-tesoura-auto";
+  if (n.startsWith("CONSOLO VIGA")) return "consolo-viga-auto";
   // Peças da 2ª laje (dois pavimentos) têm chave própria — sem isso a viga
   // de cima era confundida com a de baixo e a laje de cima virava peça
   // solta, duplicando ao mexer nas medidas.

@@ -30,6 +30,9 @@ import {
   tercasPorMedida,
   precoTercaInterpolado,
   precoTesouraPorTamanho,
+  qtdConsolosDeViga,
+  qtdConsolosDeTesoura,
+  aplicarPecaAutomatica,
   vaosCobertosPelaLaje,
   alturaVigaLaje,
   alturaENomeVigaLaje,
@@ -53,12 +56,6 @@ const ORDEM_ESTRUTURA = [
   "TESOURA", "PILAR", "TERCA", "VIGA_TRAVAMENTO",
   "TELHA", "CAPOTE", "CALHA", "MONTAGEM", "FUNDACAO",
 ];
-// Consolo da tesoura ("dente gerber"): valor por peca. Base do levantamento
-// dos projetos: ~0,030 m3 de concreto e ~5,5 kg de aco por consolo, com taxa
-// de armadura de ~180-205 kg/m3 (quase o dobro de um pilar comum), mais a
-// forma, que e trabalhosa para uma peca pequena. Editavel na lista de pecas.
-const PRECO_CONSOLO_TESOURA = 150;
-
 const ORDEM_LAJE = ["PILAR", "VIGA_LAJE", "LAJE", "MONTAGEM"];
 
 // Itens livres (sem peça do catálogo) têm papel deduzido pelo nome.
@@ -304,6 +301,11 @@ function OrcamentosGalpaoPageInterno() {
   const [novoClienteTelefone, setNovoClienteTelefone] = useState("");
   const [salvandoCliente, setSalvandoCliente] = useState(false);
   const [composicoes, setComposicoes] = useState([]);
+  // Consolos do pilar: peças do catálogo com receita de aço + concreto
+  const consoloTesouraComp =
+    composicoes.find((c) => c.papel === "CONSOLO" && /^CONSOLO TESOURA/i.test(c.nome)) || null;
+  const consoloVigaComp =
+    composicoes.find((c) => c.papel === "CONSOLO" && /^CONSOLO VIGA/i.test(c.nome)) || null;
   const [modelos, setModelos] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -798,29 +800,28 @@ function OrcamentosGalpaoPageInterno() {
             secao: "laje",
           });
         }
-        // Consolo da tesoura (o "dente gerber"): reforco no topo do pilar onde
-        // a tesoura apoia. Nos projetos so aparece quando o galpao tem
-        // platibanda E o vao passa de 17m — por isso as duas condicoes.
-        // Levantamento das pecas confirmadas: ~0,030 m3 e ~5,5 kg de aco,
-        // taxa de armadura ~180-205 kg/m3 (quase o dobro de um pilar), por
-        // isso o valor nao sai do m3 do pilar e sim de um preco proprio.
-        // Um consolo por pilar da estrutura; quantidade e preco editaveis.
-        if (temPlatibanda && temDenteGerber && v > 17) {
-          const qtdConsolo = pilaresPorFileira * (2 + fileirasReforcadas);
-          if (qtdConsolo > 0) {
-            novos.push({
-              chave: "consolo-tesoura-auto",
-              composicao_id: null,
-              nome: "CONSOLO TESOURA (dente gerber) - apoio da tesoura no topo do pilar",
-              unidade: "PÇ",
-              // papel proprio: se fosse PILAR entraria na conferencia de
-              // pilares do checklist e inflaria a contagem.
-              papel: "CONSOLO",
-              quantidade: qtdDe("consolo-tesoura-auto", qtdConsolo),
-              preco_unitario: PRECO_CONSOLO_TESOURA,
-              secao: "estrutura",
-            });
-          }
+        // Consolo de tesoura: peça do catálogo, com preço pelo aço e pelo
+        // concreto da receita (Engenharia). Com o dente gerber (platibanda e
+        // vão acima de 17 m), um em cada pilar da estrutura; sem ele, só nos
+        // pilares do meio do galpão germinado, que recebem duas tesouras na
+        // cabeça. Papel próprio (CONSOLO): se fosse PILAR entraria na
+        // conferência de pilares do checklist e inflaria a contagem.
+        const qtdConsolo = qtdConsolosDeTesoura({
+          pilaresPorFileira,
+          fileirasDoMeio: fileirasReforcadas,
+          comDenteGerber: temPlatibanda && temDenteGerber && v > 17,
+        });
+        if (qtdConsolo > 0 && consoloTesouraComp) {
+          novos.push({
+            chave: "consolo-tesoura-auto",
+            composicao_id: consoloTesouraComp.id,
+            nome: consoloTesouraComp.nome,
+            unidade: consoloTesouraComp.unidade,
+            papel: "CONSOLO",
+            quantidade: qtdDe("consolo-tesoura-auto", qtdConsolo),
+            preco_unitario: Number(consoloTesouraComp.preco) || 0,
+            secao: "estrutura",
+          });
         }
         return recalcularFundacao([...novos.filter((i) => !removidasNaMao.current.has(i.chave)), ...semAuto]);
       });
@@ -828,7 +829,25 @@ function OrcamentosGalpaoPageInterno() {
     return () => {
       cancelado = true;
     };
-  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, comPilares, nivelPadrao, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber, trapezioAtivo]);
+  }, [paramEng, peDireito, vao, comprimento, numeroVaos, areaLaje, modo, totalGalpoes, comPilares, nivelPadrao, nivelReforcado, nivelComLaje, temPlatibanda, alturaPlatibanda, espessuraPlatibanda, temDenteGerber, trapezioAtivo, consoloTesouraComp]);
+
+  // Consolo de viga: cada viga de laje apoia as duas pontas num consolo de
+  // pilar — 2 por viga, venha ela do cálculo, do ajuste à mão ou do orçar por
+  // projeto. Peça do catálogo (aço + concreto da receita). Roda a cada
+  // mudança da lista, mas só altera quando o número de vigas muda.
+  useEffect(() => {
+    if (listaCongelada.current) return;
+    if (modo === "lista") return;
+    setItens((atual) =>
+      aplicarPecaAutomatica(atual, {
+        chave: "consolo-viga-auto",
+        composicao: consoloVigaComp,
+        quantidade: qtdConsolosDeViga(atual),
+        secao: "laje",
+        removidas: removidasNaMao.current,
+      })
+    );
+  }, [itens, consoloVigaComp, modo]);
 
   // Trapézio: gera um par de pilares por PÓRTICO (não por fileira única),
   // cada um com seu próprio vão interpolado entre a frente e o fundo —

@@ -28,6 +28,7 @@ const PAPEIS_CARTAO = [
   { papel: "POSTE", titulo: "Poste (caixa d'água)" },
   { papel: "CAPITEL", titulo: "Capitel (caixa d'água)" },
   { papel: "BASE_CALICE", titulo: "Base tipo cálice" },
+  { papel: "CONSOLO", titulo: "Consolo do pilar" },
 ];
 
 // =====================================================================

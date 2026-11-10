@@ -36,7 +36,54 @@ import {
   volumeVigaLaje,
   trocarLinhaPagamento,
   precoTesouraPorTamanho,
+  qtdConsolosDeViga,
+  qtdConsolosDeTesoura,
+  aplicarPecaAutomatica,
 } from "./calculos.js";
+
+// ---------------------------------------------------------------------------
+// CONSOLOS — o sistema identifica sozinho (pedido do Murilo, 10/11/2026)
+// ---------------------------------------------------------------------------
+
+test("consolo de viga: 2 por viga de laje, de onde vier a viga", () => {
+  const itens = [
+    { nome: "VIGA PARA LAJE 0,25X0,50X5,00M", quantidade: 6 },
+    { nome: "VIGA PARA LAJE 0,25X0,60X5,60M · adicionada à mão", quantidade: 2 },
+    { nome: "PILAR 0,25x0,40 - 8,00m", quantidade: 10 },
+  ];
+  assert.equal(qtdConsolosDeViga(itens), 16);
+  assert.equal(qtdConsolosDeViga([]), 0);
+});
+
+test("consolo de tesoura: pilares do meio do germinado; com dente gerber, todos", () => {
+  // 5 vãos → 6 pilares por fileira; 2 galpões germinados → 1 fileira do meio
+  assert.equal(qtdConsolosDeTesoura({ pilaresPorFileira: 6, fileirasDoMeio: 1, comDenteGerber: false }), 6);
+  assert.equal(qtdConsolosDeTesoura({ pilaresPorFileira: 6, fileirasDoMeio: 1, comDenteGerber: true }), 18);
+  assert.equal(qtdConsolosDeTesoura({ pilaresPorFileira: 6, fileirasDoMeio: 0, comDenteGerber: false }), 0);
+});
+
+test("peça automática: entra, acompanha a conta e respeita o que foi feito à mão", () => {
+  const consolo = { id: 51, nome: "CONSOLO VIGA DE LAJE", unidade: "UN", papel: "CONSOLO", preco: "104.05" };
+  const base = { chave: "consolo-viga-auto", composicao: consolo, secao: "laje" };
+  let lista = aplicarPecaAutomatica([], { ...base, quantidade: 8 });
+  assert.equal(lista.length, 1);
+  assert.equal(lista[0].preco_unitario, 104.05);
+  assert.equal(lista[0].composicao_id, 51);
+  lista = aplicarPecaAutomatica(lista, { ...base, quantidade: 12 });
+  assert.equal(lista[0].quantidade, 12);
+  // quantidade editada à mão não muda
+  const editada = [{ ...lista[0], quantidade: 5, quantidadeEditada: true }];
+  assert.equal(aplicarPecaAutomatica(editada, { ...base, quantidade: 20 })[0].quantidade, 5);
+  // sem vigas, a automática sai
+  assert.equal(aplicarPecaAutomatica(lista, { ...base, quantidade: 0 }).length, 0);
+  // removida à mão não volta
+  assert.equal(aplicarPecaAutomatica([], { ...base, quantidade: 8, removidas: new Set(["consolo-viga-auto"]) }).length, 0);
+});
+
+test("consolos são reconhecidos pelo nome ao reabrir o orçamento", () => {
+  assert.equal(chaveAutomatica("CONSOLO VIGA DE LAJE", "laje"), "consolo-viga-auto");
+  assert.equal(chaveAutomatica("CONSOLO TESOURA (dente)", "estrutura"), "consolo-tesoura-auto");
+});
 
 // ---------------------------------------------------------------------------
 // PREÇO DA TESOURA PELO TAMANHO — reta entre as referências vizinhas
