@@ -204,12 +204,12 @@ function GrupoTravamentos({ valorM3, setValorM3, aoAdicionar }) {
 }
 
 function GrupoVigas({ valorM3, setValorM3, aproveitamento, aoAdicionar }) {
-  const [f, setF] = useState({ metros: "", trechos: "", altura: "" });
+  const [f, setF] = useState({ qtd: "", comprimento: "", altura: "" });
   const mudar = (campo) => (v) => setF((a) => ({ ...a, [campo]: v }));
   return (
-    <Grupo titulo="Vigas de laje" dica="— os trechos são as peças entre um pilar e outro">
-      <Campo rotulo="Metros no total"><Numero valor={f.metros} aoMudar={mudar("metros")} placeholder="65" /></Campo>
-      <Campo rotulo="Nº de trechos"><Numero valor={f.trechos} aoMudar={mudar("trechos")} placeholder="14" /></Campo>
+    <Grupo titulo="Vigas de laje" dica="— uma linha para cada medida real da viga">
+      <Campo rotulo="Qtd."><Numero valor={f.qtd} aoMudar={mudar("qtd")} placeholder="4" /></Campo>
+      <Campo rotulo="Comprimento (m)"><Numero valor={f.comprimento} aoMudar={mudar("comprimento")} placeholder="5,60" /></Campo>
       <Campo rotulo="Altura (m)"><Numero valor={f.altura} aoMudar={mudar("altura")} placeholder="0,60" /></Campo>
       <Campo rotulo="Valor do m³ (R$)"><Numero valor={valorM3} aoMudar={setValorM3} placeholder="R$/m³" /></Campo>
       <button
@@ -221,7 +221,7 @@ function GrupoVigas({ valorM3, setValorM3, aproveitamento, aoAdicionar }) {
             return;
           }
           enviar(vigaDoProjeto({ ...f, valorM3, aproveitamento }), aoAdicionar, () =>
-            setF({ metros: "", trechos: "", altura: "" })
+            setF({ qtd: "", comprimento: "", altura: "" })
           );
         }}
       >
@@ -465,7 +465,7 @@ export default function PainelProjeto({
 
       <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-800">
         <b>Lançado até agora:</b> {fmt(r.pilares)} pilares · {fmt(r.tesouras)} tesouras · {fmt(r.tercas)} terças ·{" "}
-        {fmt(r.travamentos)} travamentos · {fmt(r.vigas)} trechos de viga · {fmt(r.lajeM2)} m² de laje · {fmt(r.telhaM2)} m²
+        {fmt(r.travamentos)} travamentos · {fmt(r.vigas)} vigas de laje ({fmt(r.vigasM)} m) · {fmt(r.lajeM2)} m² de laje · {fmt(r.telhaM2)} m²
         de telha
       </p>
     </div>

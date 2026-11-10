@@ -107,21 +107,18 @@ export function travamentoDoProjeto({ qtd, comprimento, valorM3 }) {
   };
 }
 
-// A folha traz as vigas em METROS (65 m). Os trechos são as peças de fato, e é
-// por peça que contam a montagem e a armação; o preço usa o comprimento médio.
-export function vigaDoProjeto({ trechos, metros, altura, valorM3, aproveitamento }) {
-  const q = inteiro(trechos);
-  const m = num(metros);
+// Cada viga entra com o comprimento real dela, uma linha por medida: viga não se
+// divide por média. Os metros da folha (65 m) servem para conferir o total lançado.
+export function vigaDoProjeto({ qtd, comprimento, altura, valorM3, aproveitamento }) {
+  const q = inteiro(qtd);
+  const L = num(comprimento);
   const h = num(altura);
-  if (q <= 0 || m <= 0) return { erro: "Informe os metros de viga e em quantos trechos ela se divide." };
+  if (q <= 0 || L <= 0) return { erro: "Informe a quantidade e o comprimento da viga." };
   if (h <= 0) return { erro: "Informe a altura da viga." };
-  const medio = m / q;
-  const { volume } = volumeVigaLaje(medio, h, aproveitamento);
+  const { volume } = volumeVigaLaje(L, h, aproveitamento);
   return {
     composicao_id: null,
-    nome:
-      `VIGA PARA LAJE 0,25X${virgula(h)}X${virgula(medio)}M` +
-      ` — ${virgula(m)} m no total, ${q} trecho${q > 1 ? "s" : ""} · adicionada à mão`,
+    nome: `VIGA PARA LAJE 0,25X${virgula(h)}X${virgula(L)}M · adicionada à mão`,
     unidade: "UND",
     papel: "VIGA_LAJE",
     quantidade: q,
@@ -163,9 +160,15 @@ export function telhaDoProjeto({ composicao, area, perda = 0 }) {
   };
 }
 
+// O comprimento da viga fica no nome: "VIGA PARA LAJE 0,25X0,60X5,60M"
+function comprimentoDaViga(item) {
+  const achou = String(item.nome || "").match(/X(\d+(?:,\d+)?)M\b/);
+  return achou ? num(achou[1]) : 0;
+}
+
 // Totais do que já foi lançado, para conferir com o quadro da folha.
 export function resumoProjeto(itens) {
-  const r = { pilares: 0, tesouras: 0, tercas: 0, travamentos: 0, vigas: 0, lajeM2: 0, telhaM2: 0 };
+  const r = { pilares: 0, tesouras: 0, tercas: 0, travamentos: 0, vigas: 0, vigasM: 0, lajeM2: 0, telhaM2: 0 };
   const chave = {
     PILAR: "pilares",
     TESOURA: "tesouras",
@@ -176,8 +179,10 @@ export function resumoProjeto(itens) {
     TELHA: "telhaM2",
   };
   for (const item of itens || []) {
-    const c = chave[papelDoItem(item)];
+    const papel = papelDoItem(item);
+    const c = chave[papel];
     if (c) r[c] += num(item.quantidade);
+    if (papel === "VIGA_LAJE") r.vigasM = centavos(r.vigasM + num(item.quantidade) * comprimentoDaViga(item));
   }
   return r;
 }

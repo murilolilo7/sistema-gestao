@@ -85,15 +85,27 @@ test("travamento usa a seção 0,15×0,30 do sistema", () => {
   assert.equal(papelDoItem(v), "VIGA_TRAVAMENTO");
 });
 
-test("viga em metros: 65 m em 14 trechos, preço pelo concreto real", () => {
-  const v = vigaDoProjeto({ trechos: 14, metros: 65, altura: "0,60", valorM3: 3000 });
-  assert.equal(v.quantidade, 14);
+test("viga de laje entra com o comprimento real, sem dividir por média", () => {
+  const v = vigaDoProjeto({ qtd: 3, comprimento: "5,60", altura: "0,60", valorM3: 3000 });
+  assert.equal(v.quantidade, 3);
   assert.equal(v.secao, "laje");
   assert.equal(papelDoItem(v), "VIGA_LAJE");
-  // 0,25 × 0,60 × 65% = 0,0975 m³/m × 4,64 m ≈ 0,453 m³ × R$ 3.000
-  assert.equal(v.preco_unitario, 1359);
-  assert.match(v.nome, /65,00 m no total, 14 trechos/);
-  assert.ok(vigaDoProjeto({ trechos: 0, metros: 65, altura: 0.6 }).erro);
+  // 0,25 × 0,60 × 65% = 0,0975 m³/m × 5,60 m = 0,546 m³ × R$ 3.000
+  assert.equal(v.preco_unitario, 1638);
+  assert.match(v.nome, /^VIGA PARA LAJE 0,25X0,60X5,60M/);
+  assert.ok(vigaDoProjeto({ qtd: 0, comprimento: 5, altura: 0.6 }).erro);
+  assert.ok(vigaDoProjeto({ qtd: 1, comprimento: "", altura: 0.6 }).erro);
+  assert.ok(vigaDoProjeto({ qtd: 1, comprimento: 5, altura: "" }).erro);
+});
+
+test("o resumo soma os metros de viga lançados para conferir com a folha", () => {
+  const itens = [
+    vigaDoProjeto({ qtd: 10, comprimento: 5, altura: 0.6, valorM3: 3000 }),
+    vigaDoProjeto({ qtd: 4, comprimento: "3,75", altura: 0.6, valorM3: 3000 }),
+  ];
+  const r = resumoProjeto(itens);
+  assert.equal(r.vigas, 14);
+  assert.equal(r.vigasM, 65);
 });
 
 test("laje: com local vira linha descrita; sem local fica ligada ao catálogo", () => {
@@ -123,7 +135,8 @@ test("obra do Cláudio: os totais lançados batem com a folha e a montagem conta
     tercaDoProjeto({ qtd: 30, comprimento: 5, pontos: TERCAS }),
     tercaDoProjeto({ qtd: 12, comprimento: 5.57, pontos: TERCAS }),
     travamentoDoProjeto({ qtd: 12, comprimento: 5, valorM3: 1300 }),
-    vigaDoProjeto({ trechos: 14, metros: 65, altura: 0.6, valorM3: 3000 }),
+    vigaDoProjeto({ qtd: 10, comprimento: 5, altura: 0.6, valorM3: 3000 }),
+    vigaDoProjeto({ qtd: 4, comprimento: 3.75, altura: 0.6, valorM3: 3000 }),
     lajeDoProjeto({ composicao: LAJE_300, area: 287 }),
     lajeDoProjeto({ composicao: LAJE_300, area: 11, local: "Castelo" }),
     telhaDoProjeto({ composicao: TELHA, area: 356 }),
@@ -134,6 +147,7 @@ test("obra do Cláudio: os totais lançados batem com a folha e a montagem conta
     tercas: 42,
     travamentos: 12,
     vigas: 14,
+    vigasM: 65,
     lajeM2: 298,
     telhaM2: 356,
   });
