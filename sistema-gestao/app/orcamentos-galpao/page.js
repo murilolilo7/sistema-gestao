@@ -33,6 +33,8 @@ import {
   qtdConsolosDeViga,
   qtdConsolosDeTesoura,
   aplicarPecaAutomatica,
+  tesourasDoGalpao,
+  aplicarTesourasAutomaticas,
   vaosCobertosPelaLaje,
   alturaVigaLaje,
   alturaENomeVigaLaje,
@@ -303,9 +305,9 @@ function OrcamentosGalpaoPageInterno() {
   const [composicoes, setComposicoes] = useState([]);
   // Consolos do pilar: peças do catálogo com receita de aço + concreto
   const consoloTesouraComp =
-    composicoes.find((c) => c.papel === "CONSOLO" && /^CONSOLO TESOURA/i.test(c.nome)) || null;
+    composicoes.find((c) => c.papel === "CONSOLO" && /TESOURA/i.test(c.nome)) || null;
   const consoloVigaComp =
-    composicoes.find((c) => c.papel === "CONSOLO" && /^CONSOLO VIGA/i.test(c.nome)) || null;
+    composicoes.find((c) => c.papel === "CONSOLO" && /VIGA/i.test(c.nome)) || null;
   const [modelos, setModelos] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1261,6 +1263,24 @@ function OrcamentosGalpaoPageInterno() {
     (c) => c.papel === "TESOURA" && Number(c.comprimento_referencia) > 0
   );
 
+  // Tesouras automáticas: uma em cada linha de pilar (nº de vãos + 1) em cada
+  // galpão, com o tamanho = largura do galpão e o preço pelo tamanho. Entram
+  // sozinhas como pilar e terça; a calculadora da etapa 3 fica para medidas
+  // extras. Trapézio tem o gerador próprio (uma por pórtico).
+  const largurasChave = (listaLarguras || (Number(vao) > 0 ? [Number(vao)] : [])).join("|");
+  useEffect(() => {
+    if (listaCongelada.current) return;
+    if (modo === "lista" || modoProjeto) return;
+    const referencias = composicoes.filter(
+      (c) => c.papel === "TESOURA" && Number(c.comprimento_referencia) > 0
+    );
+    const larguras = largurasChave ? largurasChave.split("|").map(Number) : [];
+    const tesouras = trapezioAtivo ? [] : tesourasDoGalpao(larguras, nVaos, referencias);
+    setItens((atual) =>
+      atual.length === 0 ? atual : aplicarTesourasAutomaticas(atual, tesouras, removidasNaMao.current)
+    );
+  }, [composicoes, largurasChave, nVaos, trapezioAtivo, modo, modoProjeto]);
+
   function buscarComposicao(nome) {
     return composicoes.find((c) => c.nome === nome);
   }
@@ -1315,38 +1335,7 @@ function OrcamentosGalpaoPageInterno() {
   }
 
   // ---------- Sugestões automáticas pelas medidas ----------
-  // Tesouras: (nº de vãos + 1) por galpão — uma em cada linha de
-  // pilares, incluindo as duas empenas. Geminados com larguras
-  // diferentes sugerem por grupo de largura (primeiro as tesouras do
-  // galpão 1; depois de adicionar, sugere as do próximo galpão).
-  function sugestaoTesoura() {
-    const numVaos = nVaos;
-    if (numVaos <= 0 || !vao) return null;
-    const larguras = listaLarguras || [Number(vao)];
-    // Mantém a ordem dos galpões (1º, 2º, ...) — objeto puro reordenaria
-    // as chaves numéricas e sugeriria o galpão errado primeiro.
-    const ordem = [];
-    const grupos = {};
-    for (const l of larguras) {
-      if (!(l in grupos)) ordem.push(l);
-      grupos[l] = (grupos[l] || 0) + 1;
-    }
-    const lancadas = new Set(
-      itens
-        .filter((i) => i.papel === "TESOURA")
-        .map((i) => {
-          const m = (i.nome || "").match(/([\d.,]+)\s*M/i);
-          return m ? parseFloat(m[1].replace(",", ".")) : null;
-        })
-        .filter((n) => n !== null)
-    );
-    for (const largura of ordem) {
-      if (!lancadas.has(largura)) {
-        return { tamanho: largura, qtd: (numVaos + 1) * grupos[largura] };
-      }
-    }
-    return null;
-  }
+  // (Tesouras entram sozinhas — ver tesourasDoGalpao.)
 
   // Pilares: (nº de vãos + 1) linhas x (nº de galpões + 1) fileiras —
   // 2 fileiras laterais no galpão solo; nos geminados, a divisa usa
@@ -1938,7 +1927,10 @@ function OrcamentosGalpaoPageInterno() {
       {
         chave: proximaChave.current++,
         composicao_id: null,
-        nome: `Tesoura ${tam}M de vão livre (preço pelo tamanho)` + (sufixoNome ? " — " + sufixoNome : ""),
+        // "adicionada à mão" separa esta das tesouras automáticas ao reabrir
+        nome:
+          `Tesoura ${tam}M de vão livre (preço pelo tamanho)` +
+          (sufixoNome ? " — " + sufixoNome : " · adicionada à mão"),
         unidade: "PÇ",
         papel: "TESOURA",
         quantidade,
@@ -3664,28 +3656,11 @@ function OrcamentosGalpaoPageInterno() {
           <TituloEtapa numero="3">Tesoura</TituloEtapa>
             {tesourasComReferencia.length > 0 && (
               <div className="rounded-lg border border-slate-300 bg-white p-3 mb-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-slate-600">Tesoura de qualquer tamanho — preço pelo tamanho</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Tamanho = largura do galpão e quantidade = (nº de vãos
-                      // + 1) x galpões dessa largura. Geminados de larguras
-                      // diferentes vão por etapa: depois de adicionar as do
-                      // galpão 1, sugere as do galpão 2, e assim vai.
-                      const s = sugestaoTesoura();
-                      if (!s) {
-                        setErro("Informe a largura e o comprimento do galpão para sugerir as tesouras.");
-                        return;
-                      }
-                      setTesouraTamanho(String(s.tamanho));
-                      setTesouraQtd(String(s.qtd));
-                    }}
-                    className="text-xs font-medium text-emerald-700 hover:underline"
-                  >
-                    Sugerir pela largura do galpão
-                  </button>
-                </div>
+                <p className="mb-1 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+                  As tesouras do galpão já entram sozinhas na lista de peças: uma em cada linha de pilar,
+                  com o tamanho da largura. Use os campos abaixo só para outra medida.
+                </p>
+                <p className="mb-2 text-xs font-medium text-slate-600">Adicionar tesoura de outra medida — preço pelo tamanho</p>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2" data-bloco="tesoura">
                   <input
                     type="number"

@@ -45,7 +45,7 @@ export function papelDoItem(item) {
   // e "CONSOLO TESOURA" começa igual a "TESOURA".
   if (nome.startsWith("VIGA DE TRAVAMENTO")) return "VIGA_TRAVAMENTO";
   if (nome.startsWith("VIGA PARA LAJE")) return "VIGA_LAJE";
-  if (nome.startsWith("CONSOLO TESOURA")) return "CONSOLO";
+  if (nome.startsWith("CONSOLO")) return "CONSOLO";
   if (nome.startsWith("TESOURA") || nome.includes("DE VÃO LIVRE")) return "TESOURA";
   // O PILAR calculado também entra sem papel: sem esta linha ele sumia do
   // checklist, levava a fundação junto (que é contada pelos pilares) e
@@ -427,6 +427,53 @@ export function qtdConsolosDeTesoura({ pilaresPorFileira, fileirasDoMeio, comDen
   return comDenteGerber ? porFileira * (2 + meio) : porFileira * meio;
 }
 
+// Tesouras do galpão pela largura: uma em cada linha de pilar (nº de vãos +
+// 1) em cada galpão, agrupadas por largura (germinado de larguras diferentes
+// gera uma linha por largura). Preço pelo tamanho.
+export function tesourasDoGalpao(larguras, numeroVaos, referencias) {
+  const vaos = Number(numeroVaos) || 0;
+  if (vaos <= 0) return [];
+  const grupos = new Map();
+  for (const l of larguras || []) {
+    const L = Number(l) || 0;
+    if (L > 0) grupos.set(L, (grupos.get(L) || 0) + 1);
+  }
+  const tesouras = [];
+  for (const [L, galpoes] of grupos) {
+    const calculo = precoTesouraPorTamanho(L, referencias);
+    if (!calculo) continue;
+    tesouras.push({
+      chave: `tesoura-auto-${L}`,
+      nome: `Tesoura ${L}M de vão livre (preço pelo tamanho)`,
+      quantidade: (vaos + 1) * galpoes,
+      preco: calculo.preco,
+    });
+  }
+  return tesouras;
+}
+
+// Aplica as tesouras automáticas na lista. Orçamento que já tem tesoura
+// lançada à mão (ou antiga, pela referência) não ganha outra por cima: as
+// automáticas só entram onde não há tesoura manual.
+export function aplicarTesourasAutomaticas(lista, tesouras, removidas) {
+  const ehAuto = (i) => String(i.chave).startsWith("tesoura-auto-");
+  const temManual = lista.some((i) => papelDoItem(i) === "TESOURA" && !ehAuto(i));
+  const validas = new Set(tesouras.map((t) => t.chave));
+  let nova = lista.filter((i) => !ehAuto(i) || validas.has(i.chave) || i.quantidadeEditada);
+  for (const t of tesouras) {
+    if (temManual && !nova.some((i) => i.chave === t.chave)) continue;
+    nova = aplicarPecaAutomatica(nova, {
+      chave: t.chave,
+      composicao: { id: null, nome: t.nome, unidade: "PÇ", papel: "TESOURA", preco: t.preco },
+      quantidade: t.quantidade,
+      secao: "estrutura",
+      removidas,
+    });
+  }
+  const igual = nova.length === lista.length && nova.every((i, k) => i === lista[k]);
+  return igual ? lista : nova;
+}
+
 // Põe, atualiza ou tira uma peça automática de catálogo (ex.: consolo) na
 // lista, respeitando o que o usuário fez à mão: quantidade editada fica, e
 // peça removida à mão não volta.
@@ -464,8 +511,22 @@ export function aplicarPecaAutomatica(lista, { chave, composicao, quantidade, se
 // isso o sistema não a identificava e lançava OUTRA por cima (peça duplicada).
 export function chaveAutomatica(nome, secao) {
   const n = (nome || "").toUpperCase();
-  if (n.startsWith("CONSOLO TESOURA")) return "consolo-tesoura-auto";
-  if (n.startsWith("CONSOLO VIGA")) return "consolo-viga-auto";
+  // Consolo é do pilar: "CONSOLO DO PILAR - APOIO DA TESOURA / DA VIGA DE LAJE"
+  // (nomes antigos: "CONSOLO TESOURA…", "CONSOLO VIGA…")
+  if (n.startsWith("CONSOLO") && n.includes("TESOURA")) return "consolo-tesoura-auto";
+  if (n.startsWith("CONSOLO") && n.includes("VIGA")) return "consolo-viga-auto";
+  // Tesoura automática (pela largura). A lançada à mão leva "adicionada à
+  // mão" no nome e a do trapézio, o pórtico — essas ficam soltas.
+  if (
+    n.startsWith("TESOURA ") &&
+    n.includes("PREÇO PELO TAMANHO") &&
+    !n.includes("ADICIONADA") &&
+    !n.includes("PÓRTICO")
+  ) {
+    const m = n.match(/^TESOURA\s+(\d+(?:[.,]\d+)?)M/);
+    const L = m ? parseFloat(m[1].replace(",", ".")) : 0;
+    if (L > 0) return `tesoura-auto-${L}`;
+  }
   // Peças da 2ª laje (dois pavimentos) têm chave própria — sem isso a viga
   // de cima era confundida com a de baixo e a laje de cima virava peça
   // solta, duplicando ao mexer nas medidas.

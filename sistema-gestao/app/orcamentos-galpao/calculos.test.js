@@ -39,6 +39,8 @@ import {
   qtdConsolosDeViga,
   qtdConsolosDeTesoura,
   aplicarPecaAutomatica,
+  tesourasDoGalpao,
+  aplicarTesourasAutomaticas,
 } from "./calculos.js";
 
 // ---------------------------------------------------------------------------
@@ -81,8 +83,55 @@ test("peça automática: entra, acompanha a conta e respeita o que foi feito à 
 });
 
 test("consolos são reconhecidos pelo nome ao reabrir o orçamento", () => {
+  assert.equal(chaveAutomatica("CONSOLO DO PILAR - APOIO DA VIGA DE LAJE", "laje"), "consolo-viga-auto");
+  assert.equal(chaveAutomatica("CONSOLO DO PILAR - APOIO DA TESOURA", "estrutura"), "consolo-tesoura-auto");
+  // nomes antigos
   assert.equal(chaveAutomatica("CONSOLO VIGA DE LAJE", "laje"), "consolo-viga-auto");
   assert.equal(chaveAutomatica("CONSOLO TESOURA (dente)", "estrutura"), "consolo-tesoura-auto");
+  assert.equal(papelDoItem({ nome: "CONSOLO DO PILAR - APOIO DA TESOURA" }), "CONSOLO");
+});
+
+// ---------------------------------------------------------------------------
+// TESOURAS AUTOMÁTICAS PELA LARGURA
+// ---------------------------------------------------------------------------
+
+test("tesouras do galpão: (vãos + 1) por galpão, agrupadas por largura", () => {
+  // germinado 2 × 10 m, 6 vãos (orçamento 62): 14 tesouras de 10 m
+  const g = tesourasDoGalpao([10, 10], 6, TESOURAS_REF);
+  assert.equal(g.length, 1);
+  assert.equal(g[0].quantidade, 14);
+  assert.equal(g[0].chave, "tesoura-auto-10");
+  assert.equal(g[0].preco, 1889.83);
+  // larguras diferentes: uma linha por largura
+  const d = tesourasDoGalpao([10, 15], 6, TESOURAS_REF);
+  assert.deepEqual(d.map((t) => [t.chave, t.quantidade]), [["tesoura-auto-10", 7], ["tesoura-auto-15", 7]]);
+  assert.deepEqual(tesourasDoGalpao([10], 0, TESOURAS_REF), []);
+});
+
+test("tesoura automática entra, troca com a largura e não duplica a manual", () => {
+  const base = [{ chave: 1, nome: "FUNDAÇÃO", quantidade: 0 }];
+  let lista = aplicarTesourasAutomaticas(base, tesourasDoGalpao([10, 10], 6, TESOURAS_REF));
+  assert.equal(lista.filter((i) => i.papel === "TESOURA").length, 1);
+  // largura mudou para 12 m: a de 10 sai, a de 12 entra
+  lista = aplicarTesourasAutomaticas(lista, tesourasDoGalpao([12, 12], 6, TESOURAS_REF));
+  assert.deepEqual(lista.filter((i) => i.papel === "TESOURA").map((i) => i.chave), ["tesoura-auto-12"]);
+  // sem mudança, devolve a mesma lista
+  assert.equal(aplicarTesourasAutomaticas(lista, tesourasDoGalpao([12, 12], 6, TESOURAS_REF)), lista);
+  // orçamento antigo com tesoura pela referência: não ganha outra por cima
+  const antigo = [{ chave: 7, nome: "Tesoura 10M de vão livre (calculada proporcionalmente a partir da TESOURA 18M)", quantidade: 14 }];
+  assert.equal(aplicarTesourasAutomaticas(antigo, tesourasDoGalpao([10, 10], 6, TESOURAS_REF)).length, 1);
+  // removida à mão não volta
+  assert.equal(
+    aplicarTesourasAutomaticas(base, tesourasDoGalpao([10], 6, TESOURAS_REF), new Set(["tesoura-auto-10"])).length,
+    1
+  );
+});
+
+test("tesoura automática é reconhecida ao reabrir; a manual e a do trapézio não", () => {
+  assert.equal(chaveAutomatica("Tesoura 10M de vão livre (preço pelo tamanho)", "estrutura"), "tesoura-auto-10");
+  assert.equal(chaveAutomatica("Tesoura 12.5M de vão livre (preço pelo tamanho)", "estrutura"), "tesoura-auto-12.5");
+  assert.equal(chaveAutomatica("Tesoura 8M de vão livre (preço pelo tamanho) · adicionada à mão", "estrutura"), null);
+  assert.equal(chaveAutomatica("Tesoura 9.2M de vão livre (preço pelo tamanho) — pórtico 2/7", "estrutura"), null);
 });
 
 // ---------------------------------------------------------------------------
