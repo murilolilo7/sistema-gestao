@@ -19,6 +19,7 @@ import {
   X,
   BarChart3,
   Ruler,
+  HardHat,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { Notificacoes, Confirmador, useSouAdmin } from "@/components/Ui";
@@ -45,6 +46,10 @@ const MENU = [
       { href: "/orcamentos-galpao", label: "Orçamentos Galpão", icone: Warehouse },
       { href: "/relatorios", label: "Relatórios", icone: BarChart3, adminOnly: true },
     ],
+  },
+  {
+    titulo: "Fábrica",
+    itens: [{ href: "/producao", label: "Produção", icone: HardHat, adminOnly: true }],
   },
   {
     titulo: "Preços",

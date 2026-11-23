@@ -10,7 +10,8 @@ const NOMES_TABELA = {
   mao_de_obra: "Mão de obra",
   composicoes_galpao: "Peça de galpão",
   parametros_engenharia: "Parâmetros de engenharia",
-  armacao_comissao: "Comissão de armação",
+  armacao_comissao: "Peça da produção (prêmio)",
+  producao_colaboradores: "Pessoa da produção",
 };
 
 const NOMES_ACAO = {
@@ -41,6 +42,11 @@ const NOMES_CAMPO = {
   papel: "Categoria",
   bdi_pct: "BDI (%)",
   comprimento_referencia: "Comprimento de referência",
+  comissao: "Prêmio armação (R$)",
+  valor_concretagem: "Prêmio concretagem (R$)",
+  ativo: "Ativo",
+  setor: "Setor",
+  funcao_id: "Função (código)",
 };
 
 function formatarValor(valor) {
