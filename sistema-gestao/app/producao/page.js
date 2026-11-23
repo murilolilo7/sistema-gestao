@@ -112,6 +112,26 @@ function ProducaoPage({ souAdmin }) {
   );
 }
 
+// Exclui de vez. Só funciona se nunca foi usado em lançamento; se já foi,
+// o banco não deixa (o histórico ficaria sem dono) e a saída é desativar.
+async function excluirDeVez({ tabela, id, nome, oQue, recarregar }) {
+  const ok = await confirmar({
+    titulo: `Excluir ${nome}?`,
+    texto: `${oQue} some do cadastro de vez. Isso só é possível se nunca foi usado em nenhum lançamento — se já foi, use Desativar.`,
+    confirmarTexto: "Excluir",
+    perigoso: true,
+  });
+  if (!ok) return;
+  const { error } = await supabase.from(tabela).delete().eq("id", id);
+  if (error) {
+    if (error.code === "23503")
+      return notificar(`${nome} já tem lançamentos e não pode ser excluído. Use Desativar: some da lista e o histórico fica.`, "erro");
+    return notificar("Não foi possível excluir: " + error.message, "erro");
+  }
+  notificar(`${nome} excluído.`);
+  recarregar();
+}
+
 // ------------------------------------------------------------------ Pessoas
 
 async function nomeLiberado(nome, pessoas, idIgnorar = null) {
@@ -165,7 +185,10 @@ function AbaPessoas({ pessoas, funcoes, recarregar, souAdmin }) {
         custo (o valor vem de Preços → Mão de obra). O <b>setor</b> é onde a pessoa
         costuma trabalhar — no lançamento dá para marcar alguém em outro setor naquele dia.
         <br />
-        Pessoa que saiu da empresa: clique em <b>Desativar</b>. Ela some do lançamento, mas o histórico dela continua.
+        <b>Para alterar:</b> mude direto no campo e clique em <b>Salvar</b> (ou Desfazer). Pessoa que saiu da empresa:{" "}
+        <b>Desativar</b> — some do lançamento, o histórico continua, e dá para <b>Reativar</b> quando quiser (as
+        desativadas aparecem em &quot;Mostrar pessoas desativadas&quot;, no fim da página). <b>Excluir</b> só para cadastro
+        feito por engano, que nunca entrou em lançamento.
       </Explicacao>
 
       <form onSubmit={adicionar} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -281,6 +304,9 @@ function LinhaPessoa({ p, pessoas, funcoes, recarregar, souAdmin }) {
     gravar({ ativo: !p.ativo }, p.ativo ? `${p.nome} desativado.` : `${p.nome} reativado.`);
   }
 
+  const excluir = () =>
+    excluirDeVez({ tabela: "producao_colaboradores", id: p.id, nome: p.nome, oQue: "A pessoa", recarregar });
+
   return (
     <tr className={`border-t border-slate-100 ${mudou ? "bg-amber-50/60" : ""} ${p.ativo ? "" : "opacity-50"}`}>
       <td className="px-4 py-1.5">
@@ -319,9 +345,18 @@ function LinhaPessoa({ p, pessoas, funcoes, recarregar, souAdmin }) {
             </button>
           </span>
         ) : (
-          <button onClick={alternarAtivo} disabled={salvando} className="text-xs text-slate-500 hover:text-slate-900 underline">
-            {p.ativo ? "Desativar" : "Reativar"}
-          </button>
+          <span className="inline-flex items-center gap-3">
+            <button
+              onClick={alternarAtivo}
+              disabled={salvando}
+              className={`text-xs underline ${p.ativo ? "text-slate-500 hover:text-slate-900" : "font-medium text-emerald-700 hover:text-emerald-900"}`}
+            >
+              {p.ativo ? "Desativar" : "Reativar"}
+            </button>
+            <button onClick={excluir} disabled={salvando} className="text-xs text-rose-500 hover:text-rose-700 underline">
+              Excluir
+            </button>
+          </span>
         )}
       </td>
     </tr>
@@ -365,6 +400,10 @@ function AbaPecas({ pecas, recarregar, souAdmin }) {
       <Explicacao>
         O prêmio do dia é a <b>soma das peças feitas × o valor de cada peça</b>. Cada peça tem um valor para a{" "}
         <b>armação</b> (quem fez a ferragem) e outro para a <b>concretagem</b>.
+        <br />
+        <b>Para alterar:</b> mude o nome ou o valor direto no campo e clique em <b>Salvar</b> (ou Desfazer). Peça que
+        não se faz mais: <b>Desativar</b> (fica no fim da lista, apagada, e volta com <b>Reativar</b>). <b>Excluir</b> só
+        para peça cadastrada por engano, que nunca entrou em lançamento.
         <br />O valor da armação do <b>pilar sem consolo</b> também entra no Custo real do pilar (Engenharia). Toda
         alteração fica no Histórico de Preços.
       </Explicacao>
@@ -501,6 +540,12 @@ function LinhaPeca({ p, pecas, recarregar, souAdmin }) {
     gravar({ ativo: !p.ativo }, p.ativo ? `${p.nome} desativada.` : `${p.nome} reativada.`);
   }
 
+  function excluir() {
+    if (PECAS_PROTEGIDAS.includes(p.tipo))
+      return notificar(`${p.nome} é usada no Custo real do pilar e não pode ser excluída. Você pode alterar os valores.`, "erro");
+    excluirDeVez({ tabela: "armacao_comissao", id: p.id, nome: p.nome, oQue: "A peça", recarregar });
+  }
+
   if (!souAdmin)
     return (
       <tr className={`border-t border-slate-100 ${p.ativo ? "" : "opacity-50"}`}>
@@ -555,9 +600,18 @@ function LinhaPeca({ p, pecas, recarregar, souAdmin }) {
             </button>
           </span>
         ) : (
-          <button onClick={alternarAtivo} disabled={salvando} className="text-xs text-slate-500 hover:text-slate-900 underline">
-            {p.ativo ? "Desativar" : "Reativar"}
-          </button>
+          <span className="inline-flex items-center gap-3">
+            <button
+              onClick={alternarAtivo}
+              disabled={salvando}
+              className={`text-xs underline ${p.ativo ? "text-slate-500 hover:text-slate-900" : "font-medium text-emerald-700 hover:text-emerald-900"}`}
+            >
+              {p.ativo ? "Desativar" : "Reativar"}
+            </button>
+            <button onClick={excluir} disabled={salvando} className="text-xs text-rose-500 hover:text-rose-700 underline">
+              Excluir
+            </button>
+          </span>
         )}
       </td>
     </tr>
@@ -565,6 +619,9 @@ function LinhaPeca({ p, pecas, recarregar, souAdmin }) {
 }
 
 // ------------------------------------------------------------------ peças pequenas
+
+// Peças que outras contas do sistema usam pelo código (não podem ser excluídas)
+const PECAS_PROTEGIDAS = ["PILAR_SEM_CONSOLO"];
 
 const ESTILO_INPUT =
   "w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
