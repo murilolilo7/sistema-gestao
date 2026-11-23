@@ -638,6 +638,7 @@ function EngenhariaPage() {
           {aba === "testes" && (
             <div className="grid gap-3 sm:grid-cols-2">
               {[
+                { href: "/engenharia/custo-pilar", titulo: "Custo real do pilar", texto: "Concreto, aço por bitola, armação, concretagem e BDI — todos os números para conferir e atualizar." },
                 { href: "/engenharia/pilar-forma4", titulo: "Laboratório do pilar", texto: "Cálculo pelo vento e pela laje, comparado com os projetos reais." },
                 { href: "/engenharia/tesoura", titulo: "Laboratório da tesoura", texto: "Cálculo pelo formato real e pela carga, comparado com os projetos reais." },
               ].map((l) => (

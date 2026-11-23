@@ -9,6 +9,8 @@ const NOMES_TABELA = {
   insumos: "Insumo",
   mao_de_obra: "Mão de obra",
   composicoes_galpao: "Peça de galpão",
+  parametros_engenharia: "Parâmetros de engenharia",
+  armacao_comissao: "Comissão de armação",
 };
 
 const NOMES_ACAO = {
