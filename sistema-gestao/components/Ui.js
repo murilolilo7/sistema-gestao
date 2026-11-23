@@ -121,7 +121,7 @@ export function Confirmador() {
           <div>
             <h3 className="font-semibold text-slate-900">{pedido.titulo}</h3>
             {pedido.texto && (
-              <p className="text-sm text-slate-500 mt-1 leading-relaxed">{pedido.texto}</p>
+              <p className="text-sm text-slate-500 mt-1 leading-relaxed whitespace-pre-line">{pedido.texto}</p>
             )}
           </div>
         </div>
@@ -303,7 +303,8 @@ export function ThOrdenavel({ campo, ordenacao, children, className }) {
 
 // Verifica se o usuário logado é administrador.
 // Retorna: null (ainda verificando), true (admin) ou false (não é).
-export function useSouAdmin() {
+// chave (opcional): repete a verificação quando muda (ex.: id do usuário logado).
+export function useSouAdmin(chave) {
   const [souAdmin, setSouAdmin] = useState(null);
   useEffect(() => {
     let ativo = true;
@@ -318,8 +319,29 @@ export function useSouAdmin() {
     return () => {
       ativo = false;
     };
-  }, []);
+  }, [chave]);
   return souAdmin;
+}
+
+// Perfil da produção: { pode } = admin ou "lança produção";
+// { so } = só lança produção (não é admin) -> vê apenas a Produção.
+// Retorna null enquanto verifica.
+export function usePerfilProducao(chave) {
+  const [perfil, setPerfil] = useState(null);
+  useEffect(() => {
+    let ativo = true;
+    Promise.all([supabase.rpc("pode_lancar_producao"), supabase.rpc("so_producao")])
+      .then(([p, s]) => {
+        if (ativo) setPerfil({ pode: !!p.data, so: !!s.data });
+      })
+      .catch(() => {
+        if (ativo) setPerfil({ pode: false, so: false });
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [chave]);
+  return perfil;
 }
 
 // Tela padrão exibida quando alguém sem permissão tenta abrir

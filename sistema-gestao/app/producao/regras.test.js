@@ -1,6 +1,110 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { nomeLimpo, nomeRepetido, nomeParecido, gerarTipo, custoMensalFuncao, rotuloSetor } from "./regras.js";
+import {
+  nomeLimpo,
+  nomeRepetido,
+  nomeParecido,
+  gerarTipo,
+  custoMensalFuncao,
+  rotuloSetor,
+  dividirPremio,
+  premioConcretagemDia,
+  resumoMes,
+  custoMaoObraMes,
+  avisosDoDia,
+} from "./regras.js";
+
+const r2 = (v) => Math.round(v * 100) / 100;
+
+test("prêmio dividido igual à planilha (9 presentes, 2 de meio dia)", () => {
+  const partes = dividirPremio(140, ["P", "P", "P", "P", "P", "P", "P", "M", "M", "F", "S"]);
+  assert.equal(r2(partes[0]), 17.78);
+  assert.equal(r2(partes[7]), 7.78);
+  assert.equal(partes[9], 0);
+  assert.equal(partes[10], 0);
+  assert.equal(r2(partes.reduce((a, b) => a + b, 0)), 140);
+});
+
+test("prêmio dividido: 8 de dia inteiro dá 17,50; só meio dia fica com tudo", () => {
+  assert.deepEqual(dividirPremio(140, Array(8).fill("P")), Array(8).fill(17.5));
+  assert.deepEqual(dividirPremio(100, ["M", "M", "F"]), [50, 50, 0]);
+  assert.deepEqual(dividirPremio(0, ["P"]), [0]);
+  assert.deepEqual(dividirPremio(140, ["F", "S"]), [0, 0]);
+});
+
+test("prêmio do dia: informado ou soma das peças", () => {
+  assert.equal(premioConcretagemDia(140, [{ quantidade: 9, valor_unit: 5 }]), 140);
+  assert.equal(premioConcretagemDia(null, [{ quantidade: 9, valor_unit: 5 }, { quantidade: 2, valor_unit: 2.5 }]), 50);
+  assert.equal(premioConcretagemDia("", []), 0);
+});
+
+const diasExemplo = [
+  {
+    data: "2026-12-01",
+    m3_concretado: 8,
+    premio_concretagem_informado: null,
+    producao_presencas: [
+      { colaborador_id: 1, setor: "CONCRETAGEM", situacao: "P" },
+      { colaborador_id: 2, setor: "CONCRETAGEM", situacao: "P" },
+      { colaborador_id: 3, setor: "ARMACAO", situacao: "P" },
+    ],
+    producao_concretagem_pecas: [{ peca_id: 10, quantidade: 4, valor_unit: 10 }],
+    producao_armacao: [{ colaborador_id: 3, peca_id: 10, quantidade: 3, valor_unit: 3 }],
+  },
+  {
+    data: "2026-12-02",
+    m3_concretado: 2,
+    premio_concretagem_informado: 20,
+    producao_presencas: [
+      { colaborador_id: 1, setor: "CONCRETAGEM", situacao: "F" },
+      { colaborador_id: 2, setor: "CONCRETAGEM", situacao: "P" },
+      { colaborador_id: 3, setor: "CONCRETAGEM", situacao: "M" },
+    ],
+    producao_concretagem_pecas: [],
+    producao_armacao: [],
+  },
+];
+
+test("resumo do mês soma dias, faltas e prêmios por pessoa", () => {
+  const r = resumoMes(diasExemplo, [{ colaborador_id: 2, valor: 200 }]);
+  const p = (id) => r.linhas.find((l) => l.colaborador_id === id);
+  assert.equal(p(1).dias, 1);
+  assert.equal(p(1).faltas, 1);
+  assert.equal(p(1).premioConcretagem, 20); // 40 ÷ 2
+  assert.equal(p(2).premioConcretagem, r2(20 + 20 - 20 / 2 / 2)); // 20 + 15
+  assert.equal(p(3).premioConcretagem, 5); // meio dia: 20 ÷ 2 ÷ 2
+  assert.equal(p(3).premioArmacao, 9);
+  assert.equal(p(2).total, 235);
+  assert.equal(r.totais.m3, 10);
+  assert.equal(r.totais.premioConcretagem, 60);
+  assert.equal(r.totais.premioArmacao, 9);
+  assert.equal(r.totais.total, 269);
+  assert.equal(r.porPecaConcretada.get(10), 4);
+});
+
+test("custo da mão de obra reparte o salário pelos dias em cada setor", () => {
+  const r = resumoMes(diasExemplo, []);
+  const c = custoMaoObraMes(r, (id) => ({ 1: 3000, 2: 3000, 3: 4000 })[id]);
+  // pessoa 3: 1 dia armação, 1 dia concretagem -> metade em cada
+  assert.equal(c.concretagem.salarios, 3000 + 3000 + 2000);
+  assert.equal(c.armacao.salarios, 2000);
+  assert.equal(c.concretagem.porM3, r2((8000 + 60) / 10));
+  assert.equal(c.armacao.porReal, 223.222); // (2000 + 9) ÷ 9
+  assert.equal(custoMaoObraMes(r, () => null).semFuncao, 3);
+});
+
+test("avisos do dia apontam o que está faltando", () => {
+  const pecas = [{ id: 10, nome: "Laje", valor_concretagem: null }];
+  const a = avisosDoDia({
+    m3: "",
+    presencas: [{ colaborador_id: 1, setor: "CONCRETAGEM", situacao: "P" }, { colaborador_id: 3, setor: "ARMACAO", situacao: "P" }],
+    concretagem: [{ peca_id: 10, quantidade: 2 }],
+    armacao: [],
+    pecas,
+  });
+  assert.equal(a.length, 4);
+  assert.deepEqual(avisosDoDia({ m3: 5, presencas: [{ colaborador_id: 1, setor: "CONCRETAGEM", situacao: "P" }], concretagem: [{ peca_id: 11, quantidade: 1 }], armacao: [], pecas }), []);
+});
 
 const lista = [
   { id: 1, nome: "José Adriano" },

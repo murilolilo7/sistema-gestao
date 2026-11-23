@@ -75,6 +75,35 @@ export default function UsuariosPage() {
     setAlterandoId(null);
   }
 
+  async function alternarProducao(usuario) {
+    const novoValor = !usuario.lanca_producao;
+    const nome = usuario.nome_completo || usuario.email;
+    const ok = await confirmar({
+      titulo: novoValor ? "Liberar lançamento da produção?" : "Tirar lançamento da produção?",
+      texto: novoValor
+        ? `"${nome}" vai poder lançar a produção do dia, cadastrar pessoas da produção e ver os relatórios de prêmios.` +
+          (usuario.is_admin ? "" : " Ao entrar no sistema, essa pessoa vê só a Produção.")
+        : `"${nome}" não vai mais conseguir lançar a produção.`,
+      confirmarTexto: novoValor ? "Liberar" : "Tirar",
+      perigoso: !novoValor,
+    });
+    if (!ok) return;
+    setAlterandoId(usuario.user_id);
+    setErro("");
+    const { error } = await supabase.rpc("definir_lanca_producao", {
+      usuario_id_input: usuario.user_id,
+      novo_valor: novoValor,
+    });
+    if (error) setErro("Erro ao alterar permissão: " + error.message);
+    else {
+      notificar("Permissão atualizada.");
+      setUsuarios((atual) =>
+        atual.map((u) => (u.user_id === usuario.user_id ? { ...u, lanca_producao: novoValor } : u))
+      );
+    }
+    setAlterandoId(null);
+  }
+
   if (loading) {
     return <p className="text-sm text-slate-500">Carregando...</p>;
   }
@@ -86,7 +115,9 @@ export default function UsuariosPage() {
       </Link>
       <h1 className="text-2xl font-bold mb-1">Usuários</h1>
       <p className="text-slate-500 mb-6">
-        Quem pode alterar, incluir ou excluir preços (insumos, mão de obra, peças de galpão).
+        Quem pode alterar preços (administrador) e quem lança a produção do dia. Quem só lança a produção, ao
+        entrar, vê apenas a tela da Produção. Pessoa nova: ela cria a conta em &quot;Criar conta&quot; na tela de entrada e
+        você libera aqui.
       </p>
 
       {erro && (
@@ -113,6 +144,7 @@ export default function UsuariosPage() {
                 <th className="px-4 py-2 font-medium">E-mail</th>
                 <th className="px-4 py-2 font-medium">Administrador</th>
                 <th className="px-4 py-2 font-medium"></th>
+                <th className="px-4 py-2 font-medium">Lança produção</th>
               </tr>
             </thead>
             <tbody>
@@ -146,6 +178,18 @@ export default function UsuariosPage() {
                           ? "Remover admin"
                           : "Tornar admin"}
                     </button>
+                  </td>
+                  <td className="px-4 py-2">
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!u.lanca_producao}
+                        onChange={() => alternarProducao(u)}
+                        disabled={alterandoId === u.user_id}
+                        className="w-4 h-4 accent-emerald-600"
+                      />
+                      <span className="text-xs text-slate-600">{u.lanca_producao ? "Sim" : "Não"}</span>
+                    </label>
                   </td>
                 </tr>
               ))}

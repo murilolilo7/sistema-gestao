@@ -22,7 +22,7 @@ import {
   HardHat,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { Notificacoes, Confirmador, useSouAdmin } from "@/components/Ui";
+import { Notificacoes, Confirmador, useSouAdmin, usePerfilProducao } from "@/components/Ui";
 
 // Estrutura do menu lateral: seções com ícones. Para adicionar uma nova
 // tela no futuro, basta incluir uma linha aqui.
@@ -49,7 +49,7 @@ const MENU = [
   },
   {
     titulo: "Fábrica",
-    itens: [{ href: "/producao", label: "Produção", icone: HardHat, adminOnly: true }],
+    itens: [{ href: "/producao", label: "Produção", icone: HardHat, producao: true }],
   },
   {
     titulo: "Preços",
@@ -97,11 +97,17 @@ function ItemMenu({ href, label, icone: Icone, ativo, onClick }) {
   );
 }
 
-function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, onLogout, souAdmin }) {
-  // Esconde itens exclusivos de admin (e seções que ficarem vazias)
+function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, onLogout, souAdmin, perfil }) {
+  // Esconde itens exclusivos de admin (e seções que ficarem vazias).
+  // Quem só lança produção vê apenas a Produção.
+  const soProducao = perfil?.so === true;
   const menuVisivel = MENU.map((secao) => ({
     ...secao,
-    itens: secao.itens.filter((item) => !item.adminOnly || souAdmin === true),
+    itens: secao.itens.filter((item) => {
+      if (soProducao) return !!item.producao;
+      if (item.producao) return souAdmin === true || perfil?.pode === true;
+      return !item.adminOnly || souAdmin === true;
+    }),
   })).filter((secao) => secao.itens.length > 0);
 
   return (
@@ -168,7 +174,8 @@ export default function AppShell({ children }) {
   const [menuMobileAberto, setMenuMobileAberto] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const souAdmin = useSouAdmin();
+  const souAdmin = useSouAdmin(session?.user?.id);
+  const perfil = usePerfilProducao(session?.user?.id);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -197,6 +204,13 @@ export default function AppShell({ children }) {
       router.replace("/");
     }
   }, [session, pathname, router]);
+
+  // Quem só lança produção fica sempre dentro da Produção
+  useEffect(() => {
+    if (session && perfil?.so && pathname !== "/login" && !pathname.startsWith("/producao")) {
+      router.replace("/producao");
+    }
+  }, [session, perfil, pathname, router]);
 
   // Fecha o menu mobile ao trocar de página
   useEffect(() => {
@@ -239,6 +253,7 @@ export default function AppShell({ children }) {
           iniciaisUsuario={iniciaisUsuario}
           onLogout={handleLogout}
           souAdmin={souAdmin}
+          perfil={perfil}
         />
       </aside>
 
@@ -283,6 +298,7 @@ export default function AppShell({ children }) {
               iniciaisUsuario={iniciaisUsuario}
               onLogout={handleLogout}
           souAdmin={souAdmin}
+          perfil={perfil}
             />
           </div>
         </div>

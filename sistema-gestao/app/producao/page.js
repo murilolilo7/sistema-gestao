@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { useSouAdmin, AcessoRestrito, notificar, confirmar } from "@/components/Ui";
+import { useSouAdmin, usePerfilProducao, AcessoRestrito, notificar, confirmar } from "@/components/Ui";
+import Lancamento, { hojeISO } from "./Lancamento";
+import Relatorios from "./Relatorios";
 import { lerNumero, paraTexto } from "@/app/engenharia/custo-pilar/campos";
 import {
   SETORES,
@@ -15,18 +17,10 @@ import {
 } from "./regras";
 
 const ABAS = [
+  { id: "lancar", rotulo: "Lançar o dia" },
+  { id: "relatorios", rotulo: "Relatórios" },
   { id: "pessoas", rotulo: "Pessoas" },
   { id: "pecas", rotulo: "Peças e prêmios" },
-  { id: "lancar", rotulo: "Lançar produção", breve: true },
-  { id: "relatorios", rotulo: "Relatórios", breve: true },
-];
-
-const ETAPAS = [
-  { n: 1, texto: "Cadastro das pessoas e das peças", agora: true },
-  { n: 2, texto: "Lançamento do dia (pelo encarregado)" },
-  { n: 3, texto: "Relatórios do mês" },
-  { n: 4, texto: "Login próprio para quem lança" },
-  { n: 5, texto: "Importar a planilha de 2026" },
 ];
 
 const brl = (v) =>
@@ -42,8 +36,9 @@ function buscarTudo() {
   ]);
 }
 
-function ProducaoPage() {
-  const [aba, setAba] = useState("pessoas");
+function ProducaoPage({ souAdmin }) {
+  const [aba, setAba] = useState("lancar");
+  const [dataDia, setDataDia] = useState(hojeISO());
   const [dados, setDados] = useState({ pessoas: [], pecas: [], funcoes: [] });
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -67,46 +62,24 @@ function ProducaoPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-1">Produção</h1>
-      <p className="text-slate-500 mb-4">
+      <h1 className="text-2xl font-bold mb-1 print:hidden">Produção</h1>
+      <p className="text-slate-500 mb-4 print:hidden">
         Aqui fica tudo o que a fábrica produz no dia: quem trabalhou, o concreto e as peças. É daqui que sai o prêmio de
         cada um e o custo real da mão de obra.
       </p>
 
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Como o módulo vai ficar</p>
-        <ol className="grid gap-1.5 sm:grid-cols-5 text-xs">
-          {ETAPAS.map((e) => (
-            <li
-              key={e.n}
-              className={`rounded-lg border px-2.5 py-2 ${
-                e.agora ? "border-emerald-300 bg-emerald-50 text-emerald-800 font-medium" : "border-slate-200 text-slate-500"
-              }`}
-            >
-              <span className="font-bold mr-1">{e.n}.</span>
-              {e.texto}
-              {e.agora && <span className="block text-[10px] uppercase tracking-wide mt-0.5">← estamos aqui</span>}
-            </li>
-          ))}
-        </ol>
-      </div>
-
-      <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-5">
+      <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-5 print:hidden">
         {ABAS.map((a) => (
           <button
             key={a.id}
-            onClick={() => !a.breve && setAba(a.id)}
-            disabled={a.breve}
+            onClick={() => setAba(a.id)}
             className={`px-4 py-2 text-sm rounded-t-lg border-b-2 -mb-px transition ${
               aba === a.id
                 ? "border-emerald-600 text-emerald-700 font-medium"
-                : a.breve
-                  ? "border-transparent text-slate-300 cursor-not-allowed"
-                  : "border-transparent text-slate-600 hover:text-slate-900"
+                : "border-transparent text-slate-600 hover:text-slate-900"
             }`}
           >
             {a.rotulo}
-            {a.breve && <span className="ml-1 text-[10px]">(em breve)</span>}
           </button>
         ))}
       </div>
@@ -117,10 +90,23 @@ function ProducaoPage() {
 
       {carregando ? (
         <p className="text-sm text-slate-500">Carregando...</p>
+      ) : aba === "lancar" ? (
+        <Lancamento pessoas={dados.pessoas} pecas={dados.pecas} data={dataDia} irParaData={setDataDia} />
+      ) : aba === "relatorios" ? (
+        <Relatorios
+          pessoas={dados.pessoas}
+          pecas={dados.pecas}
+          funcoes={dados.funcoes}
+          souAdmin={souAdmin}
+          abrirDia={(d) => {
+            setDataDia(d > hojeISO() ? hojeISO() : d);
+            setAba("lancar");
+          }}
+        />
       ) : aba === "pessoas" ? (
-        <AbaPessoas pessoas={dados.pessoas} funcoes={dados.funcoes} recarregar={recarregar} />
+        <AbaPessoas pessoas={dados.pessoas} funcoes={dados.funcoes} recarregar={recarregar} souAdmin={souAdmin} />
       ) : (
-        <AbaPecas pecas={dados.pecas} recarregar={recarregar} />
+        <AbaPecas pecas={dados.pecas} recarregar={recarregar} souAdmin={souAdmin} />
       )}
     </div>
   );
@@ -149,7 +135,7 @@ async function nomeLiberado(nome, pessoas, idIgnorar = null) {
   return true;
 }
 
-function AbaPessoas({ pessoas, funcoes, recarregar }) {
+function AbaPessoas({ pessoas, funcoes, recarregar, souAdmin }) {
   const [novo, setNovo] = useState({ nome: "", funcao_id: "", setor: "CONCRETAGEM" });
   const [salvando, setSalvando] = useState(false);
   const [verInativos, setVerInativos] = useState(false);
@@ -176,7 +162,7 @@ function AbaPessoas({ pessoas, funcoes, recarregar }) {
     <div className="space-y-5">
       <Explicacao>
         São as pessoas que o encarregado vai marcar no lançamento do dia. A <b>função</b> diz qual salário entra no
-        custo (o valor vem de Preços → Mão de obra; aqui só aparece para conferir). O <b>setor</b> é onde a pessoa
+        custo (o valor vem de Preços → Mão de obra). O <b>setor</b> é onde a pessoa
         costuma trabalhar — no lançamento dá para marcar alguém em outro setor naquele dia.
         <br />
         Pessoa que saiu da empresa: clique em <b>Desativar</b>. Ela some do lançamento, mas o histórico dela continua.
@@ -229,7 +215,7 @@ function AbaPessoas({ pessoas, funcoes, recarregar }) {
                     <th className="px-4 py-2 font-medium">Nome</th>
                     <th className="px-2 py-2 font-medium">Função</th>
                     <th className="px-2 py-2 font-medium">Setor</th>
-                    <th className="px-2 py-2 font-medium whitespace-nowrap">Custo da função/mês</th>
+                    {souAdmin && <th className="px-2 py-2 font-medium whitespace-nowrap">Custo da função/mês</th>}
                     <th className="px-4 py-2" />
                   </tr>
                 </thead>
@@ -241,6 +227,7 @@ function AbaPessoas({ pessoas, funcoes, recarregar }) {
                       pessoas={pessoas}
                       funcoes={funcoes}
                       recarregar={recarregar}
+                      souAdmin={souAdmin}
                     />
                   ))}
                 </tbody>
@@ -259,7 +246,7 @@ function AbaPessoas({ pessoas, funcoes, recarregar }) {
   );
 }
 
-function LinhaPessoa({ p, pessoas, funcoes, recarregar }) {
+function LinhaPessoa({ p, pessoas, funcoes, recarregar, souAdmin }) {
   const [rascunho, setRascunho] = useState({ nome: p.nome, funcao_id: String(p.funcao_id ?? ""), setor: p.setor });
   const [salvando, setSalvando] = useState(false);
   const mudou =
@@ -309,9 +296,11 @@ function LinhaPessoa({ p, pessoas, funcoes, recarregar }) {
       <td className="px-2 py-1.5">
         <SelectSetor valor={rascunho.setor} aoMudar={(v) => setRascunho({ ...rascunho, setor: v })} />
       </td>
-      <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap" title="Salário da função + encargos">
-        {brl(custoMensalFuncao(funcao))}
-      </td>
+      {souAdmin && (
+        <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap" title="Salário da função + encargos">
+          {brl(custoMensalFuncao(funcao))}
+        </td>
+      )}
       <td className="px-4 py-1.5 text-right whitespace-nowrap">
         {mudou ? (
           <span className="inline-flex gap-1">
@@ -341,7 +330,7 @@ function LinhaPessoa({ p, pessoas, funcoes, recarregar }) {
 
 // ------------------------------------------------------------------ Peças
 
-function AbaPecas({ pecas, recarregar }) {
+function AbaPecas({ pecas, recarregar, souAdmin }) {
   const [nova, setNova] = useState({ nome: "", comissao: "", valor_concretagem: "" });
   const [salvando, setSalvando] = useState(false);
   const semConcretagem = pecas.filter((p) => p.ativo && (p.valor_concretagem === null || p.valor_concretagem === undefined));
@@ -380,6 +369,12 @@ function AbaPecas({ pecas, recarregar }) {
         alteração fica no Histórico de Preços.
       </Explicacao>
 
+      {!souAdmin && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          Só administrador altera os valores. Aqui você consulta o prêmio de cada peça.
+        </div>
+      )}
+
       {semConcretagem.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <b>{semConcretagem.length} peças ainda sem valor de concretagem.</b> Preencha a coluna &quot;Prêmio
@@ -404,12 +399,14 @@ function AbaPecas({ pecas, recarregar }) {
                 p={p}
                 pecas={pecas}
                 recarregar={recarregar}
+                souAdmin={souAdmin}
               />
             ))}
           </tbody>
         </table>
       </div>
 
+      {souAdmin && (
       <form onSubmit={adicionar} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <p className="text-sm font-medium text-slate-700 mb-3">Cadastrar peça nova</p>
         <div className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr_auto] items-end">
@@ -447,11 +444,12 @@ function AbaPecas({ pecas, recarregar }) {
           </button>
         </div>
       </form>
+      )}
     </div>
   );
 }
 
-function LinhaPeca({ p, pecas, recarregar }) {
+function LinhaPeca({ p, pecas, recarregar, souAdmin }) {
   const original = { nome: p.nome, comissao: paraTexto(p.comissao), valor_concretagem: paraTexto(p.valor_concretagem) };
   const [rascunho, setRascunho] = useState(original);
   const [salvando, setSalvando] = useState(false);
@@ -502,6 +500,16 @@ function LinhaPeca({ p, pecas, recarregar }) {
     }
     gravar({ ativo: !p.ativo }, p.ativo ? `${p.nome} desativada.` : `${p.nome} reativada.`);
   }
+
+  if (!souAdmin)
+    return (
+      <tr className={`border-t border-slate-100 ${p.ativo ? "" : "opacity-50"}`}>
+        <td className="px-4 py-2 text-slate-700">{p.nome}</td>
+        <td className="px-2 py-2">{brl(p.comissao)}</td>
+        <td className="px-2 py-2">{semConcretagem ? <span className="text-amber-600">falta</span> : brl(p.valor_concretagem)}</td>
+        <td />
+      </tr>
+    );
 
   return (
     <tr className={`border-t border-slate-100 ${mudou ? "bg-amber-50/60" : ""} ${p.ativo ? "" : "opacity-50"}`}>
@@ -603,10 +611,11 @@ function SelectSetor({ valor, aoMudar }) {
   );
 }
 
-// Porteiro: por enquanto só administradores (o login próprio da produção é a etapa 4).
+// Porteiro: administradores e quem tem a permissão "Lança produção" (tela Usuários).
 export default function ProducaoPageProtegida() {
   const souAdmin = useSouAdmin();
-  if (souAdmin === false) return <AcessoRestrito />;
-  if (souAdmin !== true) return null;
-  return <ProducaoPage />;
+  const perfil = usePerfilProducao();
+  if (souAdmin === null || perfil === null) return null;
+  if (!souAdmin && !perfil.pode) return <AcessoRestrito />;
+  return <ProducaoPage souAdmin={souAdmin} />;
 }
