@@ -95,10 +95,35 @@ export function calcularDesenhoGalpao(dados) {
   const uz = [0.94, -0.34];
   const proj = (x, y, z) => [x * ux[0] + z * uz[0], x * ux[1] + z * uz[1] - y];
 
+  // Conjuntos de caixa d'água (poste + capitel + caixa): um desenho por
+  // tamanho lançado (até 3), ao lado do galpão — ou sozinhos, quando o
+  // orçamento é só da caixa. Medidas do reservatório são ilustrativas.
+  const semGalpao = dados.semGalpao === true;
+  const torres = (Array.isArray(dados.caixas) ? dados.caixas : [])
+    .filter((g) => g.capacidade)
+    .slice(0, 3)
+    .map((g, k) => {
+      const dim = DIMENSOES_CAIXA.find((d) => g.capacidade <= d.ate) || DIMENSOES_CAIXA[DIMENSOES_CAIXA.length - 1];
+      return {
+        x: semGalpao ? 0 : -4,
+        z: semGalpao ? k * 6 : C + 3.5 + k * 6,
+        hp: Math.max(3, Number(g.alturaPoste) || 6),
+        r: dim.d / 2,
+        ht: dim.h,
+        material: g.material,
+        rotulo: `${Number(g.capacidade).toLocaleString("pt-BR")} L${g.quantidade > 1 ? ` ×${g.quantidade}` : ""}`,
+      };
+    });
+
   // Enquadramento automático dentro do viewBox
   const cantos = [];
-  for (const x of [0, W])
-    for (const y of [0, H + hcMax]) for (const z of [0, C]) cantos.push(proj(x, y, z));
+  if (!semGalpao || torres.length === 0)
+    for (const x of [0, W])
+      for (const y of [0, H + hcMax]) for (const z of [0, C]) cantos.push(proj(x, y, z));
+  for (const t of torres)
+    for (const dx of [-t.r, t.r])
+      for (const dz of [-t.r, t.r])
+        for (const y of [0, t.hp + 0.3 + t.ht]) cantos.push(proj(t.x + dx, y, t.z + dz));
   let minX = Infinity,
     maxX = -Infinity,
     minY = Infinity,
@@ -159,6 +184,7 @@ export function calcularDesenhoGalpao(dados) {
   // Linhas longitudinais de pilares: bordas externas + divisas dos galpões
   const linhasX = divisas;
 
+  if (!semGalpao || torres.length === 0) {
   // 1) Fundo: empena traseira e lateral distante, em traço mais claro
   for (const x of linhasX) linha(T(x, 0, C), T(x, H, C), CONCRETO_CLARO, wPilar * 0.8);
   for (let i = 1; i < nMod; i++)
@@ -298,8 +324,68 @@ export function calcularDesenhoGalpao(dados) {
     linha([b[0] - 17, b[1]], [b[0] - 9, b[1]], VERDE, 1);
     texto(b[0] - 20, (a[1] + b[1]) / 2 + 3, dados.textoAltura, "end");
   }
+  } // fim do galpão
+
+  // 7) Caixas d'água: poste, capitel (laje quadrada no topo) e o reservatório
+  // cilíndrico. Contorno de cada sólido = envoltória dos pontos projetados.
+  for (const t of torres) {
+    const e = 0.3; // espessura do capitel
+    const lado = t.r * 1.05;
+    linha(T(t.x, 0, t.z), T(t.x, t.hp, t.z), CONCRETO, wPilar * 1.3);
+    const capitel = [];
+    for (const y of [t.hp, t.hp + e])
+      for (const dx of [-lado, lado]) for (const dz of [-lado, lado]) capitel.push(T(t.x + dx, y, t.z + dz));
+    poligono(envoltoria(capitel), CONCRETO_CLARO, CONCRETO, 0.8);
+    const yTopoCap = t.hp + e;
+    poligono(
+      [T(t.x - lado, yTopoCap, t.z - lado), T(t.x + lado, yTopoCap, t.z - lado), T(t.x + lado, yTopoCap, t.z + lado), T(t.x - lado, yTopoCap, t.z + lado)],
+      "#dfe5ea",
+      CONCRETO,
+      0.8
+    );
+    const circulo = (y) =>
+      Array.from({ length: 28 }, (_, k) => {
+        const a = (k / 28) * Math.PI * 2;
+        return T(t.x + t.r * Math.cos(a), y, t.z + t.r * Math.sin(a));
+      });
+    const yBase = yTopoCap;
+    const yTopo = yBase + t.ht;
+    const cor = t.material === "POLIETILENO" ? ["#4f86b8", "#2f5f8a", "#7aa6cf"] : ["#9cc3dd", "#5b8db0", "#c4dcec"];
+    poligono(envoltoria([...circulo(yBase), ...circulo(yTopo)]), cor[0], cor[1], 1);
+    poligono(circulo(yTopo), cor[2], cor[1], 1);
+    const p = T(t.x, yTopo, t.z);
+    texto(p[0], p[1] - t.r * esc * 0.45 - 6, t.rotulo, "middle");
+  }
 
   return { viewBoxLargura: VB_L, viewBoxAltura: VB_A, formas };
+}
+
+// Medidas aproximadas do reservatório (diâmetro x altura, em metros) só para
+// o desenho ficar proporcional — não entram em conta nenhuma.
+const DIMENSOES_CAIXA = [
+  { ate: 5000, d: 2.1, h: 1.8 },
+  { ate: 10000, d: 2.6, h: 2.3 },
+  { ate: 15000, d: 3.0, h: 2.5 },
+  { ate: Infinity, d: 3.1, h: 3.0 },
+];
+
+// Envoltória convexa (contorno) de pontos 2D — cadeia monótona.
+function envoltoria(pontos) {
+  const p = [...pontos].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cruz = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const baixo = [];
+  for (const q of p) {
+    while (baixo.length >= 2 && cruz(baixo[baixo.length - 2], baixo[baixo.length - 1], q) <= 0) baixo.pop();
+    baixo.push(q);
+  }
+  const cima = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (cima.length >= 2 && cruz(cima[cima.length - 2], cima[cima.length - 1], q) <= 0) cima.pop();
+    cima.push(q);
+  }
+  return baixo.slice(0, -1).concat(cima.slice(0, -1));
 }
 
 // Componente pronto: recebe as medidas e desenha o galpão.
@@ -321,6 +407,8 @@ export default function DesenhoGalpao({
   areaLaje2 = null,
   alturaLaje2 = null,
   areaLaje = null,
+  caixas = null,
+  semGalpao = false,
   largura = 300,
 }) {
   const fmt = (n) =>
@@ -351,6 +439,8 @@ export default function DesenhoGalpao({
     areaLaje2,
     alturaLaje2,
     areaLaje,
+    caixas,
+    semGalpao,
     textoLargura: larguraTotal > 0 ? `${fmt(larguraTotal)}M` : null,
     textoComprimento: comprimento ? `${fmt(comprimento)}M` : null,
     textoAltura: peDireito ? `${fmt(peDireito)}M` : null,

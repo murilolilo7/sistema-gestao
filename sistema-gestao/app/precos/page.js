@@ -12,7 +12,7 @@ function formatarMoeda(valor) {
   return Number(valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-const PAPEIS_SUGERIDOS = ["PILAR", "TELHA", "CALHA", "CAPOTE", "MONTAGEM", "FUNDACAO"];
+const PAPEIS_SUGERIDOS = ["PILAR", "TELHA", "CALHA", "CAPOTE", "MONTAGEM", "FUNDACAO", "CAIXA_AGUA"];
 
 // Terça, Laje, Tesoura, Viga de travamento, Poste, Capitel e Base Cálice
 // ganharam cartão próprio em Engenharia -> Cálculo de peças (receita, BDI,

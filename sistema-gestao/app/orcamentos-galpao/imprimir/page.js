@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { calcularDesenhoGalpao } from "../desenho-galpao";
 import { useUrlImagemProjeto } from "../imagem-projeto";
 import { modulosDoGalpao, contarModulos } from "../calculos";
+import { SECAO_CAIXA, conjuntosDaLista, descricaoConjunto, rotuloCapacidade } from "../caixa-dagua";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -243,7 +244,7 @@ function ConteudoImpressao() {
         supabase
           .from("orcamentos_galpao")
           .select(
-            "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), modelos_galpao(nome), itens_orcamento_galpao(id, quantidade, preco_unitario, descricao_livre, unidade_livre, composicoes_galpao(nome, codigo, unidade, papel))"
+            "*, clientes(nome, cpf_cnpj, telefone, email, endereco, numero, bairro, cidade, uf, cep), modelos_galpao(nome, tipo), itens_orcamento_galpao(id, quantidade, preco_unitario, descricao_livre, unidade_livre, secao, composicoes_galpao(nome, codigo, unidade, papel))"
           )
           .eq("codigo", codigo)
           .single(),
@@ -281,8 +282,9 @@ function ConteudoImpressao() {
         num(orcamento.pe_direito),
       ].filter(Boolean);
       const sufixo = medidas.length ? ` ${medidas.join("X")}` : "";
+      const tipoDoc = orcamento.modelos_galpao?.tipo === "caixa" ? "Orcamento Caixa dAgua" : "Orcamento Galpao";
       document.title = nomeArquivoSeguro(
-        `Orcamento Galpao ${orcamento.codigo} - ${nomeCliente}${sufixo}`
+        `${tipoDoc} ${orcamento.codigo} - ${nomeCliente}${sufixo}`
       );
     }
   }, [orcamento]);
@@ -310,6 +312,29 @@ function ConteudoImpressao() {
     orcamento.status === "aprovado" ? "Aprovado" : vencido ? "Vencido" : "Pendente";
 
   const itensOrcamento = orcamento.itens_orcamento_galpao || [];
+  // Caixa d'água (conjunto poste + capitel + caixa): sozinha ou junto com o galpão.
+  const soCaixa = orcamento.modelos_galpao?.tipo === "caixa";
+  const itensCaixa = itensOrcamento
+    .filter((i) => i.secao === SECAO_CAIXA)
+    .map((i) => ({
+      nome: nomeDaPeca(i),
+      papel: papelDaPeca(i),
+      quantidade: i.quantidade,
+      preco_unitario: i.preco_unitario,
+    }));
+  const conjuntosCaixa = conjuntosDaLista(itensCaixa);
+  const fatorMargem = 1 + (Number(orcamento.margem_comercial_pct) || 0) / 100;
+  const subtotalGalpao = itensOrcamento
+    .filter((i) => i.secao !== SECAO_CAIXA)
+    .reduce((s, i) => s + (Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0), 0);
+  const descontoOrc = Number(orcamento.desconto) || 0;
+  const textoCaixas = conjuntosCaixa
+    .filter((g) => g.capacidade)
+    .map(
+      (g) =>
+        `${g.quantidade} x ${rotuloCapacidade(g.capacidade)} (${g.material === "POLIETILENO" ? "POLIETILENO" : "FIBRA"})`
+    )
+    .join(" + ");
   const itemTelha = primeiraComPapel(itensOrcamento, "TELHA");
   const itemCalha = primeiraComPapel(itensOrcamento, "CALHA");
   const galpoesGerminados = Math.max(0, Number(orcamento.numero_galpoes_germinados) || 0);
@@ -360,6 +385,8 @@ function ConteudoImpressao() {
     textoLargura: larguraTotal ? `${formatarMedida(larguraTotal)}M` : null,
     textoComprimento: orcamento.comprimento ? `${formatarMedida(orcamento.comprimento)}M` : null,
     textoAltura: orcamento.pe_direito ? `${formatarMedida(orcamento.pe_direito)}M` : null,
+    caixas: conjuntosCaixa,
+    semGalpao: soCaixa,
   });
 
   // Lajes por nível, lidas das peças do orçamento (a quantidade da laje é
@@ -382,7 +409,20 @@ function ConteudoImpressao() {
         )}M²`
       : `${formatarMedida(areaTotal)}M²`;
 
-  const especificacoes = [
+  const especificacoesCaixa = [
+    { rotulo: "Caixa d'água", valor: textoCaixas || "-" },
+    {
+      rotulo: "Poste",
+      valor:
+        conjuntosCaixa
+          .filter((g) => g.alturaPoste)
+          .map((g) => `${formatarMedida(g.alturaPoste)}M`)
+          .filter((v, i, a) => a.indexOf(v) === i)
+          .join(" / ") || "-",
+    },
+    { rotulo: "Cada conjunto", valor: "1 POSTE + 1 CAPITEL + 1 CAIXA" },
+  ];
+  const especificacoesGalpao = [
     {
       rotulo: "Largura",
       valor: largurasGalpoes
@@ -430,7 +470,27 @@ function ConteudoImpressao() {
       rotulo: "Viga de travamento",
       valor: possuiPapel(itensOrcamento, "VIGA_TRAVAMENTO") ? "SIM" : "NÃO CONTEMPLA",
     },
+    ...(textoCaixas ? [{ rotulo: "Caixa d'água", valor: textoCaixas }] : []),
   ];
+  const especificacoes = soCaixa ? especificacoesCaixa : especificacoesGalpao;
+  // Linhas da proposta: com caixa d'água, o galpão e cada conjunto saem em
+  // linhas separadas (valores já com o BDI comercial); o desconto, se houver,
+  // aparece numa linha própria antes do total. Sem caixa, fica como sempre.
+  const linhasProposta =
+    conjuntosCaixa.length === 0
+      ? [{ descricao: orcamento.titulo || "Galpão pré-moldado", qtd: 1, unit: orcamento.total, total: orcamento.total }]
+      : [
+          ...(subtotalGalpao > 0
+            ? [{ descricao: orcamento.titulo || "Galpão pré-moldado", qtd: 1, unit: subtotalGalpao * fatorMargem, total: subtotalGalpao * fatorMargem }]
+            : []),
+          ...conjuntosCaixa.map((g) => ({
+            descricao: descricaoConjunto(g),
+            qtd: g.quantidade,
+            unit: (g.total * fatorMargem) / Math.max(1, g.quantidade),
+            total: g.total * fatorMargem,
+          })),
+          ...(descontoOrc > 0 ? [{ descricao: "Desconto", qtd: null, unit: null, total: -descontoOrc }] : []),
+        ];
 
   return (
     <div className="max-w-3xl mx-auto p-8 print:p-4 text-slate-900 bg-white">
@@ -462,7 +522,7 @@ function ConteudoImpressao() {
       </div>
 
       <h1 className="text-center text-lg font-bold mb-1">
-        Orçamento de Galpão Nº {orcamento.codigo}
+        {soCaixa ? "Orçamento de Caixa d'Água" : "Orçamento de Galpão"} Nº {orcamento.codigo}
       </h1>
       {orcamento.titulo && (
         <p className="text-center text-sm text-slate-600 mb-6">{orcamento.titulo}</p>
@@ -522,7 +582,7 @@ function ConteudoImpressao() {
           width="250"
           viewBox={`0 0 ${desenho.viewBoxLargura} ${desenho.viewBoxAltura}`}
           role="img"
-          aria-label="Desenho do galpão pré-moldado com as medidas do orçamento"
+          aria-label={soCaixa ? "Desenho da caixa d'água" : "Desenho do galpão pré-moldado com as medidas do orçamento"}
         >
           {desenho.formas.map((f, i) => {
             if (f.tipo === "poligono") {
@@ -579,18 +639,18 @@ function ConteudoImpressao() {
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td className="border border-slate-300 px-2 py-1.5">
-              {orcamento.titulo || "Galpão pré-moldado"}
-            </td>
-            <td className="border border-slate-300 px-2 py-1.5 text-right">1</td>
-            <td className="border border-slate-300 px-2 py-1.5 text-right">
-              {formatarMoeda(orcamento.total)}
-            </td>
-            <td className="border border-slate-300 px-2 py-1.5 text-right">
-              {formatarMoeda(orcamento.total)}
-            </td>
-          </tr>
+          {linhasProposta.map((l, idx) => (
+            <tr key={idx}>
+              <td className="border border-slate-300 px-2 py-1.5">{l.descricao}</td>
+              <td className="border border-slate-300 px-2 py-1.5 text-right">{l.qtd ?? ""}</td>
+              <td className="border border-slate-300 px-2 py-1.5 text-right">
+                {l.unit === null ? "" : formatarMoeda(l.unit)}
+              </td>
+              <td className="border border-slate-300 px-2 py-1.5 text-right">
+                {l.total < 0 ? `- ${formatarMoeda(-l.total)}` : formatarMoeda(l.total)}
+              </td>
+            </tr>
+          ))}
           <tr>
             <td colSpan={3} className="border border-slate-300 px-2 py-1.5 text-right font-bold">
               TOTAL

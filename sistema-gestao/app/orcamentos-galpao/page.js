@@ -14,6 +14,17 @@ import MaoDeObraArmacao from "./MaoDeObraArmacao";
 import PainelProjeto, { PROJETO_VAZIO } from "./PainelProjeto";
 import { useUrlImagemProjeto } from "./imagem-projeto";
 import { areaLajeDoProjeto } from "./projeto";
+import {
+  SECAO_CAIXA,
+  CAPACIDADES_CAIXA,
+  MATERIAIS_CAIXA,
+  rotuloCapacidade,
+  pecasDoConjunto,
+  itensDoConjunto,
+  somarNaLista,
+  conjuntosDaLista,
+  alturaDoPoste,
+} from "./caixa-dagua";
 // Regras de cálculo (testadas em calculos.test.js). Ficam num arquivo à parte
 // para que os testes protejam EXATAMENTE o que o sistema usa.
 import {
@@ -45,7 +56,8 @@ import {
   qtdCapote,
 } from "./calculos";
 
-const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL"]; // caixa d'água, tratado à parte
+// Caixa d'água tem bloco próprio (conjunto poste + capitel + caixa)
+const PAPEIS_EXCLUIDOS = ["POSTE", "CAPITEL", "CAIXA_AGUA"];
 
 // Orçamentos por página na lista (o último é o teto — a lista nunca fica
 // infinita).
@@ -425,6 +437,12 @@ function OrcamentosGalpaoPageInterno() {
   const [itens, setItens] = useState([]);
   const [composicaoParaAdicionar, setComposicaoParaAdicionar] = useState("");
   const [buscaPeca, setBuscaPeca] = useState("");
+  // Conjunto de caixa d'água (1 poste + 1 capitel + 1 caixa)
+  const [caixaCapacidade, setCaixaCapacidade] = useState("10000");
+  const [caixaMaterial, setCaixaMaterial] = useState("FIBRA");
+  const [caixaPosteId, setCaixaPosteId] = useState("");
+  const [caixaQtd, setCaixaQtd] = useState("1");
+  const [caixaAvisos, setCaixaAvisos] = useState([]);
   const [perdaTelha, setPerdaTelha] = useState("10"); // % de perda da telha (editável)
   const [chaveRecente, setChaveRecente] = useState(null); // realce da linha recém-adicionada
   const [rascunhoDisponivel, setRascunhoDisponivel] = useState(null);
@@ -582,6 +600,8 @@ function OrcamentosGalpaoPageInterno() {
   const modeloSelecionado = modelos.find((m) => String(m.id) === String(modeloId));
   const tipoSelecionado = modeloSelecionado?.tipo || "";
   const modoProjeto = projetoLigado && tipoSelecionado === "editado";
+  // Orçamento só da caixa d'água: sem medidas nem peças de galpão.
+  const soCaixa = tipoSelecionado === "caixa";
   const urlImagemProjeto = useUrlImagemProjeto(modoProjeto ? projeto.imagem_path : null);
   // GEMINADO: a largura lançada é a de CADA galpão. Galpões podem ter
   // larguras diferentes — o galpão 1 usa o campo principal e os demais
@@ -1502,6 +1522,23 @@ function OrcamentosGalpaoPageInterno() {
     return { ...s, qtd: linhasTotais * trechos, trechos, lancadas, doisNiveis: !!s2 };
   })();
 
+  // Caixa d'água: lança N conjuntos (poste + capitel + caixa) na seção própria.
+  function adicionarConjuntoCaixa() {
+    const { itens: novos, avisos } = itensDoConjunto({
+      composicoes,
+      capacidade: Number(caixaCapacidade),
+      material: caixaMaterial,
+      posteId: caixaPosteId,
+      quantidade: caixaQtd,
+    });
+    setCaixaAvisos(avisos);
+    if (novos.length === 0) return;
+    descongelarLista();
+    setItens((atual) => somarNaLista(atual, novos, () => proximaChave.current++));
+    setCaixaQtd("1");
+    notificar(`${Math.max(1, Math.floor(Number(caixaQtd) || 1))} conjunto(s) de ${rotuloCapacidade(caixaCapacidade)} adicionado(s).`);
+  }
+
   function adicionarItem() {
     if (!composicaoParaAdicionar) return;
     const composicao = composicoes.find(
@@ -2158,11 +2195,15 @@ function OrcamentosGalpaoPageInterno() {
   const totalFinal = totalComMargem - descontoNumerico;
 
   // Numeração das etapas: a laje (6) só aparece em galpão com laje/mezanino
-  const numEtapaLista = modoProjeto
-    ? 4
-    : tipoSelecionado === "laje" || tipoSelecionado === "mezanino" || tipoSelecionado === "editado"
-      ? 7
-      : 6;
+  // A caixa d'água entra como etapa própria logo antes da lista de peças.
+  const numEtapaCaixa = soCaixa
+    ? 2
+    : modoProjeto
+      ? 4
+      : tipoSelecionado === "laje" || tipoSelecionado === "mezanino" || tipoSelecionado === "editado"
+        ? 7
+        : 6;
+  const numEtapaLista = numEtapaCaixa + 1;
 
   const frasePagamento = fraseFormaPagamento(pagEntrada, pagMomento, pagParcelas);
   // Valores de referência (não vão no texto: mudariam se o total mudar depois)
@@ -2182,8 +2223,14 @@ function OrcamentosGalpaoPageInterno() {
   // Seções separadas, como na planilha da empresa: a estrutura do galpão
   // tem valor/m² pela área do galpão; a laje/mezanino tem subtotal e
   // valor/m² próprios, pela área da laje.
-  const itensEstrutura = itens.filter((i) => i.secao !== "laje");
+  const itensEstrutura = itens.filter((i) => i.secao !== "laje" && i.secao !== SECAO_CAIXA);
   const itensLaje = itens.filter((i) => i.secao === "laje");
+  const itensCaixa = itens.filter((i) => i.secao === SECAO_CAIXA);
+  const subtotalCaixa = itensCaixa.reduce(
+    (soma, i) => soma + (Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0), 0
+  );
+  const conjuntosCaixa = conjuntosDaLista(itensCaixa);
+  const pecasCaixaEscolhida = pecasDoConjunto(composicoes, Number(caixaCapacidade), caixaMaterial);
   const itensEstruturaOrdenados = ordenarItensPorPapel(itensEstrutura, ORDEM_ESTRUTURA);
   const itensLajeOrdenados = ordenarItensPorPapel(itensLaje, ORDEM_LAJE);
   const subtotalEstrutura = itensEstrutura.reduce(
@@ -2251,6 +2298,19 @@ function OrcamentosGalpaoPageInterno() {
   // fundacao, pilares e vigas. As pecas continuam NA LISTA (a FUNDAÇÃO
   // precisa existir para o calculo automatico dela funcionar), mas deixam de
   // ser exigidas — o usuario zera ou remove o que nao for do orcamento.
+  // Troca do tipo. No "Só caixa d'água" as peças-base do galpão (montagem,
+  // fundação, calha, capote) não fazem sentido: saem da lista se zeradas.
+  function escolherModelo(novoId) {
+    setModeloId(novoId);
+    const tipo = modelos.find((m) => String(m.id) === String(novoId))?.tipo;
+    if (tipo !== "caixa") return;
+    setItens((atual) =>
+      atual
+        .filter((i) => !(i.obrigatorio && !(Number(i.quantidade) > 0)))
+        .map((i) => (i.obrigatorio ? { ...i, obrigatorio: false } : i))
+    );
+  }
+
   useEffect(() => {
     if (tipoSelecionado !== "editado") return;
     setItens((atual) => {
@@ -2260,6 +2320,7 @@ function OrcamentosGalpaoPageInterno() {
   }, [tipoSelecionado]);
 
   const checklistEstrutura = (() => {
+    if (soCaixa) return [];
     // Galpao editado: o checklist nao cobra o que "deveria" existir — ele
     // apenas confere o que foi lancado, para o usuario revisar a lista.
     if (tipoSelecionado === "editado") {
@@ -2740,7 +2801,7 @@ function OrcamentosGalpaoPageInterno() {
     const itensCarregados = (orcamento.itens_orcamento_galpao || []).map((item) => {
       const nomeItem =
         item.composicoes_galpao?.nome || item.descricao_livre || "Item removido";
-      const secaoItem = item.secao === "laje" ? "laje" : "estrutura";
+      const secaoItem = item.secao === "laje" || item.secao === SECAO_CAIXA ? item.secao : "estrutura";
       let chaveAuto = porProjeto ? null : chaveAutomatica(nomeItem, secaoItem);
       if (chaveAuto && chavesUsadas.has(chaveAuto)) chaveAuto = null; // a 2ª ganha chave própria
       if (chaveAuto) chavesUsadas.add(chaveAuto);
@@ -2764,11 +2825,13 @@ function OrcamentosGalpaoPageInterno() {
         null,
       quantidade: Number(item.quantidade),
       preco_unitario: Number(item.preco_unitario),
-      secao: item.secao === "laje" ? "laje" : "estrutura",
+      secao: secaoItem,
       // Obrigatórios são só os da estrutura base — a montagem da laje,
       // por exemplo, pode ser removida sem travar o orçamento.
       obrigatorio:
         item.secao !== "laje" &&
+        item.secao !== SECAO_CAIXA &&
+        orcamento.modelos_galpao?.tipo !== "caixa" &&
         ["MONTAGEM", "FUNDAÇÃO", "CALHA FIBRA", "CAPOTE"].includes(
           item.composicoes_galpao?.nome
         ),
@@ -2854,7 +2917,7 @@ function OrcamentosGalpaoPageInterno() {
       // já que vai pro banco.
       quantidade: Math.max(0, Number(i.quantidade) || 0),
       preco_unitario: Math.max(0, Number(i.preco_unitario) || 0),
-      secao: i.secao === "laje" ? "laje" : "estrutura",
+      secao: i.secao === "laje" || i.secao === SECAO_CAIXA ? i.secao : "estrutura",
     }));
     // A validade conta da DATA DA PROPOSTA (envio), não de hoje.
     const validadeCalculada = calcularDataFuturaDe(dataProposta, diasValidade) || null;
@@ -3247,7 +3310,7 @@ function OrcamentosGalpaoPageInterno() {
               <label className={labelClasse}>Tipo de galpão</label>
               <select
                 value={modeloId}
-                onChange={(e) => setModeloId(e.target.value)}
+                onChange={(e) => escolherModelo(e.target.value)}
                 className={campoClasse}
               >
                 <option value="">Selecione o tipo</option>
@@ -3277,6 +3340,8 @@ function OrcamentosGalpaoPageInterno() {
             </label>
           )}
 
+          {!soCaixa && (
+          <>
           <TituloEtapa numero="2">{modoProjeto ? "Medidas gerais da obra" : "Medidas do galpão"}</TituloEtapa>
           {(
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
@@ -3623,6 +3688,7 @@ function OrcamentosGalpaoPageInterno() {
                         Number(i.quantidade) > 0
                     )}
                     areaLaje={areaLaje}
+                    caixas={conjuntosCaixa}
                     largura={280}
                   />
                   <p className="text-center text-[10px] text-emerald-600">
@@ -3807,6 +3873,9 @@ function OrcamentosGalpaoPageInterno() {
           )}
           </>
           )}
+          </>
+          )}
+          {!soCaixa && (
           <PainelTestes>
             {comPilares && pilaresComparacao.length > 0 && nVaos > 0 && (
               <ComparacaoPilarForma4
@@ -3829,10 +3898,13 @@ function OrcamentosGalpaoPageInterno() {
             )}
             <MaoDeObraArmacao itens={itens} subtotal={subtotal} />
           </PainelTestes>
+          )}
           <div className="lg:hidden">
             <PainelChecklist />
           </div>
           <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
+            {!soCaixa && (
+            <>
             <p className="text-xs font-medium text-slate-600 mb-2">
               {modoProjeto ? "Outras peças do catálogo (capitel, poste, base...)" : "Adicionar peça"}
             </p>
@@ -4488,6 +4560,104 @@ function OrcamentosGalpaoPageInterno() {
 
             </>
             )}
+          </>
+          )}
+
+            {/* Caixa d'água: conjunto poste + capitel + caixa (sozinho ou junto com o galpão) */}
+            {modeloId && (
+            <>
+            <TituloEtapa numero={numEtapaCaixa}>
+              Caixa d&apos;água{" "}
+              <span className="font-normal text-xs text-slate-400">
+                {soCaixa ? "— cada conjunto: 1 poste + 1 capitel + 1 caixa" : "— opcional: conjunto junto com o galpão"}
+              </span>
+            </TituloEtapa>
+            <div className="rounded-lg border border-sky-200 bg-sky-50/40 p-3 mb-3" data-bloco="caixa">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
+                <div>
+                  <label className={labelClasse}>Capacidade</label>
+                  <select
+                    value={caixaCapacidade}
+                    onChange={(e) => { setCaixaCapacidade(e.target.value); setCaixaPosteId(""); setCaixaAvisos([]); }}
+                    className={campoClasse}
+                  >
+                    {CAPACIDADES_CAIXA.map((c) => (
+                      <option key={c} value={c}>{rotuloCapacidade(c)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClasse}>Caixa de</label>
+                  <select
+                    value={caixaMaterial}
+                    onChange={(e) => { setCaixaMaterial(e.target.value); setCaixaAvisos([]); }}
+                    className={campoClasse}
+                  >
+                    {MATERIAIS_CAIXA.map((m) => (
+                      <option key={m.id} value={m.id}>{m.rotulo}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClasse}>Poste</label>
+                  <select
+                    value={caixaPosteId || String(pecasCaixaEscolhida.postes[0]?.id || "")}
+                    onChange={(e) => setCaixaPosteId(e.target.value)}
+                    className={campoClasse}
+                    disabled={pecasCaixaEscolhida.postes.length < 2}
+                  >
+                    {pecasCaixaEscolhida.postes.length === 0 && <option value="">não cadastrado</option>}
+                    {pecasCaixaEscolhida.postes.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {alturaDoPoste(p.nome) ? `${String(alturaDoPoste(p.nome).toFixed(2)).replace(".", ",")} m` : p.nome}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClasse}>Quantidade</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={caixaQtd}
+                    onChange={(e) => setCaixaQtd(e.target.value)}
+                    className={campoClasse}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={adicionarConjuntoCaixa}
+                  className="col-span-2 sm:col-span-1 rounded-lg bg-sky-700 hover:bg-sky-800 text-white text-sm font-medium px-4 py-2 transition"
+                >
+                  Adicionar conjunto
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] text-slate-600">
+                Entra na lista: {[
+                  pecasCaixaEscolhida.postes.length ? "poste" : null,
+                  pecasCaixaEscolhida.capitel ? "capitel" : null,
+                  pecasCaixaEscolhida.caixa ? `caixa de ${caixaMaterial === "POLIETILENO" ? "polietileno" : "fibra"}` : null,
+                ].filter(Boolean).join(" + ") || "nenhuma peça cadastrada"}
+                {pecasCaixaEscolhida.caixa && !(Number(pecasCaixaEscolhida.caixa.preco) > 0) && (
+                  <span className="text-amber-700"> · a caixa ainda está sem preço (preencha em Preços)</span>
+                )}
+                {!pecasCaixaEscolhida.capitel && (
+                  <span className="text-amber-700"> · capitel desta capacidade ainda não cadastrado</span>
+                )}
+              </p>
+              {caixaAvisos.length > 0 && (
+                <ul className="mt-2 text-[11px] text-amber-800 list-disc pl-4">
+                  {caixaAvisos.map((a) => <li key={a}>{a}</li>)}
+                </ul>
+              )}
+              {soCaixa && conjuntosCaixa.length > 0 && (
+                <div className="lg:hidden mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2 text-center">
+                  <DesenhoGalpao semGalpao caixas={conjuntosCaixa} largura={260} />
+                </div>
+              )}
+            </div>
+            </>
+            )}
 
             {/* Lista de peças: etapa própria, separada da laje */}
             <TituloEtapa numero={numEtapaLista}>
@@ -4511,7 +4681,7 @@ function OrcamentosGalpaoPageInterno() {
                   </tr>
                 </thead>
                 <tbody>
-                  {itensLaje.length > 0 && (
+                  {(itensLaje.length > 0 || itensCaixa.length > 0) && itensEstrutura.length > 0 && (
                     <tr>
                       <td colSpan={6} className="pt-2 pb-1 text-xs font-semibold text-slate-500 uppercase">
                         Estrutura do galpão
@@ -4716,6 +4886,95 @@ function OrcamentosGalpaoPageInterno() {
                           <td></td>
                         </tr>
                       )}
+                    </>
+                  )}
+
+                  {itensCaixa.length > 0 && itensLaje.length === 0 && itensEstrutura.length > 0 && (
+                    <tr className="border-t border-slate-300">
+                      <td colSpan={4} className="py-1 text-right text-xs font-medium text-slate-500">
+                        Subtotal estrutura — com BDI ({margemNumerica}%)
+                      </td>
+                      <td className="py-1 text-right font-semibold whitespace-nowrap">
+                        {formatarMoeda(subtotalEstrutura * fatorMargem)}
+                      </td>
+                      <td></td>
+                    </tr>
+                  )}
+                  {itensCaixa.length > 0 && (
+                    <>
+                      {(itensEstrutura.length > 0 || itensLaje.length > 0) && (
+                        <tr>
+                          <td colSpan={6} className="pt-3 pb-1 text-xs font-semibold text-sky-700 uppercase">
+                            Caixa d&apos;água
+                          </td>
+                        </tr>
+                      )}
+                      {itensCaixa.map((i) => (
+                        <tr
+                          key={i.chave}
+                          className={`border-t border-slate-200 transition-colors duration-700 ${
+                            i.chave === chaveRecente ? "bg-emerald-100" : "bg-sky-50/40"
+                          }`}
+                        >
+                          <td className="py-1.5 pr-2">
+                            {i.nome}
+                            {!(Number(i.preco_unitario) > 0) && (
+                              <span className="ml-1 text-xs text-amber-700">(aguardando preço)</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 pr-2 text-slate-500">{i.unidade || "-"}</td>
+                          <td className="py-1.5 pr-2">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={i.quantidade}
+                              onChange={(e) => atualizarItem(i.chave, "quantidade", e.target.value)}
+                              className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          </td>
+                          <td className="py-1.5 pr-2">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={i.preco_unitario}
+                              onChange={(e) => atualizarItem(i.chave, "preco_unitario", e.target.value)}
+                              className="w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          </td>
+                          <td className="py-1.5 text-right whitespace-nowrap">
+                            {formatarMoeda((Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0))}
+                          </td>
+                          <td className="py-1.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => removerItem(i.chave)}
+                              className="text-red-600 hover:text-red-800 text-xs font-medium"
+                            >
+                              Remover
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="border-t border-slate-300">
+                        <td colSpan={4} className="py-1 text-right text-xs font-medium text-sky-700">
+                          Subtotal caixa d&apos;água
+                          {conjuntosCaixa.length > 0 &&
+                            ` (${conjuntosCaixa.map((g) => `${g.quantidade}× ${g.capacidade ? rotuloCapacidade(g.capacidade) : "peças"}`).join(" + ")})`}
+                        </td>
+                        <td className="py-1 text-right font-semibold whitespace-nowrap">
+                          {formatarMoeda(subtotalCaixa)}
+                        </td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} className="py-1 text-right text-xs font-medium text-sky-700">
+                          Com BDI ({margemNumerica}%)
+                        </td>
+                        <td className="py-1 text-right font-semibold whitespace-nowrap">
+                          {formatarMoeda(subtotalCaixa * fatorMargem)}
+                        </td>
+                        <td></td>
+                      </tr>
                     </>
                   )}
                 </tbody>
@@ -4954,6 +5213,17 @@ function OrcamentosGalpaoPageInterno() {
                   )}
                   <p className="text-[10px] text-slate-500">Prévia — igual sairá no orçamento impresso</p>
                 </div>
+              ) : soCaixa ? (
+                conjuntosCaixa.length > 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-center">
+                    <DesenhoGalpao semGalpao caixas={conjuntosCaixa} largura={300} />
+                    <p className="text-[10px] text-slate-500">Prévia — igual sairá no orçamento impresso</p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-400">
+                    Adicione um conjunto de caixa d&apos;água para ver a prévia aqui.
+                  </div>
+                )
               ) : vao && comprimento && peDireito ? (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-center">
                   <DesenhoGalpao
@@ -4983,6 +5253,7 @@ function OrcamentosGalpaoPageInterno() {
                         Number(i.quantidade) > 0
                     )}
                     areaLaje={areaLaje}
+                    caixas={conjuntosCaixa}
                     largura={300}
                   />
                   <p className="text-[10px] text-slate-500">
@@ -5216,9 +5487,10 @@ function OrcamentosGalpaoPageInterno() {
                           nome: item.composicoes_galpao?.nome || item.descricao_livre || "",
                         }));
                         const daEstrutura = ordenarItensPorPapel(
-                          todosItens.filter((item) => item.secao !== "laje"),
+                          todosItens.filter((item) => item.secao !== "laje" && item.secao !== SECAO_CAIXA),
                           ORDEM_ESTRUTURA
                         );
+                        const daCaixa = todosItens.filter((item) => item.secao === SECAO_CAIXA);
                         const daLaje = ordenarItensPorPapel(
                           todosItens.filter((item) => item.secao === "laje"),
                           ORDEM_LAJE
@@ -5231,7 +5503,7 @@ function OrcamentosGalpaoPageInterno() {
                             {formatarMoeda(item.quantidade * item.preco_unitario)}
                           </li>
                         );
-                        if (daLaje.length === 0) {
+                        if (daLaje.length === 0 && (daCaixa.length === 0 || daEstrutura.length === 0)) {
                           return (
                             <ul className="text-xs text-slate-600 space-y-1">
                               {todosItens.map(linhaItem)}
@@ -5246,13 +5518,25 @@ function OrcamentosGalpaoPageInterno() {
                             <ul className="text-xs text-slate-600 space-y-1 mb-2">
                               {daEstrutura.map(linhaItem)}
                             </ul>
-                            <p className="text-xs font-semibold text-emerald-700 uppercase mb-1">
-                              Estrutura da laje/mezanino
-                              {o.area_laje ? ` — ${o.area_laje} m²` : ""}
-                            </p>
-                            <ul className="text-xs text-slate-600 space-y-1">
-                              {daLaje.map(linhaItem)}
-                            </ul>
+                            {daLaje.length > 0 && (
+                              <>
+                                <p className="text-xs font-semibold text-emerald-700 uppercase mb-1">
+                                  Estrutura da laje/mezanino
+                                  {o.area_laje ? ` — ${o.area_laje} m²` : ""}
+                                </p>
+                                <ul className="text-xs text-slate-600 space-y-1 mb-2">
+                                  {daLaje.map(linhaItem)}
+                                </ul>
+                              </>
+                            )}
+                            {daCaixa.length > 0 && (
+                              <>
+                                <p className="text-xs font-semibold text-sky-700 uppercase mb-1">Caixa d&apos;água</p>
+                                <ul className="text-xs text-slate-600 space-y-1">
+                                  {daCaixa.map(linhaItem)}
+                                </ul>
+                              </>
+                            )}
                           </>
                         );
                       })()}
