@@ -116,8 +116,8 @@ export default function UsuariosPage() {
       <h1 className="text-2xl font-bold mb-1">Usuários</h1>
       <p className="text-slate-500 mb-6">
         Quem pode alterar preços (administrador) e quem lança a produção do dia. Quem só lança a produção, ao
-        entrar, vê apenas a tela da Produção. Pessoa nova: ela cria a conta em &quot;Criar conta&quot; na tela de entrada e
-        você libera aqui.
+        entrar, vê apenas a tela da Produção. Pessoa nova, senha esquecida ou bloqueio de acesso: só o dono do
+        sistema faz, na Central do Dono.
       </p>
 
       {erro && (

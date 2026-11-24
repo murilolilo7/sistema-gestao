@@ -323,6 +323,26 @@ export function useSouAdmin(chave) {
   return souAdmin;
 }
 
+// Dono do sistema (uma única conta, acima do administrador). null enquanto verifica.
+export function useSouDono(chave) {
+  const [souDono, setSouDono] = useState(null);
+  useEffect(() => {
+    let ativo = true;
+    supabase
+      .rpc("eh_dono")
+      .then(({ data }) => {
+        if (ativo) setSouDono(!!data);
+      })
+      .catch(() => {
+        if (ativo) setSouDono(false);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [chave]);
+  return souDono;
+}
+
 // Perfil da produção: { pode } = admin ou "lança produção";
 // { so } = só lança produção (não é admin) -> vê apenas a Produção.
 // Retorna null enquanto verifica.

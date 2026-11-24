@@ -35,70 +35,27 @@ const DESTAQUES = [
 ];
 
 export default function LoginPage() {
-  const [modo, setModo] = useState("entrar");
-  const [nomeCompleto, setNomeCompleto] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
-  const [mensagem, setMensagem] = useState("");
   const [carregando, setCarregando] = useState(false);
   const router = useRouter();
 
+  // Contas novas só são criadas pelo dono, na Central do Dono.
   async function handleSubmit(e) {
     e.preventDefault();
     setErro("");
-    setMensagem("");
     setCarregando(true);
-
-    if (modo === "entrar") {
-      const resultado = await supabase.auth.signInWithPassword({
-        email: email,
-        password: senha,
-      });
-      if (resultado.error) {
-        setErro(traduzErro(resultado.error.message));
-      } else {
-        router.replace("/");
-      }
+    const resultado = await supabase.auth.signInWithPassword({ email: email, password: senha });
+    if (resultado.error) {
+      setErro(traduzErro(resultado.error.message));
     } else {
-      if (!nomeCompleto.trim()) {
-        setErro("Informe seu nome completo.");
-        setCarregando(false);
-        return;
-      }
-      const resultado = await supabase.auth.signUp({
-        email: email,
-        password: senha,
-        options: { data: { nome_completo: nomeCompleto.trim() } },
-      });
-      if (resultado.error) {
-        setErro(traduzErro(resultado.error.message));
-      } else {
-        setMensagem("Conta criada! Confirme seu e-mail se for pedido, depois entre.");
-        setModo("entrar");
-        setNomeCompleto("");
-      }
+      router.replace("/");
     }
     setCarregando(false);
   }
 
-  function trocarModo(novoModo) {
-    setModo(novoModo);
-    setErro("");
-    setMensagem("");
-  }
-
-  const abaEntrarClasse =
-    modo === "entrar"
-      ? "flex-1 rounded-md py-1.5 transition bg-white shadow text-slate-900"
-      : "flex-1 rounded-md py-1.5 transition text-slate-500";
-
-  const abaCadastrarClasse =
-    modo === "cadastrar"
-      ? "flex-1 rounded-md py-1.5 transition bg-white shadow text-slate-900"
-      : "flex-1 rounded-md py-1.5 transition text-slate-500";
-
-  const textoBotao = carregando ? "Aguarde..." : modo === "entrar" ? "Entrar" : "Criar conta";
+  const textoBotao = carregando ? "Aguarde..." : "Entrar";
 
   const classeCampo =
     "w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500";
@@ -165,55 +122,20 @@ export default function LoginPage() {
 
           <div className="hidden md:block mb-6">
             <h2 className="text-2xl font-bold text-slate-900">
-              {modo === "entrar" ? "Bem-vindo de volta" : "Criar sua conta"}
+              Bem-vindo de volta
             </h2>
             <p className="text-sm text-slate-500 mt-1">
-              {modo === "entrar"
-                ? "Entre com seus dados para acessar o sistema."
-                : "Preencha os dados — o administrador libera o acesso."}
+              Entre com seus dados para acessar o sistema.
             </p>
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-            <div className="flex mb-5 rounded-lg bg-slate-100 p-1 text-sm font-medium">
-              <button type="button" onClick={() => trocarModo("entrar")} className={abaEntrarClasse}>
-                Entrar
-              </button>
-              <button
-                type="button"
-                onClick={() => trocarModo("cadastrar")}
-                className={abaCadastrarClasse}
-              >
-                Criar conta
-              </button>
-            </div>
-
             {erro ? (
               <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm">
                 {erro}
               </div>
             ) : null}
-            {mensagem ? (
-              <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 px-3 py-2 text-sm">
-                {mensagem}
-              </div>
-            ) : null}
-
             <form onSubmit={handleSubmit} className="space-y-3">
-              {modo === "cadastrar" && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Nome completo
-                  </label>
-                  <input
-                    type="text"
-                    value={nomeCompleto}
-                    onChange={(e) => setNomeCompleto(e.target.value)}
-                    className={classeCampo}
-                    placeholder="Seu nome e sobrenome"
-                  />
-                </div>
-              )}
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">E-mail</label>
                 <input
@@ -245,6 +167,9 @@ export default function LoginPage() {
                 {textoBotao}
               </button>
             </form>
+            <p className="mt-4 text-xs text-slate-500 text-center">
+              Não tem acesso ou esqueceu a senha? Fale com o responsável pelo sistema.
+            </p>
           </div>
         </div>
       </div>

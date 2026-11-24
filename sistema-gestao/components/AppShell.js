@@ -20,9 +20,10 @@ import {
   BarChart3,
   Ruler,
   HardHat,
+  Crown,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { Notificacoes, Confirmador, useSouAdmin, usePerfilProducao } from "@/components/Ui";
+import { Notificacoes, Confirmador, useSouAdmin, useSouDono, usePerfilProducao } from "@/components/Ui";
 
 // Estrutura do menu lateral: seções com ícones. Para adicionar uma nova
 // tela no futuro, basta incluir uma linha aqui.
@@ -64,6 +65,7 @@ const MENU = [
     itens: [
       { href: "/usuarios", label: "Usuários", icone: UserCog, adminOnly: true },
       { href: "/configuracoes", label: "Configurações", icone: Settings, adminOnly: true },
+      { href: "/central", label: "Central do Dono", icone: Crown, donoOnly: true },
     ],
   },
 ];
@@ -97,13 +99,14 @@ function ItemMenu({ href, label, icone: Icone, ativo, onClick }) {
   );
 }
 
-function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, onLogout, souAdmin, perfil }) {
+function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, onLogout, souAdmin, souDono, perfil }) {
   // Esconde itens exclusivos de admin (e seções que ficarem vazias).
-  // Quem só lança produção vê apenas a Produção.
+  // Quem só lança produção vê apenas a Produção. A Central só aparece para o dono.
   const soProducao = perfil?.so === true;
   const menuVisivel = MENU.map((secao) => ({
     ...secao,
     itens: secao.itens.filter((item) => {
+      if (item.donoOnly) return souDono === true;
       if (soProducao) return !!item.producao;
       if (item.producao) return souAdmin === true || perfil?.pode === true;
       return !item.adminOnly || souAdmin === true;
@@ -176,6 +179,28 @@ export default function AppShell({ children }) {
   const pathname = usePathname();
   const souAdmin = useSouAdmin(session?.user?.id);
   const perfil = usePerfilProducao(session?.user?.id);
+  const souDono = useSouDono(session?.user?.id);
+
+  // Conta bloqueada pelo dono: sai na hora, mesmo com a sessão ainda aberta.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    let ativo = true;
+    supabase.rpc("meu_acesso_bloqueado").then(({ data }) => {
+      if (!ativo || data !== true) return;
+      supabase.auth.signOut().then(() => {
+        try {
+          window.dispatchEvent(
+            new CustomEvent("ui:notificar", {
+              detail: { texto: "Seu acesso foi bloqueado. Fale com o responsável.", tipo: "erro" },
+            })
+          );
+        } catch (e) { /* ok */ }
+      });
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [session?.user?.id, pathname]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -253,6 +278,7 @@ export default function AppShell({ children }) {
           iniciaisUsuario={iniciaisUsuario}
           onLogout={handleLogout}
           souAdmin={souAdmin}
+          souDono={souDono}
           perfil={perfil}
         />
       </aside>
@@ -297,8 +323,9 @@ export default function AppShell({ children }) {
               nomeExibido={nomeExibido}
               iniciaisUsuario={iniciaisUsuario}
               onLogout={handleLogout}
-          souAdmin={souAdmin}
-          perfil={perfil}
+              souAdmin={souAdmin}
+              souDono={souDono}
+              perfil={perfil}
             />
           </div>
         </div>
