@@ -112,6 +112,9 @@ export function calcularDesenhoGalpao(dados) {
         ht: dim.h,
         material: g.material,
         rotulo: `${Number(g.capacidade).toLocaleString("pt-BR")} L${g.quantidade > 1 ? ` ×${g.quantidade}` : ""}`,
+        cotaAltura: Number(g.alturaPoste) > 0
+          ? `${Number(g.alturaPoste).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}M`
+          : null,
       };
     });
 
@@ -120,10 +123,12 @@ export function calcularDesenhoGalpao(dados) {
   if (!semGalpao || torres.length === 0)
     for (const x of [0, W])
       for (const y of [0, H + hcMax]) for (const z of [0, C]) cantos.push(proj(x, y, z));
+  // folga extra à direita de cada torre para a cota da altura
+  // (na tela, "para a direita" = x menor e z maior)
   for (const t of torres)
-    for (const dx of [-t.r, t.r])
-      for (const dz of [-t.r, t.r])
-        for (const y of [0, t.hp + 0.3 + t.ht]) cantos.push(proj(t.x + dx, y, t.z + dz));
+    for (const dx of [-t.r * 1.15 - 1, t.r * 1.15])
+      for (const dz of [-t.r * 1.15, t.r * 1.15 + 1])
+        for (const y of [0, t.hp + 0.14 + t.ht + 0.6]) cantos.push(proj(t.x + dx, y, t.z + dz));
   let minX = Infinity,
     maxX = -Infinity,
     minY = Infinity,
@@ -139,16 +144,20 @@ export function calcularDesenhoGalpao(dados) {
   // Margens assimétricas: sobra maior à esquerda e embaixo para as
   // cotas (altura, largura e comprimento) nunca saírem cortadas.
   const M_ESQ = 74;
-  const M_DIR = 22;
+  const M_DIR = torres.length > 0 ? 52 : 22; // caixa: espaço para a cota da altura
   const M_TOPO = 22;
   const M_BASE = 56;
   const esc = Math.min(
     (VB_L - M_ESQ - M_DIR) / (maxX - minX),
     (VB_A - M_TOPO - M_BASE) / (maxY - minY)
   );
+  // Só caixas d'água: centraliza o desenho (sobra igual dos dois lados).
+  const sobraX = semGalpao && torres.length > 0
+    ? Math.max(0, (VB_L - M_ESQ - M_DIR - (maxX - minX) * esc) / 2)
+    : 0;
   const T = (x, y, z) => {
     const p = proj(x, y, z);
-    return [(p[0] - minX) * esc + M_ESQ, (p[1] - minY) * esc + M_TOPO];
+    return [(p[0] - minX) * esc + M_ESQ + sobraX, (p[1] - minY) * esc + M_TOPO];
   };
 
   const CONCRETO = "#8f9aa6";
@@ -326,35 +335,108 @@ export function calcularDesenhoGalpao(dados) {
   }
   } // fim do galpão
 
-  // 7) Caixas d'água: poste, capitel (laje quadrada no topo) e o reservatório
-  // cilíndrico. Contorno de cada sólido = envoltória dos pontos projetados.
-  for (const t of torres) {
-    const e = 0.3; // espessura do capitel
-    const lado = t.r * 1.05;
-    linha(T(t.x, 0, t.z), T(t.x, t.hp, t.z), CONCRETO, wPilar * 1.3);
-    const capitel = [];
-    for (const y of [t.hp, t.hp + e])
-      for (const dx of [-lado, lado]) for (const dz of [-lado, lado]) capitel.push(T(t.x + dx, y, t.z + dz));
-    poligono(envoltoria(capitel), CONCRETO_CLARO, CONCRETO, 0.8);
-    const yTopoCap = t.hp + e;
+  // 7) Caixas d'água, como a MR7 monta (fotos do Murilo, 2026-11-24):
+  // bloco de fundação, poste de seção quadrada, luva no topo do poste,
+  // capitel em DISCO redondo com nervuras radiais por baixo e o reservatório
+  // cilíndrico (um pouco mais largo em cima, com anéis). Mesmo estilo do
+  // galpão: concreto em cinza claro, traço fino e cota de altura em verde.
+  // Ordem de pintura: do fundo para a frente (base -> poste -> nervuras ->
+  // disco -> caixa), para uma peça nunca "atravessar" a outra.
+  const FRENTE = [-0.3, -0.34]; // direção (x, z) que aponta para quem olha
+  const naFrente = (a) => Math.cos(a) * FRENTE[0] + Math.sin(a) * FRENTE[1] > 0;
+  const prisma = (cx, cz, meiaX, meiaZ, y0, y1, fill, topo) => {
+    const pts = [];
+    for (const y of [y0, y1])
+      for (const dx of [-meiaX, meiaX]) for (const dz of [-meiaZ, meiaZ]) pts.push(T(cx + dx, y, cz + dz));
+    poligono(envoltoria(pts), fill, CONCRETO, 0.8);
     poligono(
-      [T(t.x - lado, yTopoCap, t.z - lado), T(t.x + lado, yTopoCap, t.z - lado), T(t.x + lado, yTopoCap, t.z + lado), T(t.x - lado, yTopoCap, t.z + lado)],
-      "#dfe5ea",
+      [T(cx - meiaX, y1, cz - meiaZ), T(cx + meiaX, y1, cz - meiaZ), T(cx + meiaX, y1, cz + meiaZ), T(cx - meiaX, y1, cz + meiaZ)],
+      topo,
       CONCRETO,
       0.8
     );
-    const circulo = (y) =>
-      Array.from({ length: 28 }, (_, k) => {
-        const a = (k / 28) * Math.PI * 2;
-        return T(t.x + t.r * Math.cos(a), y, t.z + t.r * Math.sin(a));
-      });
-    const yBase = yTopoCap;
-    const yTopo = yBase + t.ht;
-    const cor = t.material === "POLIETILENO" ? ["#4f86b8", "#2f5f8a", "#7aa6cf"] : ["#9cc3dd", "#5b8db0", "#c4dcec"];
-    poligono(envoltoria([...circulo(yBase), ...circulo(yTopo)]), cor[0], cor[1], 1);
-    poligono(circulo(yTopo), cor[2], cor[1], 1);
-    const p = T(t.x, yTopo, t.z);
-    texto(p[0], p[1] - t.r * esc * 0.45 - 6, t.rotulo, "middle");
+    // aresta vertical da frente (dá o volume, como nos pilares do galpão)
+    linha(T(cx - meiaX, y0, cz - meiaZ), T(cx - meiaX, y1, cz - meiaZ), CONCRETO, 0.8);
+  };
+  const circulo = (cx, cz, r, y, n = 36) =>
+    Array.from({ length: n }, (_, k) => {
+      const a = (k / n) * Math.PI * 2;
+      return T(cx + r * Math.cos(a), y, cz + r * Math.sin(a));
+    });
+  const arcoDaFrente = (cx, cz, r, y, stroke, w) => {
+    const n = 48;
+    for (let k = 0; k < n; k++) {
+      const a0 = (k / n) * Math.PI * 2;
+      const a1 = ((k + 1) / n) * Math.PI * 2;
+      if (naFrente((a0 + a1) / 2))
+        linha(T(cx + r * Math.cos(a0), y, cz + r * Math.sin(a0)), T(cx + r * Math.cos(a1), y, cz + r * Math.sin(a1)), stroke, w);
+    }
+  };
+
+  for (const t of torres) {
+    const { x: cx, z: cz } = t;
+    const meioPoste = 0.17; // poste ~0,35 x 0,35
+    const rDisco = t.r * 1.12;
+    const eDisco = 0.18;
+    const yDisco = t.hp; // face de baixo do disco
+    const yCaixa = yDisco + eDisco;
+    const yTopo = yCaixa + t.ht;
+
+    // bloco de fundação aparente no chão
+    prisma(cx, cz, 0.55, 0.55, 0, 0.35, "#e3e8ec", "#eef1f4");
+    // poste de seção quadrada
+    prisma(cx, cz, meioPoste, meioPoste, 0.35, yDisco - 0.9, "#e9edf0", "#f8fafc");
+    // nervuras radiais sob o disco (8, como no capitel da foto): triângulos
+    // que saem da luva e morrem na borda do disco
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      const rIni = 0.3;
+      poligono(
+        [
+          T(cx + rIni * ca, yDisco, cz + rIni * sa),
+          T(cx + rDisco * 0.97 * ca, yDisco, cz + rDisco * 0.97 * sa),
+          T(cx + rIni * ca, yDisco - 0.85, cz + rIni * sa),
+        ],
+        naFrente(a) ? "#dfe5ea" : "#cfd7de",
+        CONCRETO,
+        0.7
+      );
+    }
+    // luva (encaixe do capitel no topo do poste)
+    prisma(cx, cz, 0.3, 0.3, yDisco - 0.9, yDisco, "#dfe5ea", "#eef1f4");
+    // disco do capitel: espessura (contorno) + face de cima
+    poligono(envoltoria([...circulo(cx, cz, rDisco, yDisco), ...circulo(cx, cz, rDisco, yCaixa)]), "#d5dce2", CONCRETO, 0.9);
+    poligono(circulo(cx, cz, rDisco, yCaixa), "#eef1f4", CONCRETO, 0.9);
+
+    // reservatório: tronco de cone suave (base 94% do topo), com anéis
+    const rBase = t.r * 0.94;
+    const cor =
+      t.material === "POLIETILENO"
+        ? { corpo: "#4f7fae", traco: "#2f5c86", tampa: "#86aed3", anel: "#3d6d99" }
+        : { corpo: "#5aa7d4", traco: "#2f7aa6", tampa: "#a7d3ec", anel: "#3f8fbf" };
+    poligono(envoltoria([...circulo(cx, cz, rBase, yCaixa), ...circulo(cx, cz, t.r, yTopo)]), cor.corpo, cor.traco, 1);
+    for (const f of [0.36, 0.68]) {
+      const rA = rBase + (t.r - rBase) * f;
+      arcoDaFrente(cx, cz, rA, yCaixa + t.ht * f, cor.anel, 0.8);
+    }
+    poligono(circulo(cx, cz, t.r, yTopo), cor.tampa, cor.traco, 1);
+    poligono(circulo(cx, cz, t.r * 0.35, yTopo + 0.08, 24), cor.tampa, cor.traco, 0.8); // tampa de inspeção
+
+    // capacidade em cima e cota da altura do poste (verde, como no galpão)
+    const pTopo = T(cx, yTopo, cz);
+    texto(pTopo[0], pTopo[1] - t.r * esc * 0.42 - 8, t.rotulo, "middle");
+    if (t.cotaAltura) {
+      const ref = T(cx + rDisco, 0, cz + rDisco);
+      const a0 = T(cx, 0, cz);
+      const a1 = T(cx, yDisco, cz);
+      const xC = Math.max(ref[0], a0[0]) + 12;
+      linha([xC, a0[1]], [xC, a1[1]], VERDE, 1);
+      linha([xC - 4, a0[1]], [xC + 4, a0[1]], VERDE, 1);
+      linha([xC - 4, a1[1]], [xC + 4, a1[1]], VERDE, 1);
+      texto(xC + 6, (a0[1] + a1[1]) / 2 + 3, t.cotaAltura, "start");
+    }
   }
 
   return { viewBoxLargura: VB_L, viewBoxAltura: VB_A, formas };
