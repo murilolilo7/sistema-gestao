@@ -296,7 +296,7 @@ function AbaPessoas({ pessoas, funcoes, setores, vagas = [], recarregar, souAdmi
         </div>
       </form>
 
-      <FuncoesESetores funcoes={funcoes} setores={setores} pessoas={pessoas} recarregar={recarregar} />
+      <FuncoesESetores funcoes={funcoes} setores={setores} pessoas={pessoas} recarregar={recarregar} souAdmin={souAdmin} />
 
       <BonusVagas vagas={vagas} pessoas={pessoas} setores={setores} recarregar={recarregar} />
 
@@ -348,7 +348,7 @@ function AbaPessoas({ pessoas, funcoes, setores, vagas = [], recarregar, souAdmi
 
 // Função e setor novos: a fábrica cria sem depender do administrador. A função
 // nasce sem salário (o administrador preenche em Preços → Mão de obra).
-function FuncoesESetores({ funcoes, setores, pessoas, recarregar }) {
+function FuncoesESetores({ funcoes, setores, pessoas, recarregar, souAdmin }) {
   const [aberto, setAberto] = useState(false);
   const [funcao, setFuncao] = useState("");
   const [setor, setSetor] = useState("");
@@ -401,6 +401,20 @@ function FuncoesESetores({ funcoes, setores, pessoas, recarregar }) {
     return true;
   }
 
+  async function excluirSetor(s) {
+    const ok = await confirmar({
+      titulo: `Excluir o setor ${s.rotulo}?`,
+      texto: "Só dá para excluir setor sem ninguém cadastrado e sem lançamento no histórico. Não dá para desfazer.",
+      confirmarTexto: "Excluir",
+      perigoso: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.rpc("producao_excluir_setor", { setor_input: s.id });
+    if (error) return notificar(error.message, "erro");
+    notificar(`Setor ${s.rotulo} excluído.`);
+    recarregar();
+  }
+
   async function alternarSetor(s) {
     const emUso = pessoas.filter((p) => p.ativo && p.setor === s.id).length;
     if (s.ativo !== false && emUso > 0)
@@ -429,14 +443,22 @@ function FuncoesESetores({ funcoes, setores, pessoas, recarregar }) {
         <div className="grid gap-4 border-t border-slate-100 p-4 md:grid-cols-2">
           <div>
             <p className="text-sm font-medium text-slate-700 mb-1">Funções</p>
-            <p className="text-xs text-slate-500 mb-2">
-              {funcoes.map((f) => f.funcao.charAt(0) + f.funcao.slice(1).toLowerCase()).join(" · ")}
-            </p>
             {semSalario.length > 0 && (
               <p className="text-xs text-amber-700 mb-2">
-                Sem salário cadastrado (o administrador preenche): {semSalario.map((f) => f.funcao).join(", ")}
+                Sem salário cadastrado{souAdmin ? "" : " (o administrador preenche)"}: {semSalario.map((f) => f.funcao).join(", ")}
               </p>
             )}
+            <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {funcoes.map((f) => (
+                <LinhaFuncao
+                  key={`${f.id}:${f.salario_bruto}:${f.encargos_pct}`}
+                  f={f}
+                  pessoas={pessoas.filter((p) => p.funcao_id === f.id).length}
+                  souAdmin={souAdmin}
+                  recarregar={recarregar}
+                />
+              ))}
+            </ul>
             <form onSubmit={criarFuncao} className="flex gap-2">
               <input
                 value={funcao}
@@ -460,6 +482,7 @@ function FuncoesESetores({ funcoes, setores, pessoas, recarregar }) {
                   key={`${s.id}:${s.regra}:${s.valorDia}:${s.ativo}`}
                   s={s}
                   alternar={() => alternarSetor(s)}
+                  excluir={() => excluirSetor(s)}
                   salvarRegra={(rasc) => salvarRegra(s, rasc)}
                 />
               ))}
@@ -535,7 +558,89 @@ function EscolhaRegra({ valor, aoMudar, nome = "regra-nova" }) {
   );
 }
 
-function LinhaSetor({ s, alternar, salvarRegra }) {
+// Função: nome, quantas pessoas, salário e encargos (só o administrador mexe no salário)
+function LinhaFuncao({ f, pessoas, souAdmin, recarregar }) {
+  const inicial = { salario: paraTexto(f.salario_bruto ?? 0), encargos: paraTexto(f.encargos_pct ?? 68) };
+  const [r, setR] = useState(inicial);
+  const [salvando, setSalvando] = useState(false);
+  const mudou = r.salario.trim() !== inicial.salario || r.encargos.trim() !== inicial.encargos;
+  const nome = f.funcao.charAt(0) + f.funcao.slice(1).toLowerCase();
+
+  async function salvar() {
+    const salario = lerNumero(r.salario);
+    const encargos = lerNumero(r.encargos);
+    if (salario === null || salario < 0) return notificar("Salário inválido.", "erro");
+    if (encargos === null || encargos < 0) return notificar("Encargos inválidos.", "erro");
+    setSalvando(true);
+    const { error } = await supabase.from("mao_de_obra").update({ salario_bruto: salario, encargos_pct: encargos }).eq("id", f.id);
+    setSalvando(false);
+    if (error) return notificar("Não foi possível salvar: " + error.message, "erro");
+    notificar(`Salário de ${nome} salvo. Vale para o custo e para os preços que usam essa função.`);
+    recarregar();
+  }
+
+  async function excluir() {
+    const ok = await confirmar({
+      titulo: `Excluir a função ${nome}?`,
+      texto: "Só dá para excluir função que ninguém usa (pessoas, receitas de peças e custo do pilar). Não dá para desfazer.",
+      confirmarTexto: "Excluir",
+      perigoso: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.rpc("producao_excluir_funcao", { funcao_input: f.id });
+    if (error) return notificar(error.message, "erro");
+    notificar(`Função ${nome} excluída.`);
+    recarregar();
+  }
+
+  return (
+    <li className={`px-3 py-2 ${mudou ? "bg-amber-50/60" : ""}`}>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-medium text-slate-800">{nome}</span>
+        <span className="text-xs text-slate-500">
+          {pessoas} {pessoas === 1 ? "pessoa" : "pessoas"}
+        </span>
+        {souAdmin && (
+          <span className="inline-flex flex-wrap items-center gap-1 text-xs text-slate-600">
+            salário R$
+            <input
+              value={r.salario}
+              onChange={(e) => setR({ ...r, salario: e.target.value })}
+              inputMode="decimal"
+              className="w-24 rounded border border-slate-300 px-1.5 py-0.5 text-sm"
+            />
+            encargos
+            <input
+              value={r.encargos}
+              onChange={(e) => setR({ ...r, encargos: e.target.value })}
+              inputMode="decimal"
+              className="w-14 rounded border border-slate-300 px-1.5 py-0.5 text-sm"
+            />
+            %
+          </span>
+        )}
+        <span className="ml-auto inline-flex gap-2">
+          {mudou ? (
+            <>
+              <button onClick={salvar} disabled={salvando} className="rounded bg-emerald-600 px-2.5 py-1 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
+                Salvar
+              </button>
+              <button onClick={() => setR(inicial)} className="rounded border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                Desfazer
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={excluir} className="text-xs text-rose-500 underline hover:text-rose-700">
+              Excluir
+            </button>
+          )}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function LinhaSetor({ s, alternar, excluir, salvarRegra }) {
   const [editando, setEditando] = useState(false);
   const [rasc, setRasc] = useState({ regra: s.regra, valor: s.valorDia === null ? "" : paraTexto(s.valorDia) });
   const inativo = s.ativo === false;
@@ -556,6 +661,9 @@ function LinhaSetor({ s, alternar, salvarRegra }) {
             )}
             <button type="button" onClick={alternar} className="text-xs text-slate-500 underline">
               {inativo ? "Reativar" : "Desativar"}
+            </button>
+            <button type="button" onClick={excluir} className="text-xs text-rose-500 underline hover:text-rose-700">
+              Excluir
             </button>
           </span>
         )}
