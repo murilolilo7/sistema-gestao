@@ -237,6 +237,9 @@ function PremioMensal({ linha, salvar }) {
   const mudou = texto.trim() !== inicial;
   const valor = texto.trim() ? lerNumero(texto) : 0;
   return (
+    <>
+    {/* no papel sai o valor (o campo de digitar só existe na tela) */}
+    <span className="hidden print:inline">{linha.premioMensal ? brl(linha.premioMensal) : ""}</span>
     <span className="inline-flex items-center gap-1 print:hidden">
       <input
         value={texto}
@@ -255,6 +258,7 @@ function PremioMensal({ linha, salvar }) {
         </button>
       )}
     </span>
+    </>
   );
 }
 
