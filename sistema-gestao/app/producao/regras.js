@@ -60,6 +60,12 @@ export function valorFixoDoDia(presenca, setores = SETORES) {
   return (Number(valor) || 0) * fatorDoDia(presenca.situacao);
 }
 
+// Tarefa extra do dia (ex.: Qualidade): valor do dia inteiro guardado no dia
+// × fração feita (1 = dia inteiro, 0,5 = meio dia).
+export function valorTarefaDoDia(t) {
+  return (Number(t?.valor) || 0) * (Number(t?.fracao) === 0.5 ? 0.5 : 1);
+}
+
 // A meta do dia foi batida? Dia sem meta (histórico) não tem trava.
 export function metaBatida(m3, meta) {
   const m = Number(meta);
@@ -236,6 +242,8 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES, bonus = 
         premioConcretagem: 0,
         premioArmacao: 0,
         premioFixo: 0,
+        premioTarefas: 0,
+        tarefas: {},
         pecasArmadas: 0,
         armadasPorPeca: {},
         premioMensal: 0,
@@ -243,13 +251,14 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES, bonus = 
     return pessoas.get(id);
   };
   const noSetor = (r, setor) =>
-    (r.porSetor[setor] ||= { dias: 0, meios: 0, semPremio: 0, faltas: 0, premio: 0, pecas: 0 });
+    (r.porSetor[setor] ||= { dias: 0, meios: 0, semPremio: 0, faltas: 0, premio: 0, pecas: 0, tarefas: {} });
   const tot = {
     diasComProducao: 0,
     m3: 0,
     premioConcretagem: 0,
     premioArmacao: 0,
     premioFixo: 0,
+    premioTarefas: 0,
     pecasConcretadas: 0,
     pecasArmadas: 0,
     diasSemPremioMeta: 0,
@@ -258,6 +267,7 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES, bonus = 
   const somaSetor = (setor, v) => (porSetorTot[setor] = (porSetorTot[setor] || 0) + v);
   const porPecaConcretada = new Map();
   const porPecaArmada = new Map();
+  const porTarefa = {};
 
   for (const d of dias) {
     const pres = d.producao_presencas || [];
@@ -322,6 +332,25 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES, bonus = 
       tot.pecasArmadas += q;
       porPecaArmada.set(a.peca_id, (porPecaArmada.get(a.peca_id) || 0) + q);
     }
+
+    // Tarefas extras: a pessoa continua no setor dela e ganha só o valor da tarefa
+    for (const t of d.producao_dia_tarefas || []) {
+      const v = valorTarefaDoDia(t);
+      const fr = Number(t.fracao) === 0.5 ? 0.5 : 1;
+      const r = pegar(t.colaborador_id);
+      const setor = pres.find((x) => x.colaborador_id === t.colaborador_id)?.setor || "OUTRO";
+      const s = noSetor(r, setor);
+      const soma = (m) => {
+        const x = (m[t.tarefa_id] ||= { dias: 0, valor: 0 });
+        x.dias += fr;
+        x.valor += v;
+      };
+      soma(r.tarefas);
+      soma(s.tarefas);
+      soma(porTarefa);
+      r.premioTarefas += v;
+      tot.premioTarefas += v;
+    }
   }
 
   let premioMensal = 0;
@@ -348,7 +377,8 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES, bonus = 
     premioConcretagem: arred(r.premioConcretagem),
     premioArmacao: arred(r.premioArmacao),
     premioFixo: arred(r.premioFixo),
-    total: arred(r.premioConcretagem + r.premioArmacao + r.premioFixo + r.premioMensal),
+    premioTarefas: arred(r.premioTarefas),
+    total: arred(r.premioConcretagem + r.premioArmacao + r.premioFixo + r.premioTarefas + r.premioMensal),
   }));
   return {
     linhas,
@@ -358,10 +388,12 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES, bonus = 
       premioConcretagem: arred(tot.premioConcretagem),
       premioArmacao: arred(tot.premioArmacao),
       premioFixo: arred(tot.premioFixo),
+      premioTarefas: arred(tot.premioTarefas),
       premioMensal: arred(premioMensal),
-      total: arred(tot.premioConcretagem + tot.premioArmacao + tot.premioFixo + premioMensal),
+      total: arred(tot.premioConcretagem + tot.premioArmacao + tot.premioFixo + tot.premioTarefas + premioMensal),
     },
     porSetor: Object.fromEntries(Object.entries(porSetorTot).map(([k, v]) => [k, arred(v)])),
+    porTarefa,
     porPecaConcretada,
     porPecaArmada,
   };
@@ -375,6 +407,7 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES, bonus = 
 //   armação: custo de cada R$ 1 de prêmio = (custo dos armadores + prêmios) ÷ prêmios
 // Setores sem prêmio por peça (concretagem, sem divisão, valor fixo por dia)
 // entram no custo por m³; setores por peça (armação) ficam na armação.
+// Tarefas extras (ex.: Qualidade) são despesa das peças: entram no custo por m³.
 export function custoMaoObraMes(resumo, custoMensalPorPessoa, setores = SETORES) {
   const ehArm = (id) => regraDoSetor(id, setores) === "POR_PECA";
   const ehEquipe = (id) => regraDoSetor(id, setores) === "EQUIPE_META";
@@ -409,7 +442,7 @@ export function custoMaoObraMes(resumo, custoMensalPorPessoa, setores = SETORES)
   const diasArm = (r) => Object.entries(r.diasPorSetor).reduce((s, [k, d]) => s + (ehArm(k) ? d : 0), 0);
   const diasOutros = (r) => Object.entries(r.diasPorSetor).reduce((s, [k, d]) => s + (ehArm(k) ? 0 : d), 0);
   const premioMensalConc = resumo.linhas.filter((r) => diasOutros(r) >= diasArm(r)).reduce((s, r) => s + r.premioMensal, 0);
-  const premiosConc = t.premioConcretagem + (t.premioFixo || 0) + premioMensalConc;
+  const premiosConc = t.premioConcretagem + (t.premioFixo || 0) + (t.premioTarefas || 0) + premioMensalConc;
   const custoConc = setor.CONCRETAGEM.custo + premiosConc;
   const custoArm = setor.ARMACAO.custo + t.premioArmacao + (t.premioMensal - premioMensalConc);
   return {

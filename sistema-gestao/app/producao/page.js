@@ -39,6 +39,7 @@ function buscarTudo() {
     supabase.from("producao_parametros").select("*").eq("id", 1).maybeSingle(),
     supabase.from("producao_bonus_vagas").select("*").order("ordem").order("id"),
     supabase.from("producao_bonus_historico").select("*").order("desde").order("id"),
+    supabase.from("producao_tarefas_extras").select("*").order("ordem").order("id"),
   ]);
 }
 
@@ -53,12 +54,13 @@ function ProducaoPage({ souAdmin }) {
     parametros: null,
     vagas: [],
     historicoBonus: [],
+    tarefas: [],
   });
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  function aplicar([p, c, f, st, pr, vg, hb]) {
-    const falha = p.error || c.error || f.error || st.error || pr.error || vg.error || hb.error;
+  function aplicar([p, c, f, st, pr, vg, hb, tx]) {
+    const falha = p.error || c.error || f.error || st.error || pr.error || vg.error || hb.error || tx.error;
     if (falha) setErro("Não foi possível carregar: " + falha.message);
     else
       setDados({
@@ -68,6 +70,7 @@ function ProducaoPage({ souAdmin }) {
         setores: listaSetores(st.data),
         vagas: vg.data || [],
         historicoBonus: hb.data || [],
+        tarefas: tx.data || [],
         parametros: pr.data || {
           premio_concretagem_pessoa: 14,
           meta_m3_padrao: 7,
@@ -125,6 +128,7 @@ function ProducaoPage({ souAdmin }) {
           setores={dados.setores}
           parametros={dados.parametros}
           vagas={dados.vagas}
+          tarefas={dados.tarefas}
           data={dataDia}
           irParaData={setDataDia}
         />
@@ -136,6 +140,7 @@ function ProducaoPage({ souAdmin }) {
           setores={dados.setores}
           parametros={dados.parametros}
           historicoBonus={dados.historicoBonus}
+          tarefas={dados.tarefas}
           souAdmin={souAdmin}
           abrirDia={(d) => {
             setDataDia(d > hojeISO() ? hojeISO() : d);
@@ -148,6 +153,7 @@ function ProducaoPage({ souAdmin }) {
           funcoes={dados.funcoes}
           setores={dados.setores}
           vagas={dados.vagas}
+          tarefas={dados.tarefas}
           recarregar={recarregar}
           souAdmin={souAdmin}
         />
@@ -201,7 +207,7 @@ async function nomeLiberado(nome, pessoas, idIgnorar = null) {
   return true;
 }
 
-function AbaPessoas({ pessoas, funcoes, setores, vagas = [], recarregar, souAdmin }) {
+function AbaPessoas({ pessoas, funcoes, setores, vagas = [], tarefas = [], recarregar, souAdmin }) {
   const [novo, setNovo] = useState({ nome: "", funcao_id: "", setor: "CONCRETAGEM" });
   const [salvando, setSalvando] = useState(false);
   const [verInativos, setVerInativos] = useState(false);
@@ -296,7 +302,14 @@ function AbaPessoas({ pessoas, funcoes, setores, vagas = [], recarregar, souAdmi
         </div>
       </form>
 
-      <FuncoesESetores funcoes={funcoes} setores={setores} pessoas={pessoas} recarregar={recarregar} souAdmin={souAdmin} />
+      <FuncoesESetores
+        funcoes={funcoes}
+        setores={setores}
+        pessoas={pessoas}
+        tarefas={tarefas}
+        recarregar={recarregar}
+        souAdmin={souAdmin}
+      />
 
       <BonusVagas vagas={vagas} pessoas={pessoas} setores={setores} recarregar={recarregar} />
 
@@ -348,7 +361,7 @@ function AbaPessoas({ pessoas, funcoes, setores, vagas = [], recarregar, souAdmi
 
 // Função e setor novos: a fábrica cria sem depender do administrador. A função
 // nasce sem salário (o administrador preenche em Preços → Mão de obra).
-function FuncoesESetores({ funcoes, setores, pessoas, recarregar, souAdmin }) {
+function FuncoesESetores({ funcoes, setores, pessoas, tarefas = [], recarregar, souAdmin }) {
   const [aberto, setAberto] = useState(false);
   const [funcao, setFuncao] = useState("");
   const [setor, setSetor] = useState("");
@@ -436,7 +449,9 @@ function FuncoesESetores({ funcoes, setores, pessoas, recarregar, souAdmin }) {
       >
         <span className="text-sm font-medium text-slate-700">Funções e setores</span>
         <span className="text-xs text-slate-500">
-          {funcoes.length} funções · {setores.filter((s) => s.ativo !== false).length} setores {aberto ? "▲" : "▼"}
+          {funcoes.length} funções · {setores.filter((s) => s.ativo !== false).length} setores ·{" "}
+          {tarefas.filter((t) => t.ativo).length} {tarefas.filter((t) => t.ativo).length === 1 ? "tarefa extra" : "tarefas extras"}{" "}
+          {aberto ? "▲" : "▼"}
         </span>
       </button>
       {aberto && (
@@ -503,9 +518,169 @@ function FuncoesESetores({ funcoes, setores, pessoas, recarregar, souAdmin }) {
               </button>
             </form>
           </div>
+          <TarefasExtras tarefas={tarefas} recarregar={recarregar} />
         </div>
       )}
     </div>
+  );
+}
+
+// Tarefas extras do dia (ex.: Qualidade): quem faz continua no setor dele e,
+// nos dias em que fez, ganha o valor da tarefa (meio dia = metade).
+function TarefasExtras({ tarefas, recarregar }) {
+  const [nova, setNova] = useState({ nome: "", valor: "" });
+  const [salvando, setSalvando] = useState(false);
+
+  async function criar(e) {
+    e.preventDefault();
+    const nome = nomeLimpo(nova.nome);
+    const valor = lerNumero(nova.valor);
+    if (!nome) return notificar("Digite o nome da tarefa.", "erro");
+    if (tarefas.some((t) => nomeLimpo(t.nome).toUpperCase() === nome.toUpperCase()))
+      return notificar(`A tarefa "${nome}" já existe.`, "erro");
+    if (valor === null || valor < 0) return notificar("Digite o valor por dia (R$).", "erro");
+    setSalvando(true);
+    const { data: quem } = await supabase.rpc("nome_usuario_atual");
+    const { error } = await supabase
+      .from("producao_tarefas_extras")
+      .insert({ nome, valor, ordem: tarefas.length + 1, atualizado_por_nome: quem || null });
+    setSalvando(false);
+    if (error) return notificar("Não foi possível criar: " + error.message, "erro");
+    notificar(`Tarefa ${nome} criada.`);
+    setNova({ nome: "", valor: "" });
+    recarregar();
+  }
+
+  return (
+    <div className="md:col-span-2 border-t border-slate-100 pt-4">
+      <p className="text-sm font-medium text-slate-700 mb-1">Tarefas extras do dia</p>
+      <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+        {tarefas.length === 0 && <li className="px-3 py-2 text-sm text-slate-400">Nenhuma tarefa extra cadastrada.</li>}
+        {tarefas.map((t) => (
+          <LinhaTarefa key={`${t.id}:${t.nome}:${t.valor}:${t.ativo}`} t={t} recarregar={recarregar} />
+        ))}
+      </ul>
+      <form onSubmit={criar} className="flex flex-wrap items-center gap-2">
+        <input
+          value={nova.nome}
+          onChange={(e) => setNova({ ...nova, nome: e.target.value })}
+          placeholder="Nova tarefa, ex.: Limpeza das formas"
+          className={`${ESTILO_INPUT} max-w-xs`}
+        />
+        <span className="text-sm text-slate-600">R$</span>
+        <input
+          value={nova.valor}
+          onChange={(e) => setNova({ ...nova, valor: e.target.value })}
+          inputMode="decimal"
+          placeholder="0,00"
+          className="w-24 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+        />
+        <span className="text-sm text-slate-600">por dia</span>
+        <button
+          disabled={salvando}
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          + Criar tarefa
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function LinhaTarefa({ t, recarregar }) {
+  const [editando, setEditando] = useState(false);
+  const [rasc, setRasc] = useState({ nome: t.nome, valor: paraTexto(t.valor) });
+  const inativo = !t.ativo;
+
+  async function salvar() {
+    const nome = nomeLimpo(rasc.nome);
+    const valor = lerNumero(rasc.valor);
+    if (!nome) return notificar("Digite o nome da tarefa.", "erro");
+    if (valor === null || valor < 0) return notificar("Valor inválido.", "erro");
+    const { data: quem } = await supabase.rpc("nome_usuario_atual");
+    const { error } = await supabase
+      .from("producao_tarefas_extras")
+      .update({ nome, valor, atualizado_em: new Date().toISOString(), atualizado_por_nome: quem || null })
+      .eq("id", t.id);
+    if (error) return notificar("Não foi possível salvar: " + error.message, "erro");
+    notificar(`Tarefa ${nome} salva. O valor novo vale para os próximos dias lançados.`);
+    setEditando(false);
+    recarregar();
+  }
+
+  async function alternar() {
+    const { error } = await supabase.from("producao_tarefas_extras").update({ ativo: inativo }).eq("id", t.id);
+    if (error) return notificar("Não foi possível alterar: " + error.message, "erro");
+    notificar(inativo ? `Tarefa ${t.nome} reativada.` : `Tarefa ${t.nome} desativada.`);
+    recarregar();
+  }
+
+  async function excluir() {
+    const ok = await confirmar({
+      titulo: `Excluir a tarefa ${t.nome}?`,
+      texto: "Só dá para excluir tarefa que nunca foi lançada em nenhum dia. Não dá para desfazer.",
+      confirmarTexto: "Excluir",
+      perigoso: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.rpc("producao_excluir_tarefa", { tarefa_input: t.id });
+    if (error) return notificar(error.message, "erro");
+    notificar(`Tarefa ${t.nome} excluída.`);
+    recarregar();
+  }
+
+  return (
+    <li className="px-3 py-2">
+      {editando ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <input
+            value={rasc.nome}
+            onChange={(e) => setRasc({ ...rasc, nome: e.target.value })}
+            className="rounded border border-slate-300 px-2 py-1 text-sm"
+          />
+          <span className="text-slate-600">R$</span>
+          <input
+            value={rasc.valor}
+            onChange={(e) => setRasc({ ...rasc, valor: e.target.value })}
+            inputMode="decimal"
+            className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
+          />
+          <span className="text-slate-600">por dia</span>
+          <span className="ml-auto inline-flex gap-2">
+            <button onClick={salvar} className="rounded bg-emerald-600 px-2.5 py-1 text-xs text-white hover:bg-emerald-700">
+              Salvar
+            </button>
+            <button
+              onClick={() => {
+                setRasc({ nome: t.nome, valor: paraTexto(t.valor) });
+                setEditando(false);
+              }}
+              className="rounded border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"
+            >
+              Desfazer
+            </button>
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className={`font-medium ${inativo ? "text-slate-400 line-through" : "text-slate-800"}`}>{t.nome}</span>
+          <span className="text-xs text-slate-500">{brl(t.valor)} por dia feito</span>
+          <span className="ml-auto inline-flex gap-3">
+            {!inativo && (
+              <button type="button" onClick={() => setEditando(true)} className="text-xs text-emerald-700 underline">
+                Mudar
+              </button>
+            )}
+            <button type="button" onClick={alternar} className="text-xs text-slate-500 underline">
+              {inativo ? "Reativar" : "Desativar"}
+            </button>
+            <button type="button" onClick={excluir} className="text-xs text-rose-500 underline hover:text-rose-700">
+              Excluir
+            </button>
+          </span>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -524,11 +699,13 @@ function conferirRegra({ regra, valor }) {
   return { regra_premio: regra, valor_dia: v };
 }
 
-function EscolhaRegra({ valor, aoMudar, nome = "regra-nova" }) {
+function EscolhaRegra({ valor, aoMudar, nome = "regra-nova", regraAtual = null }) {
+  // "valor fixo por dia" saiu: quem faz algo a mais em alguns dias usa Tarefa extra do dia
+  const opcoes = REGRAS_PREMIO.filter((r) => r.id !== "FIXO_DIA" || regraAtual === "FIXO_DIA");
   return (
     <fieldset className="space-y-1">
       <legend className="text-xs font-medium text-slate-600 mb-1">Como esse setor ganha prêmio</legend>
-      {REGRAS_PREMIO.map((r) => (
+      {opcoes.map((r) => (
         <label key={r.id} className="flex items-start gap-2 text-sm text-slate-700">
           <input
             type="radio"
@@ -670,7 +847,7 @@ function LinhaSetor({ s, alternar, excluir, salvarRegra }) {
       </div>
       {editando && (
         <div className="mt-2 space-y-2 rounded-lg bg-slate-50 p-2">
-          <EscolhaRegra valor={rasc} aoMudar={setRasc} nome={`regra-${s.id}`} />
+          <EscolhaRegra valor={rasc} aoMudar={setRasc} nome={`regra-${s.id}`} regraAtual={s.regra} />
           <button
             type="button"
             onClick={async () => (await salvarRegra(rasc)) && setEditando(false)}

@@ -39,7 +39,7 @@ function somarMeses(ym, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-const SELECT_DIA = "*, producao_presencas(*), producao_concretagem_pecas(*), producao_armacao(*)";
+const SELECT_DIA = "*, producao_presencas(*), producao_concretagem_pecas(*), producao_armacao(*), producao_dia_tarefas(*)";
 
 function buscarPeriodo(mesIni, mesFim) {
   return Promise.all([
@@ -62,7 +62,7 @@ const CONTEUDOS = [
   { id: "grade", rotulo: "Mês em grade (dia a dia)" },
 ];
 
-export default function Relatorios({ pessoas, pecas, funcoes, setores, parametros, historicoBonus = [], souAdmin, abrirDia }) {
+export default function Relatorios({ pessoas, pecas, funcoes, setores, parametros, historicoBonus = [], tarefas = [], souAdmin, abrirDia }) {
   const [mes, setMes] = useState(hojeISO().slice(0, 7));
   const [selecao, setSelecao] = useState({
     fora: [], // setores desmarcados
@@ -98,6 +98,7 @@ export default function Relatorios({ pessoas, pecas, funcoes, setores, parametro
         setores={setores}
         parametros={parametros}
         historicoBonus={historicoBonus}
+        tarefas={tarefas}
         selecao={selecao}
         setSelecao={setSelecao}
         souAdmin={souAdmin}
@@ -123,7 +124,7 @@ export default function Relatorios({ pessoas, pecas, funcoes, setores, parametro
 
 // ------------------------------------------------------------------ mês
 
-function RelatorioMes({ mes, pessoas, pecas, setores, parametros, historicoBonus, selecao, setSelecao, souAdmin, abrirDia }) {
+function RelatorioMes({ mes, pessoas, pecas, setores, parametros, historicoBonus, tarefas, selecao, setSelecao, souAdmin, abrirDia }) {
   const [dias, setDias] = useState(null);
   const [premios, setPremios] = useState([]);
   const [metaMensal, setMetaMensal] = useState(null);
@@ -197,6 +198,7 @@ function RelatorioMes({ mes, pessoas, pecas, setores, parametros, historicoBonus
     pessoas,
     pecas,
     setores,
+    tarefas,
     parametros,
     metaMensal: metaMensal ?? parametros?.meta_mensal_m3 ?? 140,
     salvarMetaMensal,
@@ -290,6 +292,7 @@ function RelatorioDosSetores({
   pessoas,
   pecas,
   setores,
+  tarefas = [],
   parametros,
   metaMensal,
   salvarMetaMensal,
@@ -308,19 +311,34 @@ function RelatorioDosSetores({
   const setorDe = (id) => pessoas.find((p) => p.id === id)?.setor || "OUTRO";
   const pecaDe = (id) => pecas.find((p) => p.id === id)?.nome || `#${id}`;
   const soma = (l, campo) => ids.reduce((s, id) => s + (l.porSetor[id]?.[campo] || 0), 0);
+  // tarefa extra (ex.: Qualidade) feita por quem estava nesses setores
+  const tarefaNoGrupo = (l, tid, campo) => ids.reduce((s, id) => s + (l.porSetor[id]?.tarefas?.[tid]?.[campo] || 0), 0);
+  const idsTarefas = [
+    ...new Set(
+      resumo.linhas.flatMap((l) => ids.flatMap((id) => Object.keys(l.porSetor[id]?.tarefas || {}).map(Number)))
+    ),
+  ];
+  const colunasTarefa = idsTarefas
+    .map((id) => tarefas.find((t) => t.id === id) || { id, nome: `Tarefa #${id}`, ordem: 999 })
+    .sort((a, b) => (a.ordem ?? 100) - (b.ordem ?? 100) || a.id - b.id);
 
   // pessoas que trabalharam (ou faltaram) nesses setores; prêmio mensal fica no setor da pessoa
   const linhas = resumo.linhas
     .map((l) => {
       const mensal = ids.includes(setorDe(l.colaborador_id)) ? l.premioMensal : 0;
       const premios = Object.fromEntries(colunasPremio.map((s) => [s.id, l.porSetor[s.id]?.premio || 0]));
-      const totalPremios = Object.values(premios).reduce((a, b) => a + b, 0);
+      const premiosTarefa = Object.fromEntries(colunasTarefa.map((t) => [t.id, tarefaNoGrupo(l, t.id, "valor")]));
+      const diasTarefa = Object.fromEntries(colunasTarefa.map((t) => [t.id, tarefaNoGrupo(l, t.id, "dias")]));
+      const totalPremios =
+        Object.values(premios).reduce((a, b) => a + b, 0) + Object.values(premiosTarefa).reduce((a, b) => a + b, 0);
       return {
         ...l,
         diasG: soma(l, "dias"),
         meiosG: soma(l, "meios"),
         faltasG: soma(l, "faltas"),
         premios,
+        premiosTarefa,
+        diasTarefa,
         mensal,
         totalG: Math.round((totalPremios + mensal) * 100) / 100,
         aparece: ids.some((id) => l.porSetor[id]) || mensal > 0,
@@ -333,6 +351,7 @@ function RelatorioDosSetores({
         nomeDe(a.colaborador_id).localeCompare(nomeDe(b.colaborador_id))
     );
   const totalColuna = (id) => linhas.reduce((s, l) => s + (l.premios[id] || 0), 0);
+  const totalTarefa = (id) => linhas.reduce((s, l) => s + (l.premiosTarefa[id] || 0), 0);
   const totalMensal = linhas.reduce((s, l) => s + l.mensal, 0);
   const totalGeral = linhas.reduce((s, l) => s + l.totalG, 0);
   const meta = metaDoMes(dias, parametros?.meta_m3_padrao ?? 7, metaMensal);
@@ -392,6 +411,11 @@ function RelatorioDosSetores({
                       {s.rotulo}
                     </th>
                   ))}
+                  {colunasTarefa.map((t) => (
+                    <th key={`t${t.id}`} className="py-2 px-2 font-medium text-right" title="Tarefa extra do dia">
+                      {t.nome}
+                    </th>
+                  ))}
                   <th className="py-2 px-2 font-medium text-right">Prêmio mensal</th>
                   <th className="py-2 pl-2 font-medium text-right">Total</th>
                 </tr>
@@ -414,6 +438,17 @@ function RelatorioDosSetores({
                         ) : null}
                       </td>
                     ))}
+                    {colunasTarefa.map((t) => (
+                      <td key={`t${t.id}`} className="py-1.5 px-2 text-right">
+                        {l.premiosTarefa[t.id] ? brl(l.premiosTarefa[t.id]) : ""}
+                        {l.diasTarefa[t.id] ? (
+                          <span className="text-[10px] text-slate-400">
+                            {" "}
+                            ({num(l.diasTarefa[t.id], 1)} {l.diasTarefa[t.id] === 1 ? "dia" : "dias"})
+                          </span>
+                        ) : null}
+                      </td>
+                    ))}
                     <td className="py-1.5 px-2 text-right">
                       {ids.includes(setorDe(l.colaborador_id)) ? (
                         <PremioMensal key={`${l.colaborador_id}:${l.premioMensal}`} linha={l} salvar={salvarPremioMensal} />
@@ -431,6 +466,11 @@ function RelatorioDosSetores({
                   {colunasPremio.map((s) => (
                     <td key={s.id} className="py-2 px-2 text-right">
                       {brl(totalColuna(s.id))}
+                    </td>
+                  ))}
+                  {colunasTarefa.map((t) => (
+                    <td key={`t${t.id}`} className="py-2 px-2 text-right">
+                      {brl(totalTarefa(t.id))}
                     </td>
                   ))}
                   <td className="py-2 px-2 text-right">{brl(totalMensal)}</td>
@@ -753,7 +793,7 @@ function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores, parametros, 
   return (
     <Bloco
       titulo="Custo real da mão de obra (últimos 12 meses) — só administrador"
-      texto="O salário da função de cada pessoa (com encargos) é repartido entre os setores pelos dias em que ela foi marcada em cada um, e somado aos prêmios. Concretagem: custo ÷ m³ do mês, contando também quem está em setor sem divisão de prêmio ou com valor por dia (ex.: Supervisão, Qualidade). Armação: quanto custa cada R$ 1 de prêmio pago (salários + prêmios ÷ prêmios). Feriados e paradas entram sozinhos: o mês com menos produção fica mais caro."
+      texto="O salário da função de cada pessoa (com encargos) é repartido entre os setores pelos dias em que ela foi marcada em cada um, e somado aos prêmios. Concretagem: custo ÷ m³ do mês, contando também quem está em setor sem divisão de prêmio (ex.: Supervisão, Montagem) e as tarefas extras do dia (ex.: Qualidade). Armação: quanto custa cada R$ 1 de prêmio pago (salários + prêmios ÷ prêmios). Feriados e paradas entram sozinhos: o mês com menos produção fica mais caro."
     >
       {linhas.length === 0 ? (
         <p className="text-sm text-slate-400">Sem lançamentos no período.</p>
@@ -773,7 +813,7 @@ function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores, parametros, 
                   <th className="py-2 px-2 font-medium text-right">m³</th>
                   <th className="py-2 px-2 font-medium text-center">Equipe</th>
                   <th className="py-2 px-2 font-medium text-right">Salários + encargos</th>
-                  <th className="py-2 px-2 font-medium text-right" title="Já somado nos salários: quem trabalhou em setor sem divisão de prêmio (ex.: Supervisão, Qualidade)">
+                  <th className="py-2 px-2 font-medium text-right" title="Já somado nos salários: quem trabalhou em setor sem divisão de prêmio (ex.: Supervisão, Montagem)">
                     dos quais outros setores
                   </th>
                   <th className="py-2 px-2 font-medium text-right">Prêmios</th>

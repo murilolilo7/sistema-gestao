@@ -359,3 +359,42 @@ test("custo por m³ conta o salário de quem está em setor sem divisão", () =>
   assert.equal(c.armacao.salarios, 3000);
   assert.equal(c.concretagem.porM3, r2((6000 + 14) / 10));
 });
+
+// ---------------------------------------------------------------- tarefas extras (ex.: Qualidade)
+import { valorTarefaDoDia } from "./regras.js";
+
+test("tarefa extra: dia inteiro paga o valor, meio dia paga metade", () => {
+  assert.equal(valorTarefaDoDia({ valor: 14, fracao: 1 }), 14);
+  assert.equal(valorTarefaDoDia({ valor: 14, fracao: 0.5 }), 7);
+  assert.equal(valorTarefaDoDia({ valor: "14", fracao: "0.5" }), 7);
+});
+
+test("tarefa extra: pessoa fica no setor dela (sem divisão) e ganha só a tarefa; entra no custo por m³", () => {
+  const dia = (data, fracao) => ({
+    data,
+    m3_concretado: 8,
+    meta_m3: 7,
+    premio_por_pessoa: 14,
+    producao_presencas: [
+      { colaborador_id: 1, setor: "CONCRETAGEM", situacao: "P" },
+      { colaborador_id: 35, setor: "MONTAGEM", situacao: "P" },
+    ],
+    producao_concretagem_pecas: [],
+    producao_armacao: [],
+    producao_dia_tarefas: fracao ? [{ tarefa_id: 7, colaborador_id: 35, fracao, valor: 14 }] : [],
+  });
+  const r = resumoMes([dia("2026-12-01", 1), dia("2026-12-02", 0.5), dia("2026-12-03", null)], [], SETORES_TESTE);
+  const marcos = r.linhas.find((l) => l.colaborador_id === 35);
+  assert.equal(marcos.premioConcretagem, 0);
+  assert.equal(marcos.premioTarefas, 21);
+  assert.equal(marcos.total, 21);
+  assert.equal(marcos.dias, 3);
+  assert.deepEqual(marcos.tarefas[7], { dias: 1.5, valor: 21 });
+  assert.deepEqual(marcos.porSetor.MONTAGEM.tarefas[7], { dias: 1.5, valor: 21 });
+  // a equipe da concretagem tem só 1 pessoa: 14 × 1 por dia, sem divisão com quem está na Montagem
+  assert.equal(r.linhas.find((l) => l.colaborador_id === 1).premioConcretagem, 42);
+  assert.equal(r.totais.premioTarefas, 21);
+  assert.equal(r.totais.total, 63);
+  const c = custoMaoObraMes(r, () => 0, SETORES_TESTE);
+  assert.equal(c.concretagem.premios, 63);
+});

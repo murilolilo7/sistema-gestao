@@ -16,6 +16,7 @@ import {
   metaBatida,
   metaDoMes,
   valorFixoDoDia,
+  valorTarefaDoDia,
 } from "./regras";
 
 const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -40,12 +41,12 @@ function dataPorExtenso(iso) {
 export function buscarDia(data) {
   return supabase
     .from("producao_dias")
-    .select("*, producao_presencas(*), producao_concretagem_pecas(*), producao_armacao(*)")
+    .select("*, producao_presencas(*), producao_concretagem_pecas(*), producao_armacao(*), producao_dia_tarefas(*)")
     .eq("data", data)
     .maybeSingle();
 }
 
-export default function Lancamento({ pessoas, pecas, setores = SETORES, parametros, vagas = [], data, irParaData }) {
+export default function Lancamento({ pessoas, pecas, setores = SETORES, parametros, vagas = [], tarefas = [], data, irParaData }) {
   const [sujo, setSujo] = useState(false);
   // Trocar o dia não pode jogar a tela para o topo: guarda onde a pessoa
   // estava (ex.: no item 4) e a altura do conteúdo enquanto o dia novo carrega.
@@ -123,6 +124,7 @@ export default function Lancamento({ pessoas, pecas, setores = SETORES, parametr
           setores={setores}
           parametros={parametros}
           vagas={vagas}
+          tarefas={tarefas}
           aoSujar={setSujo}
           aoCarregar={aoCarregarDia}
         />
@@ -136,7 +138,7 @@ function buscarMes(data) {
   const ini = `${data.slice(0, 7)}-01`;
   return supabase
     .from("producao_dias")
-    .select("*, producao_presencas(*), producao_concretagem_pecas(*), producao_armacao(*)")
+    .select("*, producao_presencas(*), producao_concretagem_pecas(*), producao_armacao(*), producao_dia_tarefas(*)")
     .gte("data", ini)
     .lte("data", data)
     .neq("data", data);
@@ -146,7 +148,9 @@ function estadoInicial(dia, parametros) {
   const pres = {};
   const conc = {};
   const arm = {};
+  const tar = {};
   for (const p of dia?.producao_presencas || []) pres[p.colaborador_id] = { situacao: p.situacao, setor: p.setor };
+  for (const t of dia?.producao_dia_tarefas || []) tar[`${t.tarefa_id}:${t.colaborador_id}`] = Number(t.fracao) === 0.5 ? 0.5 : 1;
   for (const c of dia?.producao_concretagem_pecas || []) conc[c.peca_id] = paraTexto(c.quantidade);
   for (const a of dia?.producao_armacao || []) arm[`${a.colaborador_id}:${a.peca_id}`] = paraTexto(a.quantidade);
   // Meta de m³: dia novo já vem com a meta padrão (7); dia antigo (importado) sem meta fica vazio.
@@ -161,14 +165,14 @@ function estadoInicial(dia, parametros) {
     tem(dia?.premio_por_pessoa) ? dia.premio_por_pessoa : parametros?.premio_concretagem_pessoa ?? PREMIO_PESSOA_PADRAO
   );
   const premioFixo = paraTexto(tem(informado) ? informado : "");
-  return { m3: paraTexto(dia?.m3_concretado), meta, modoConc, premioPessoa, premioFixo, obs: dia?.observacao || "", pres, conc, arm };
+  return { m3: paraTexto(dia?.m3_concretado), meta, modoConc, premioPessoa, premioFixo, obs: dia?.observacao || "", pres, conc, arm, tar };
 }
 
 const META_PADRAO = 7;
 const PREMIO_PESSOA_PADRAO = 14;
 const META_MENSAL_PADRAO = 140;
 
-function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], aoSujar, aoCarregar }) {
+function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], tarefas = [], aoSujar, aoCarregar }) {
   const [dia, setDia] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [r, setR] = useState(estadoInicial(null, parametros));
@@ -267,10 +271,35 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
     })
   );
 
+  // Tarefas extras do dia: valor guardado no dia (mudar o valor depois não muda o passado)
+  const valorTarSalvo = Object.fromEntries(
+    (dia?.producao_dia_tarefas || []).map((t) => [`${t.tarefa_id}:${t.colaborador_id}`, Number(t.valor)])
+  );
+  const trabalhaHoje = (id) => r.pres[id]?.situacao === "P" || r.pres[id]?.situacao === "M";
+  const tarefasDoDia = tarefas.filter((t) => t.ativo || Object.keys(r.tar).some((k) => k.startsWith(`${t.id}:`)));
+  const tarefasLanc = Object.entries(r.tar)
+    .map(([k, fracao]) => {
+      const [tarefa_id, colaborador_id] = k.split(":").map(Number);
+      const t = tarefas.find((x) => x.id === tarefa_id);
+      const valor = valorTarSalvo[k] ?? Number(t?.valor || 0);
+      return { tarefa_id, colaborador_id, fracao, valor, valido: !!t && trabalhaHoje(colaborador_id) };
+    })
+    .map((x) => ({ ...x, valorHoje: x.valido ? valorTarefaDoDia(x) : 0 }));
+  const tarDe = {};
+  for (const x of tarefasLanc) tarDe[x.colaborador_id] = (tarDe[x.colaborador_id] || 0) + x.valorHoje;
+  const totalTarHoje = tarefasLanc.reduce((s, x) => s + x.valorHoje, 0);
+
   const armadores = pessoasDoDia.filter((p) => ehArmador(r.pres[p.id]));
   const avisos = avisosDoDia({ m3: lerNumero(r.m3), presencas, concretagem, armacao, pecas, premioFixo: fixo, setores });
   if (fixo && !(premioConcCheio > 0) && equipe.some((e) => e.situacao === "P" || e.situacao === "M"))
     avisos.push("O prêmio da concretagem do dia está zerado.");
+  const tarFora = tarefasLanc.filter((x) => !x.valido);
+  if (tarFora.length)
+    avisos.push(
+      `Tarefa extra de quem não está trabalhando hoje (não vai ser salva): ${tarFora
+        .map((x) => pessoas.find((p) => p.id === x.colaborador_id)?.nome || `#${x.colaborador_id}`)
+        .join(", ")}.`
+    );
   // Meta do mês: dias já salvos + o dia da tela
   const bonusTotal = vagas.filter((v) => v.ativo && v.colaborador_id).reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const metaMes = metaDoMes(
@@ -294,13 +323,14 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
     ...equipe.map((e) => e.colaborador_id),
     ...armacao.map((a) => a.colaborador_id),
     ...presencas.filter((p) => fixoDe[p.colaborador_id] > 0).map((p) => p.colaborador_id),
+    ...tarefasLanc.filter((x) => x.valorHoje > 0).map((x) => x.colaborador_id),
     ...mesLinhas.keys(),
   ]);
   const premiosPessoa = [...idsPremio]
     .map((id) => {
       const hojeConc = parteDe[id] || 0;
       const hojeArm = premioArmDe(id);
-      const hojeFixo = fixoDe[id] || 0;
+      const hojeFixo = (fixoDe[id] || 0) + (tarDe[id] || 0);
       const m = mesLinhas.get(id);
       return {
         id,
@@ -311,7 +341,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
         hoje: hojeConc + hojeArm + hojeFixo,
         mesConc: (m?.premioConcretagem || 0) + hojeConc,
         mesArm: (m?.premioArmacao || 0) + hojeArm,
-        mesFixo: (m?.premioFixo || 0) + hojeFixo,
+        mesFixo: (m?.premioFixo || 0) + (m?.premioTarefas || 0) + hojeFixo,
       };
     })
     .map((x) => ({ ...x, mes: x.mesConc + x.mesArm + x.mesFixo }))
@@ -325,6 +355,15 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
       if (pres[p.id]?.situacao === situacao) delete pres[p.id];
       else pres[p.id] = { situacao, setor: pres[p.id]?.setor || p.setor };
       return { ...a, pres };
+    });
+  }
+  function marcarTarefa(tarefaId, colaboradorId, fracao) {
+    mudar((a) => {
+      const tar = { ...a.tar };
+      const k = `${tarefaId}:${colaboradorId}`;
+      if (fracao) tar[k] = fracao;
+      else delete tar[k];
+      return { ...a, tar };
     });
   }
   function setorDoDia(p, setor) {
@@ -376,6 +415,9 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
         presencas: presencas.map(({ colaborador_id, setor, situacao }) => ({ colaborador_id, setor, situacao })),
         concretagem,
         armacao,
+        tarefas: tarefasLanc
+          .filter((x) => x.valido)
+          .map(({ tarefa_id, colaborador_id, fracao }) => ({ tarefa_id, colaborador_id, fracao })),
       },
     });
     setSalvando(false);
@@ -389,7 +431,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
   async function apagar() {
     const ok = await confirmar({
       titulo: "Apagar o lançamento deste dia?",
-      texto: "Some tudo deste dia: presenças, m³ e peças. Não dá para desfazer.",
+      texto: "Some tudo deste dia: presenças, m³, peças e tarefas extras. Não dá para desfazer.",
       confirmarTexto: "Apagar o dia",
       perigoso: true,
     });
@@ -788,9 +830,97 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
         )}
       </Secao>
 
-      {/* ---------------- 4. Prêmio de cada um ---------------- */}
+      {/* ---------------- 4. Tarefas extras do dia ---------------- */}
+      {tarefasDoDia.length > 0 && (
+        <Secao
+          numero="4"
+          titulo="Tarefas extras do dia"
+          resumo={tarefasLanc.length ? `hoje ${brl(totalTarHoje)}` : "ninguém marcado"}
+        >
+          <div className="grid gap-3 lg:grid-cols-2">
+            {tarefasDoDia.map((t) => {
+              const feitos = tarefasLanc.filter((x) => x.tarefa_id === t.id);
+              const livres = pessoasDoDia.filter(
+                (p) => trabalhaHoje(p.id) && !feitos.some((x) => x.colaborador_id === p.id)
+              );
+              return (
+                <div key={t.id} className="rounded-lg border border-slate-200 p-3">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <p className="text-sm font-medium text-slate-700">{t.nome}</p>
+                    <span className="text-xs text-slate-500">{brl(t.valor)} por dia</span>
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const id = Number(e.target.value);
+                        if (id) marcarTarefa(t.id, id, r.pres[id]?.situacao === "M" ? 0.5 : 1);
+                      }}
+                      className="ml-auto rounded border border-slate-300 px-2 py-1 text-sm text-slate-700"
+                    >
+                      <option value="">+ quem fez hoje</option>
+                      {livres.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.nome} ({rotuloSetor(r.pres[p.id].setor, setores)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {feitos.length === 0 ? (
+                    <p className="text-xs text-slate-400">Ninguém fez hoje.</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {feitos.map((x) => {
+                        const p = pessoas.find((pp) => pp.id === x.colaborador_id);
+                        return (
+                          <li key={x.colaborador_id} className="flex flex-wrap items-center gap-2 text-sm">
+                            <span className="flex-1 min-w-32 text-slate-700">
+                              {p?.nome || `#${x.colaborador_id}`}{" "}
+                              {x.valido ? (
+                                <span className="text-xs text-slate-400">({rotuloSetor(r.pres[x.colaborador_id].setor, setores)})</span>
+                              ) : (
+                                <span className="text-xs text-rose-600">· não está trabalhando hoje</span>
+                              )}
+                            </span>
+                            <span className="inline-flex rounded-md border border-slate-300 overflow-hidden">
+                              {[
+                                [1, "Dia inteiro"],
+                                [0.5, "Meio dia"],
+                              ].map(([f, rot]) => (
+                                <button
+                                  key={f}
+                                  type="button"
+                                  onClick={() => marcarTarefa(t.id, x.colaborador_id, f)}
+                                  className={`px-2 py-0.5 text-xs ${
+                                    x.fracao === f ? "bg-emerald-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  {rot}
+                                </button>
+                              ))}
+                            </span>
+                            <span className="w-20 text-right font-medium">{brl(x.valorHoje)}</span>
+                            <button
+                              type="button"
+                              onClick={() => marcarTarefa(t.id, x.colaborador_id, null)}
+                              title="Tirar da tarefa"
+                              className="text-slate-400 hover:text-rose-600"
+                            >
+                              ✕
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Secao>
+      )}
+
+      {/* ---------------- Prêmio de cada um ---------------- */}
       <Secao
-        numero="4"
+        numero={tarefasDoDia.length > 0 ? "5" : "4"}
         titulo="Prêmio de cada um"
         resumo={`hoje ${brl(premiosPessoa.reduce((s, x) => s + x.hoje, 0))} · no mês ${brl(premiosPessoa.reduce((s, x) => s + x.mes, 0))}`}
       >
@@ -827,7 +957,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
                     <>
                       <th className="py-1.5 px-2 font-medium text-right">Concretagem hoje</th>
                       <th className="py-1.5 px-2 font-medium text-right">Armação hoje</th>
-                      {temFixo && <th className="py-1.5 px-2 font-medium text-right">Valor por dia hoje</th>}
+                      {temFixo && <th className="py-1.5 px-2 font-medium text-right">Tarefa extra hoje</th>}
                       <th className="py-1.5 px-2 font-medium text-right">Total hoje</th>
                     </>
                   )}
@@ -835,7 +965,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
                     <>
                       <th className="py-1.5 px-2 font-medium text-right">Concretagem no mês</th>
                       <th className="py-1.5 px-2 font-medium text-right">Armação no mês</th>
-                      {temFixo && <th className="py-1.5 px-2 font-medium text-right">Valor por dia no mês</th>}
+                      {temFixo && <th className="py-1.5 px-2 font-medium text-right">Tarefa extra no mês</th>}
                       <th className="py-1.5 px-2 font-medium text-right">Total no mês</th>
                     </>
                   )}
@@ -896,8 +1026,8 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], 
         )}
       </Secao>
 
-      {/* ---------------- 5. Observação ---------------- */}
-      <Secao numero="5" titulo="Observação do dia (opcional)">
+      {/* ---------------- Observação ---------------- */}
+      <Secao numero={tarefasDoDia.length > 0 ? "6" : "5"} titulo="Observação do dia (opcional)">
         <textarea
           value={r.obs}
           onChange={(e) => mudar((a) => ({ ...a, obs: e.target.value }))}
