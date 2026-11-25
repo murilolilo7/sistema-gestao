@@ -58,6 +58,10 @@ export function papelDoItem(item) {
   if (nome.startsWith("FUNDAÇÃO") || nome.startsWith("FUNDACAO")) return "FUNDACAO";
   if (nome.startsWith("MONTAGEM")) return "MONTAGEM";
   if (nome.startsWith("LAJE")) return "LAJE";
+  // Caixa d'água (o poste com altura livre diferente entra sem catálogo)
+  if (nome.startsWith("POSTE")) return "POSTE";
+  if (nome.startsWith("CAPITEL")) return "CAPITEL";
+  if (nome.startsWith("CAIXA D")) return "CAIXA_AGUA";
   return null;
 }
 

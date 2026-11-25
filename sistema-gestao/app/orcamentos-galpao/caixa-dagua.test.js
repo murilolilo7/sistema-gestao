@@ -11,6 +11,7 @@ import {
   somarNaLista,
   conjuntosDaLista,
   descricaoConjunto,
+  precoPostePorAltura,
 } from "./caixa-dagua.js";
 
 // Catálogo como está no banco (nomes reais)
@@ -82,4 +83,28 @@ test("agrupa por tamanho para a proposta e o desenho", () => {
   assert.equal(g[1].total, 2 * (3043.49 + 2105.03 + 5000));
   assert.equal(descricaoConjunto(g[1]), "Conjunto caixa d'água 10.000 L — poste, capitel e caixa de polietileno");
   assert.equal(descricaoConjunto(g[0]), "Conjunto caixa d'água 5.000 L — poste e caixa de fibra");
+});
+
+test("altura livre: poste vendido por 6 m livre; outra altura muda nome e preço pelo comprimento", () => {
+  const cat = [
+    { id: 29, nome: "POSTE P/ESTRUTURA CAIXA D'ÁGUA 5.000L — 6,00M LIVRE", papel: "POSTE", unidade: "UN", preco: 1691.57 },
+    { id: 56, nome: "CAIXA D'ÁGUA FIBRA 5.000L", papel: "CAIXA_AGUA", unidade: "UN", preco: 3000 },
+  ];
+  // 6 m: item do catálogo, sem mudança
+  const seis = itensDoConjunto({ composicoes: cat, capacidade: 5000, material: "FIBRA", quantidade: 1, alturaLivre: "6" });
+  assert.equal(seis.itens[0].composicao_id, 29);
+  assert.equal(seis.itens[0].preco_unitario, 1691.57);
+  // 8 m: peça de 9,50 m em vez de 7,50 m
+  const oito = itensDoConjunto({ composicoes: cat, capacidade: 5000, material: "FIBRA", quantidade: 2, alturaLivre: "8,00" });
+  assert.equal(oito.itens[0].composicao_id, null);
+  assert.equal(oito.itens[0].nome, "POSTE P/ESTRUTURA CAIXA D'ÁGUA 5.000L — 8,00M LIVRE");
+  assert.equal(oito.itens[0].preco_unitario, precoPostePorAltura(1691.57, 8));
+  assert.equal(precoPostePorAltura(1691.57, 8), 2142.66);
+  assert.equal(precoPostePorAltura(1691.57, 7), 1917.11);
+  // o desenho e a proposta leem a altura livre pelo nome
+  assert.equal(conjuntosDaLista(oito.itens)[0].alturaLivre, 8);
+  // somar o mesmo poste de 8 m de novo aumenta a quantidade (não duplica linha)
+  let k = 1;
+  const l = somarNaLista(somarNaLista([], oito.itens, () => k++), oito.itens, () => k++);
+  assert.deepEqual(l.map((i) => i.quantidade), [4, 4]);
 });

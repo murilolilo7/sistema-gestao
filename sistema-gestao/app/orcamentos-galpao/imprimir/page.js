@@ -200,6 +200,9 @@ function papelDaPeca(item) {
   if (nome.startsWith("TELHA")) return "TELHA";
   if (nome.startsWith("CALHA")) return "CALHA";
   if (nome.startsWith("LAJE")) return "LAJE";
+  if (nome.startsWith("POSTE")) return "POSTE";
+  if (nome.startsWith("CAPITEL")) return "CAPITEL";
+  if (nome.startsWith("CAIXA D")) return "CAIXA_AGUA";
   return null;
 }
 
@@ -412,11 +415,11 @@ function ConteudoImpressao() {
   const especificacoesCaixa = [
     { rotulo: "Caixa d'água", valor: textoCaixas || "-" },
     {
-      rotulo: "Poste",
+      rotulo: "Poste (altura livre)",
       valor:
         conjuntosCaixa
-          .filter((g) => g.alturaPoste)
-          .map((g) => `${formatarMedida(g.alturaPoste)}M`)
+          .filter((g) => g.alturaLivre)
+          .map((g) => `${formatarMedida(g.alturaLivre)}M`)
           .filter((v, i, a) => a.indexOf(v) === i)
           .join(" / ") || "-",
     },

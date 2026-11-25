@@ -106,15 +106,15 @@ export function calcularDesenhoGalpao(dados) {
       const dim = DIMENSOES_CAIXA.find((d) => g.capacidade <= d.ate) || DIMENSOES_CAIXA[DIMENSOES_CAIXA.length - 1];
       return {
         x: semGalpao ? 0 : -4,
-        z: semGalpao ? k * 6 : C + 3.5 + k * 6,
-        hp: Math.max(3, Number(g.alturaPoste) || 6),
+        z: semGalpao ? k * 8 : C + 3.5 + k * 8, // espaço para a cota "6,00M LIVRE" não encostar na vizinha
+        // altura LIVRE do poste (o que o cliente compra); a fundação de 1,50 m fica enterrada
+        hp: Math.max(3, Number(g.alturaLivre) || 6),
+        rDisco: g.capacidade <= 5000 ? 2.27 / 2 : Math.max(2.7 / 2, (dim.d / 2) * 1.05),
         r: dim.d / 2,
         ht: dim.h,
         material: g.material,
         rotulo: `${Number(g.capacidade).toLocaleString("pt-BR")} L${g.quantidade > 1 ? ` ×${g.quantidade}` : ""}`,
-        cotaAltura: Number(g.alturaPoste) > 0
-          ? `${Number(g.alturaPoste).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}M`
-          : null,
+        cotaAltura: `${(Number(g.alturaLivre) || 6).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}M LIVRE`,
       };
     });
 
@@ -144,7 +144,7 @@ export function calcularDesenhoGalpao(dados) {
   // Margens assimétricas: sobra maior à esquerda e embaixo para as
   // cotas (altura, largura e comprimento) nunca saírem cortadas.
   const M_ESQ = 74;
-  const M_DIR = torres.length > 0 ? 52 : 22; // caixa: espaço para a cota da altura
+  const M_DIR = torres.length > 0 ? 86 : 22;
   const M_TOPO = 22;
   const M_BASE = 56;
   const esc = Math.min(
@@ -376,7 +376,7 @@ export function calcularDesenhoGalpao(dados) {
   for (const t of torres) {
     const { x: cx, z: cz } = t;
     const meioPoste = 0.17; // poste ~0,35 x 0,35
-    const rDisco = t.r * 1.12;
+    const rDisco = t.rDisco; // capitel real: 5.000 L Ø 2,27 m; demais Ø 2,70 m
     const eDisco = 0.18;
     const yDisco = t.hp; // face de baixo do disco
     const yCaixa = yDisco + eDisco;
@@ -386,10 +386,10 @@ export function calcularDesenhoGalpao(dados) {
     prisma(cx, cz, 0.55, 0.55, 0, 0.35, "#e3e8ec", "#eef1f4");
     // poste de seção quadrada
     prisma(cx, cz, meioPoste, meioPoste, 0.35, yDisco - 0.9, "#e9edf0", "#f8fafc");
-    // nervuras radiais sob o disco (8, como no capitel da foto): triângulos
-    // que saem da luva e morrem na borda do disco
-    for (let k = 0; k < 8; k++) {
-      const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+    // nervuras radiais sob o disco (6, como nos projetos do capitel):
+    // triângulos que saem da luva e morrem na borda do disco
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2 + Math.PI / 6;
       const ca = Math.cos(a);
       const sa = Math.sin(a);
       const rIni = 0.3;

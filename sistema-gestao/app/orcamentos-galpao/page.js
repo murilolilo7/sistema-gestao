@@ -24,6 +24,9 @@ import {
   somarNaLista,
   conjuntosDaLista,
   alturaDoPoste,
+  precoPostePorAltura,
+  ALTURA_LIVRE_PADRAO,
+  FUNDACAO_POSTE,
 } from "./caixa-dagua";
 // Regras de cálculo (testadas em calculos.test.js). Ficam num arquivo à parte
 // para que os testes protejam EXATAMENTE o que o sistema usa.
@@ -442,6 +445,7 @@ function OrcamentosGalpaoPageInterno() {
   const [caixaMaterial, setCaixaMaterial] = useState("FIBRA");
   const [caixaPosteId, setCaixaPosteId] = useState("");
   const [caixaQtd, setCaixaQtd] = useState("1");
+  const [caixaAlturaLivre, setCaixaAlturaLivre] = useState(String(ALTURA_LIVRE_PADRAO));
   const [caixaAvisos, setCaixaAvisos] = useState([]);
   const [perdaTelha, setPerdaTelha] = useState("10"); // % de perda da telha (editável)
   const [chaveRecente, setChaveRecente] = useState(null); // realce da linha recém-adicionada
@@ -1530,6 +1534,7 @@ function OrcamentosGalpaoPageInterno() {
       material: caixaMaterial,
       posteId: caixaPosteId,
       quantidade: caixaQtd,
+      alturaLivre: caixaAlturaLivre,
     });
     setCaixaAvisos(avisos);
     if (novos.length === 0) return;
@@ -4598,21 +4603,29 @@ function OrcamentosGalpaoPageInterno() {
                     ))}
                   </select>
                 </div>
+                {pecasCaixaEscolhida.postes.length > 1 && (
                 <div>
                   <label className={labelClasse}>Poste</label>
                   <select
                     value={caixaPosteId || String(pecasCaixaEscolhida.postes[0]?.id || "")}
                     onChange={(e) => setCaixaPosteId(e.target.value)}
                     className={campoClasse}
-                    disabled={pecasCaixaEscolhida.postes.length < 2}
                   >
-                    {pecasCaixaEscolhida.postes.length === 0 && <option value="">não cadastrado</option>}
                     {pecasCaixaEscolhida.postes.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {alturaDoPoste(p.nome) ? `${String(alturaDoPoste(p.nome).toFixed(2)).replace(".", ",")} m` : p.nome}
-                      </option>
+                      <option key={p.id} value={p.id}>{p.nome}</option>
                     ))}
                   </select>
+                </div>
+                )}
+                <div>
+                  <label className={labelClasse}>Altura livre (m)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={caixaAlturaLivre}
+                    onChange={aoDigitarDecimal(setCaixaAlturaLivre)}
+                    className={campoClasse}
+                  />
                 </div>
                 <div>
                   <label className={labelClasse}>Quantidade</label>
@@ -4632,7 +4645,23 @@ function OrcamentosGalpaoPageInterno() {
                   Adicionar conjunto
                 </button>
               </div>
-              <p className="mt-2 text-[11px] text-slate-600">
+              {pecasCaixaEscolhida.postes[0] && (() => {
+                const poste = pecasCaixaEscolhida.postes.find((p) => String(p.id) === String(caixaPosteId)) || pecasCaixaEscolhida.postes[0];
+                const padrao = alturaDoPoste(poste.nome) || ALTURA_LIVRE_PADRAO;
+                const livre = Number(String(caixaAlturaLivre).replace(",", ".")) || padrao;
+                const fmt = (n) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                return (
+                  <p className="mt-2 text-[11px] text-slate-700">
+                    Poste: <b>{fmt(livre)} m livre</b> + {fmt(FUNDACAO_POSTE)} m de fundação ={" "}
+                    {fmt(livre + FUNDACAO_POSTE)} m de peça —{" "}
+                    <b>{formatarMoeda(precoPostePorAltura(poste.preco, livre, padrao))}</b>
+                    {Math.abs(livre - padrao) > 0.001 && (
+                      <span className="text-slate-500"> (cadastro: {fmt(padrao)} m livre = {formatarMoeda(Number(poste.preco) || 0)}; preço acompanha o comprimento)</span>
+                    )}
+                  </p>
+                );
+              })()}
+              <p className="mt-1 text-[11px] text-slate-600">
                 Entra na lista: {[
                   pecasCaixaEscolhida.postes.length ? "poste" : null,
                   pecasCaixaEscolhida.capitel ? "capitel" : null,

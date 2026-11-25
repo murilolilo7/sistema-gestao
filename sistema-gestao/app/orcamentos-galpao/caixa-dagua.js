@@ -11,6 +11,19 @@ export const MATERIAIS_CAIXA = [
   { id: "POLIETILENO", rotulo: "Polietileno" },
 ];
 export const PAPEIS_CAIXA = ["POSTE", "CAPITEL", "CAIXA_AGUA"];
+// Poste é vendido pela altura LIVRE (Murilo, 2026-11-24): padrão 6 m livre, e a
+// fundação de 1,50 m fica subentendida (projetos: peça de 7,50 m).
+export const ALTURA_LIVRE_PADRAO = 6;
+export const FUNDACAO_POSTE = 1.5;
+
+const fmtM = (n) => Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Preço do poste para outra altura livre: acompanha o comprimento da peça
+// (livre + 1,50 de fundação). Ex.: 8 m livre = 9,50 m de peça = preço × 9,5 / 7,5.
+export function precoPostePorAltura(precoPadrao, alturaLivre, alturaPadrao = ALTURA_LIVRE_PADRAO) {
+  const livre = Number(alturaLivre) || alturaPadrao;
+  return Math.round(((Number(precoPadrao) || 0) * (livre + FUNDACAO_POSTE)) / (alturaPadrao + FUNDACAO_POSTE) * 100) / 100;
+}
 
 // "10.000L", "10000 L", "10.000 LITROS" -> 10000
 export function capacidadeDoNome(nome) {
@@ -53,7 +66,7 @@ export function pecasDoConjunto(composicoes, capacidade, material) {
 
 // Linhas do orçamento para N conjuntos. Avisa o que está faltando no catálogo
 // (ex.: capitel da 5.000 L ainda não cadastrado) ou sem preço.
-export function itensDoConjunto({ composicoes, capacidade, material, posteId, quantidade }) {
+export function itensDoConjunto({ composicoes, capacidade, material, posteId, quantidade, alturaLivre }) {
   const { postes, capitel, caixa } = pecasDoConjunto(composicoes, capacidade, material);
   const poste = postes.find((p) => String(p.id) === String(posteId)) || postes[0] || null;
   const qtd = Math.max(1, Math.floor(Number(quantidade) || 1));
@@ -71,6 +84,17 @@ export function itensDoConjunto({ composicoes, capacidade, material, posteId, qu
     preco_unitario: Number(c.preco) || 0,
     secao: SECAO_CAIXA,
   }));
+  // Altura livre diferente da do cadastro: o poste vira item próprio, com o
+  // nome na altura pedida e o preço proporcional ao comprimento da peça.
+  const livre = Number(String(alturaLivre ?? "").replace(",", "."));
+  const padrao = poste ? alturaDoPoste(poste.nome) || ALTURA_LIVRE_PADRAO : ALTURA_LIVRE_PADRAO;
+  if (poste && livre > 0 && Math.abs(livre - padrao) > 0.001) {
+    const i = itens[0];
+    i.composicao_id = null;
+    i.nome = poste.nome.replace(/\d+(?:,\d+)?\s*M\b(\s*LIVRE)?/i, `${fmtM(livre)}M LIVRE`);
+    if (i.nome === poste.nome) i.nome = `${poste.nome} — ${fmtM(livre)}M LIVRE`;
+    i.preco_unitario = precoPostePorAltura(poste.preco, livre, padrao);
+  }
   for (const i of itens)
     if (!(i.preco_unitario > 0)) avisos.push(`"${i.nome}" está sem preço — preencha em Preços.`);
   return { itens, avisos };
@@ -81,9 +105,12 @@ export function itensDoConjunto({ composicoes, capacidade, material, posteId, qu
 export function somarNaLista(lista, novos, gerarChave) {
   const resultado = [...lista];
   for (const n of novos) {
-    const idx = resultado.findIndex(
-      (i) => i.secao === SECAO_CAIXA && String(i.composicao_id) === String(n.composicao_id)
-    );
+    // mesma peça = mesmo item do catálogo (ou, no poste de altura diferente, mesmo nome e preço)
+    const mesma = (i) =>
+      n.composicao_id
+        ? String(i.composicao_id) === String(n.composicao_id)
+        : !i.composicao_id && i.nome === n.nome && Number(i.preco_unitario) === Number(n.preco_unitario);
+    const idx = resultado.findIndex((i) => i.secao === SECAO_CAIXA && mesma(i));
     if (idx >= 0) {
       const atual = resultado[idx];
       resultado[idx] = { ...atual, quantidade: (Number(atual.quantidade) || 0) + n.quantidade };
@@ -109,14 +136,17 @@ export function conjuntosDaLista(itens) {
     const cap = capacidadeDoNome(i.nome);
     const chave = cap || "outros";
     if (!grupos.has(chave))
-      grupos.set(chave, { capacidade: cap, material: null, quantidade: 0, total: 0, alturaPoste: null, pecas: [] });
+      grupos.set(chave, { capacidade: cap, material: null, quantidade: 0, total: 0, alturaPoste: null, alturaLivre: null, pecas: [] });
     const g = grupos.get(chave);
     g.total += q * (Number(i.preco_unitario) || 0);
     g.pecas.push(i.papel);
     // nº de conjuntos = a maior quantidade entre as peças daquele tamanho
     g.quantidade = Math.max(g.quantidade, q);
     if (i.papel === "CAIXA_AGUA") g.material = materialDoNome(i.nome) || g.material;
-    else if (i.papel === "POSTE") g.alturaPoste = alturaDoPoste(i.nome) || g.alturaPoste;
+    else if (i.papel === "POSTE") {
+      g.alturaPoste = alturaDoPoste(i.nome) || g.alturaPoste;
+      g.alturaLivre = g.alturaPoste; // o nome do poste já é a altura livre ("6,00M LIVRE")
+    }
   }
   return [...grupos.values()].sort((a, b) => (a.capacidade || 0) - (b.capacidade || 0));
 }
