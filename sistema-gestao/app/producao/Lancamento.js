@@ -499,15 +499,16 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
               </label>
             </div>
             <p className="text-sm font-medium text-slate-700 mb-1">
-              Peças concretadas {fixo && <span className="font-normal text-xs text-slate-500">(só para controle)</span>}
+              Peças concretadas{" "}
+              {fixo && <span className="font-normal text-xs text-slate-500">— só a quantidade, para o relatório</span>}
             </p>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-slate-500">
                   <th className="py-1 font-medium">Peça</th>
                   <th className="py-1 font-medium">Qtd.</th>
-                  <th className="py-1 font-medium text-right">Valor</th>
-                  <th className="py-1 font-medium text-right">Prêmio</th>
+                  {!fixo && <th className="py-1 font-medium text-right">Valor</th>}
+                  {!fixo && <th className="py-1 font-medium text-right">Prêmio</th>}
                 </tr>
               </thead>
               <tbody>
@@ -525,10 +526,12 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
                           className="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
                         />
                       </td>
-                      <td className="py-1 text-right text-xs text-slate-500">
-                        {v === null ? <span className="text-amber-600">sem valor</span> : brl(v)}
-                      </td>
-                      <td className="py-1 text-right">{q > 0 ? brl(q * (v || 0)) : ""}</td>
+                      {!fixo && (
+                        <td className="py-1 text-right text-xs text-slate-500">
+                          {v === null ? <span className="text-amber-600">sem valor</span> : brl(v)}
+                        </td>
+                      )}
+                      {!fixo && <td className="py-1 text-right">{q > 0 ? brl(q * (v || 0)) : ""}</td>}
                     </tr>
                   );
                 })}
