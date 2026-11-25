@@ -64,7 +64,15 @@ Deno.serve(async (req) => {
       if (/already|registered|exists/i.test(error.message)) return erro("Já existe uma conta com esse e-mail.");
       return erro(error.message);
     }
-    return resposta({ ok: true, user_id: data.user?.id });
+    // Conta criada pelo dono já nasce liberada (quem se cadastra sozinho espera liberação).
+    const novoId = data.user?.id;
+    if (novoId) {
+      const { error: erroLib } = await admin
+        .from("perfis_usuario")
+        .upsert({ user_id: novoId, liberado: true }, { onConflict: "user_id" });
+      if (erroLib) return erro("Conta criada, mas não consegui liberar: " + erroLib.message);
+    }
+    return resposta({ ok: true, user_id: novoId });
   }
 
   if (!/^[0-9a-f-]{36}$/i.test(alvo)) return erro("Usuário inválido.");

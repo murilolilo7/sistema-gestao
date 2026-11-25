@@ -23,7 +23,15 @@ import {
   Crown,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { Notificacoes, Confirmador, useSouAdmin, useSouDono, usePerfilProducao } from "@/components/Ui";
+import {
+  Notificacoes,
+  Confirmador,
+  useSouAdmin,
+  useSouDono,
+  usePerfilProducao,
+  useAcessoLiberado,
+  usePendentesLiberacao,
+} from "@/components/Ui";
 
 // Estrutura do menu lateral: seções com ícones. Para adicionar uma nova
 // tela no futuro, basta incluir uma linha aqui.
@@ -82,7 +90,7 @@ function iniciais(nomeCompleto, email) {
   return base.slice(0, 2).toUpperCase();
 }
 
-function ItemMenu({ href, label, icone: Icone, ativo, onClick }) {
+function ItemMenu({ href, label, icone: Icone, ativo, onClick, badge }) {
   return (
     <Link
       href={href}
@@ -95,11 +103,19 @@ function ItemMenu({ href, label, icone: Icone, ativo, onClick }) {
     >
       <Icone size={17} className={ativo ? "text-white" : "text-slate-400"} />
       {label}
+      {badge > 0 && (
+        <span
+          className="ml-auto rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold px-1.5 py-0.5"
+          title="Contas aguardando liberação"
+        >
+          {badge}
+        </span>
+      )}
     </Link>
   );
 }
 
-function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, onLogout, souAdmin, souDono, perfil }) {
+function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, onLogout, souAdmin, souDono, perfil, pendentes }) {
   // Esconde itens exclusivos de admin (e seções que ficarem vazias).
   // Quem só lança produção vê apenas a Produção. A Central só aparece para o dono.
   const soProducao = perfil?.so === true;
@@ -141,6 +157,7 @@ function ConteudoSidebar({ pathname, aoNavegar, nomeExibido, iniciaisUsuario, on
                 <ItemMenu
                   key={item.href}
                   {...item}
+                  badge={item.donoOnly ? pendentes : 0}
                   ativo={
                     pathname === item.href ||
                     (item.href !== "/" && pathname.startsWith(item.href + "/"))
@@ -180,6 +197,8 @@ export default function AppShell({ children }) {
   const souAdmin = useSouAdmin(session?.user?.id);
   const perfil = usePerfilProducao(session?.user?.id);
   const souDono = useSouDono(session?.user?.id);
+  const liberado = useAcessoLiberado(session?.user?.id);
+  const pendentes = usePendentesLiberacao(souDono === true, pathname);
 
   // Conta bloqueada pelo dono: sai na hora, mesmo com a sessão ainda aberta.
   useEffect(() => {
@@ -264,6 +283,31 @@ export default function AppShell({ children }) {
     return null;
   }
 
+  // Conta criada pela própria pessoa: só entra depois que o dono liberar.
+  if (liberado === false) {
+    const nome = session.user.user_metadata?.nome_completo || session.user.email;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
+        <div className="max-w-md w-full rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <span className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-600 text-white font-black text-lg mb-4">
+            M7
+          </span>
+          <h1 className="text-lg font-bold text-slate-900">Aguardando liberação</h1>
+          <p className="text-sm text-slate-600 mt-2">
+            Olá, {nome}. Sua conta foi criada, mas o responsável pelo sistema ainda precisa liberar o seu
+            acesso. Assim que for liberado, é só entrar de novo.
+          </p>
+          <button
+            onClick={handleLogout}
+            className="mt-6 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Sair
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const nomeCompleto = session.user.user_metadata?.nome_completo;
   const nomeExibido = primeiroNome(nomeCompleto) || session.user.email;
   const iniciaisUsuario = iniciais(nomeCompleto, session.user.email);
@@ -280,6 +324,7 @@ export default function AppShell({ children }) {
           souAdmin={souAdmin}
           souDono={souDono}
           perfil={perfil}
+          pendentes={pendentes}
         />
       </aside>
 
@@ -326,6 +371,7 @@ export default function AppShell({ children }) {
               souAdmin={souAdmin}
               souDono={souDono}
               perfil={perfil}
+              pendentes={pendentes}
             />
           </div>
         </div>

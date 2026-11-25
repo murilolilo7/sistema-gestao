@@ -343,6 +343,45 @@ export function useSouDono(chave) {
   return souDono;
 }
 
+// Conta liberada pelo dono? (quem se cadastra sozinho começa sem acesso)
+// null enquanto verifica.
+export function useAcessoLiberado(chave) {
+  const [liberado, setLiberado] = useState(null);
+  useEffect(() => {
+    if (!chave) return;
+    let ativo = true;
+    supabase
+      .rpc("acesso_liberado")
+      .then(({ data, error }) => {
+        // Em caso de erro de rede não trava ninguém: as travas do banco protegem os dados.
+        if (ativo) setLiberado(error ? true : !!data);
+      })
+      .catch(() => {
+        if (ativo) setLiberado(true);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [chave]);
+  return liberado;
+}
+
+// Quantas contas aguardam liberação (só conta para o dono). Atualiza ao trocar de página.
+export function usePendentesLiberacao(ativoPara, recarregar) {
+  const [qtd, setQtd] = useState(0);
+  useEffect(() => {
+    if (!ativoPara) return;
+    let ativo = true;
+    supabase.rpc("dono_pendentes").then(({ data }) => {
+      if (ativo) setQtd(Number(data) || 0);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [ativoPara, recarregar]);
+  return ativoPara ? qtd : 0;
+}
+
 // Perfil da produção: { pode } = admin ou "lança produção";
 // { so } = só lança produção (não é admin) -> vê apenas a Produção.
 // Retorna null enquanto verifica.

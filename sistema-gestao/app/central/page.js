@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Crown, KeyRound, Lock, LockOpen, Pencil, Trash2, UserPlus, Copy, RefreshCw, X } from "lucide-react";
+import { Crown, KeyRound, Lock, LockOpen, Pencil, Trash2, UserPlus, Copy, RefreshCw, X, UserCheck } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar, useSouDono } from "@/components/Ui";
 
@@ -356,6 +356,45 @@ function Central() {
     setOcupado(null);
   }
 
+  async function liberar(u) {
+    const nome = u.nome_completo || u.email;
+    const ok = await confirmar({
+      titulo: `Liberar o acesso de ${nome}?`,
+      texto:
+        "A pessoa passa a entrar no sistema e ver os dados. Logo abaixo do nome dela você marca se é Administrador ou se Lança produção.",
+      confirmarTexto: "Liberar",
+    });
+    if (!ok) return;
+    setOcupado(u.user_id);
+    const { error } = await supabase.rpc("dono_liberar_usuario", { usuario_id_input: u.user_id, liberar: true });
+    if (error) notificar("Erro: " + error.message, "erro");
+    else {
+      notificar("Acesso liberado.");
+      recarregar();
+    }
+    setOcupado(null);
+  }
+
+  async function recusar(u) {
+    const nome = u.nome_completo || u.email;
+    const ok = await confirmar({
+      titulo: `Recusar ${nome}?`,
+      texto: "A conta é apagada. Se a pessoa tentar de novo, ela precisa se cadastrar outra vez.",
+      confirmarTexto: "Recusar e apagar",
+      perigoso: true,
+    });
+    if (!ok) return;
+    setOcupado(u.user_id);
+    try {
+      await chamarCentral({ acao: "excluir", user_id: u.user_id });
+      notificar("Cadastro recusado.");
+      recarregar();
+    } catch (err) {
+      notificar(err.message, "erro");
+    }
+    setOcupado(null);
+  }
+
   async function excluir(u) {
     const nome = u.nome_completo || u.email;
     const ok = await confirmar({
@@ -397,6 +436,7 @@ function Central() {
   const ativosSemana = usuarios.filter((u) => u.ultimo_login && new Date(u.ultimo_login).getTime() >= semana).length;
   const bloqueados = usuarios.filter((u) => u.bloqueado).length;
   const admins = usuarios.filter((u) => u.is_admin || u.eh_dono).length;
+  const aguardando = usuarios.filter((u) => !u.liberado).length;
 
   return (
     <div className="space-y-5">
@@ -406,6 +446,13 @@ function Central() {
         <Cartao titulo="Administradores" valor={admins} detalhe="contando você" />
         <Cartao titulo="Bloqueados" valor={bloqueados} />
       </div>
+      {aguardando > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <b>{aguardando} {aguardando === 1 ? "pessoa se cadastrou" : "pessoas se cadastraram"}</b> e{" "}
+          {aguardando === 1 ? "está" : "estão"} aguardando liberação (no topo da lista). Enquanto você não liberar, não
+          veem nada no sistema.
+        </div>
+      )}
 
       <div className="flex justify-end">
         <button
@@ -422,7 +469,9 @@ function Central() {
           return (
             <div
               key={u.user_id}
-              className={`rounded-xl border bg-white p-4 shadow-sm ${u.bloqueado ? "border-red-200 bg-red-50/30" : "border-slate-200"}`}
+              className={`rounded-xl border bg-white p-4 shadow-sm ${
+                !u.liberado ? "border-amber-300 bg-amber-50/40" : u.bloqueado ? "border-red-200 bg-red-50/30" : "border-slate-200"
+              }`}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -433,7 +482,13 @@ function Central() {
                         <Crown size={11} /> Dono (você)
                       </Selo>
                     )}
-                    {u.bloqueado ? <Selo cor="vermelho">Bloqueado</Selo> : <Selo cor="verde">Ativo</Selo>}
+                    {!u.liberado ? (
+                      <Selo cor="ambar">Aguardando liberação</Selo>
+                    ) : u.bloqueado ? (
+                      <Selo cor="vermelho">Bloqueado</Selo>
+                    ) : (
+                      <Selo cor="verde">Ativo</Selo>
+                    )}
                     {(u.is_admin || u.eh_dono) && <Selo cor="azul">Administrador</Selo>}
                     {u.lanca_producao && <Selo cor="cinza">Lança produção</Selo>}
                   </div>
@@ -446,9 +501,21 @@ function Central() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
+                  {!u.liberado && (
+                    <>
+                      <button
+                        onClick={() => liberar(u)}
+                        disabled={travado}
+                        className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+                      >
+                        <UserCheck size={13} /> Liberar
+                      </button>
+                      <BotaoAcao icone={X} titulo="Recusar" perigoso onClick={() => recusar(u)} disabled={travado} />
+                    </>
+                  )}
                   <BotaoAcao icone={KeyRound} titulo="Definir senha" onClick={() => setJanela({ tipo: "senha", usuario: u })} disabled={travado} />
                   <BotaoAcao icone={Pencil} titulo="Nome" onClick={() => setJanela({ tipo: "nome", usuario: u })} disabled={travado} />
-                  {!u.eh_dono && (
+                  {!u.eh_dono && u.liberado && (
                     <>
                       <BotaoAcao icone={u.bloqueado ? LockOpen : Lock} titulo={u.bloqueado ? "Desbloquear" : "Bloquear"} onClick={() => bloquear(u)} disabled={travado} />
                       <BotaoAcao icone={Trash2} titulo="Excluir" perigoso onClick={() => excluir(u)} disabled={travado} />
@@ -503,8 +570,8 @@ export default function CentralDoDonoPage() {
         <Crown className="text-amber-500" size={24} /> Central do Dono
       </h1>
       <p className="text-slate-500 mb-6 text-sm">
-        Só você vê esta tela. Aqui você cria contas, define a senha de qualquer pessoa (inclusive a sua), bloqueia quem
-        saiu e vê quando cada um entrou pela última vez. As senhas nunca aparecem: o sistema guarda só uma versão
+        Só você vê esta tela. Aqui você libera quem se cadastrou, cria contas, define a senha de qualquer pessoa
+        (inclusive a sua), bloqueia quem saiu e vê quando cada um entrou pela última vez. As senhas nunca aparecem: o sistema guarda só uma versão
         embaralhada delas, mas você pode trocar a de qualquer um a qualquer hora.
       </p>
       <Central />
