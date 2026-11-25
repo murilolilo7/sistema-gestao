@@ -43,7 +43,7 @@ function buscarPeriodo(mesIni, mesFim) {
   ]);
 }
 
-export default function Relatorios({ pessoas, pecas, funcoes, souAdmin, abrirDia }) {
+export default function Relatorios({ pessoas, pecas, funcoes, setores, souAdmin, abrirDia }) {
   const [mes, setMes] = useState(hojeISO().slice(0, 7));
   return (
     <div className="space-y-5">
@@ -66,7 +66,7 @@ export default function Relatorios({ pessoas, pecas, funcoes, souAdmin, abrirDia
         </button>
       </div>
 
-      <RelatorioMes key={mes} mes={mes} pessoas={pessoas} pecas={pecas} abrirDia={abrirDia} />
+      <RelatorioMes key={mes} mes={mes} pessoas={pessoas} pecas={pecas} setores={setores} abrirDia={abrirDia} />
       {souAdmin && <CustoMaoObra key={`custo:${mes}`} mesFinal={mes} pessoas={pessoas} pecas={pecas} funcoes={funcoes} />}
     </div>
   );
@@ -74,7 +74,7 @@ export default function Relatorios({ pessoas, pecas, funcoes, souAdmin, abrirDia
 
 // ------------------------------------------------------------------ mês
 
-function RelatorioMes({ mes, pessoas, pecas, abrirDia }) {
+function RelatorioMes({ mes, pessoas, pecas, setores, abrirDia }) {
   const [dias, setDias] = useState(null);
   const [premios, setPremios] = useState([]);
 
@@ -94,6 +94,11 @@ function RelatorioMes({ mes, pessoas, pecas, abrirDia }) {
   if (dias === null) return <p className="text-sm text-slate-500">Carregando o mês...</p>;
 
   const resumo = resumoMes(dias, premios);
+  // Meta de m³: só os dias que têm meta (os importados da planilha não têm)
+  const diasComMeta = dias.filter((d) => Number(d.meta_m3) > 0);
+  const metaMes = diasComMeta.reduce((s, d) => s + Number(d.meta_m3), 0);
+  const m3NaMeta = diasComMeta.reduce((s, d) => s + (Number(d.m3_concretado) || 0), 0);
+  const pctMetaMes = metaMes > 0 ? Math.round((m3NaMeta / metaMes) * 100) : null;
   const t = resumo.totais;
   const nomeDe = (id) => pessoas.find((p) => p.id === id)?.nome || `#${id}`;
   const setorDe = (id) => pessoas.find((p) => p.id === id)?.setor || "OUTRO";
@@ -129,7 +134,12 @@ function RelatorioMes({ mes, pessoas, pecas, abrirDia }) {
         <Cartao
           rotulo="m³ concretados"
           valor={num(t.m3, 1)}
-          detalhe={t.diasComProducao ? `${num(t.m3 / t.diasComProducao, 2)} m³ por dia` : ""}
+          detalhe={
+            (t.diasComProducao ? `${num(t.m3 / t.diasComProducao, 2)} m³ por dia` : "") +
+            (pctMetaMes !== null
+              ? ` · ${pctMetaMes}% da meta (${num(m3NaMeta, 1)} de ${num(metaMes, 1)} m³ em ${diasComMeta.length} ${diasComMeta.length === 1 ? "dia" : "dias"})`
+              : "")
+          }
         />
         <Cartao rotulo="Peças concretadas" valor={num(t.pecasConcretadas, 0)} />
         <Cartao rotulo="Peças armadas" valor={num(t.pecasArmadas, 0)} />
@@ -162,7 +172,7 @@ function RelatorioMes({ mes, pessoas, pecas, abrirDia }) {
               {linhas.map((l) => (
                 <tr key={l.colaborador_id} className="border-b border-slate-100">
                   <td className="py-1.5 pr-2 font-medium text-slate-800">{nomeDe(l.colaborador_id)}</td>
-                  <td className="py-1.5 px-2 text-slate-500">{rotuloSetor(setorDe(l.colaborador_id))}</td>
+                  <td className="py-1.5 px-2 text-slate-500">{rotuloSetor(setorDe(l.colaborador_id), setores)}</td>
                   <td className="py-1.5 px-2 text-center">{l.dias}</td>
                   <td className="py-1.5 px-2 text-center text-slate-500">{l.meios || ""}</td>
                   <td className={`py-1.5 px-2 text-center ${l.faltas ? "text-rose-600 font-medium" : "text-slate-400"}`}>
@@ -205,7 +215,7 @@ function RelatorioMes({ mes, pessoas, pecas, abrirDia }) {
         titulo="Mês em grade (igual à planilha)"
         texto="Cada letra é o que foi lançado no dia. Letra com bolinha = trabalhou em outro setor naquele dia. Clique no número do dia para abrir o lançamento."
       >
-        <GradeMes mes={mes} dias={dias} linhas={linhas} nomeDe={nomeDe} setorDe={setorDe} abrirDia={abrirDia} />
+        <GradeMes mes={mes} dias={dias} linhas={linhas} nomeDe={nomeDe} setorDe={setorDe} setores={setores} abrirDia={abrirDia} />
       </Bloco>
 
       {/* ---------------- peças ---------------- */}
@@ -248,7 +258,7 @@ function PremioMensal({ linha, salvar }) {
   );
 }
 
-function GradeMes({ mes, dias, linhas, nomeDe, setorDe, abrirDia }) {
+function GradeMes({ mes, dias, linhas, nomeDe, setorDe, setores, abrirDia }) {
   const n = ultimoDia(mes);
   const porData = Object.fromEntries(dias.map((d) => [Number(d.data.slice(8, 10)), d]));
   const cor = Object.fromEntries(SITUACOES.map((s) => [s.id, s.cor]));
@@ -291,7 +301,7 @@ function GradeMes({ mes, dias, linhas, nomeDe, setorDe, abrirDia }) {
                     {p && (
                       <span
                         className={`relative inline-flex w-5 h-5 items-center justify-center rounded text-[10px] font-bold ${cor[p.situacao]}`}
-                        title={`${p.situacao} · ${rotuloSetor(p.setor)}`}
+                        title={`${p.situacao} · ${rotuloSetor(p.setor, setores)}`}
                       >
                         {p.situacao}
                         {p.setor !== setorDe(l.colaborador_id) && (

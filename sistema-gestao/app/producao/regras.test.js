@@ -141,3 +141,19 @@ test("custo mensal da função soma os encargos", () => {
   assert.equal(custoMensalFuncao(null), null);
   assert.equal(rotuloSetor("ARMACAO"), "Armação");
 });
+
+test("setores do cadastro e % da meta de m³", async () => {
+  const { listaSetores, rotuloSetor, percentualMeta } = await import("./regras.js");
+  const lista = listaSetores([
+    { id: "MONTAGEM", nome: "Montagem", ordem: 50, ativo: true },
+    { id: "CONCRETAGEM", nome: "Concretagem", ordem: 1, fixo: true },
+    { id: "ARMACAO", nome: "Armação", ordem: 2, fixo: true },
+  ]);
+  assert.deepEqual(lista.map((s) => s.id), ["CONCRETAGEM", "ARMACAO", "MONTAGEM"]);
+  assert.equal(rotuloSetor("MONTAGEM", lista), "Montagem");
+  assert.equal(rotuloSetor("OUTRO", lista), "Outro setor");
+  assert.equal(listaSetores([]).length, 3);
+  assert.equal(percentualMeta(8.5, 10), 85);
+  assert.equal(percentualMeta(12, 10), 120);
+  assert.equal(percentualMeta(5, null), null);
+});

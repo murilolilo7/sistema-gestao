@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
 import { lerNumero, paraTexto } from "@/app/engenharia/custo-pilar/campos";
-import { SETORES, SITUACOES, rotuloSetor, dividirPremio, avisosDoDia } from "./regras";
+import { SETORES, SITUACOES, rotuloSetor, dividirPremio, avisosDoDia, percentualMeta } from "./regras";
 
 const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const num = (v, c = 2) => Number(v || 0).toLocaleString("pt-BR", { maximumFractionDigits: c });
@@ -33,7 +33,7 @@ export function buscarDia(data) {
     .maybeSingle();
 }
 
-export default function Lancamento({ pessoas, pecas, data, irParaData }) {
+export default function Lancamento({ pessoas, pecas, setores = SETORES, data, irParaData }) {
   const [sujo, setSujo] = useState(false);
 
   async function trocar(nova) {
@@ -82,7 +82,7 @@ export default function Lancamento({ pessoas, pecas, data, irParaData }) {
         {sujo && <span className="ml-auto text-xs font-medium text-amber-700">● alterações não salvas</span>}
       </div>
 
-      <DiaLancamento key={data} data={data} pessoas={pessoas} pecas={pecas} aoSujar={setSujo} />
+      <DiaLancamento key={data} data={data} pessoas={pessoas} pecas={pecas} setores={setores} aoSujar={setSujo} />
     </div>
   );
 }
@@ -94,10 +94,14 @@ function estadoInicial(dia) {
   for (const p of dia?.producao_presencas || []) pres[p.colaborador_id] = { situacao: p.situacao, setor: p.setor };
   for (const c of dia?.producao_concretagem_pecas || []) conc[c.peca_id] = paraTexto(c.quantidade);
   for (const a of dia?.producao_armacao || []) arm[`${a.colaborador_id}:${a.peca_id}`] = paraTexto(a.quantidade);
-  return { m3: paraTexto(dia?.m3_concretado), obs: dia?.observacao || "", pres, conc, arm };
+  // Meta de m³: dia novo já vem com 10; dia antigo (importado) sem meta fica vazio.
+  const meta = dia ? paraTexto(dia.meta_m3) : paraTexto(META_PADRAO);
+  return { m3: paraTexto(dia?.m3_concretado), meta, obs: dia?.observacao || "", pres, conc, arm };
 }
 
-function DiaLancamento({ data, pessoas, pecas, aoSujar }) {
+const META_PADRAO = 10;
+
+function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
   const [dia, setDia] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [r, setR] = useState(estadoInicial(null));
@@ -193,6 +197,8 @@ function DiaLancamento({ data, pessoas, pecas, aoSujar }) {
   async function salvar() {
     const m3 = lerNumero(r.m3);
     if (r.m3.trim() && (m3 === null || m3 < 0)) return notificar("O m³ do dia não é um número válido.", "erro");
+    const meta = lerNumero(r.meta);
+    if (r.meta.trim() && (meta === null || meta < 0)) return notificar("A meta de m³ não é um número válido.", "erro");
     const qtdRuim =
       Object.values(r.conc).some((q) => q.trim() && !(lerNumero(q) >= 0)) ||
       Object.values(r.arm).some((q) => q.trim() && !(lerNumero(q) >= 0));
@@ -207,7 +213,7 @@ function DiaLancamento({ data, pessoas, pecas, aoSujar }) {
     }
     setSalvando(true);
     const { error } = await supabase.rpc("salvar_dia_producao", {
-      payload: { data, m3: m3 === null ? "" : m3, observacao: r.obs, presencas, concretagem, armacao },
+      payload: { data, m3: m3 === null ? "" : m3, meta: meta === null ? "" : meta, observacao: r.obs, presencas, concretagem, armacao },
     });
     setSalvando(false);
     if (error) return notificar("Não foi possível salvar: " + error.message, "erro");
@@ -234,9 +240,17 @@ function DiaLancamento({ data, pessoas, pecas, aoSujar }) {
   if (carregando) return <p className="text-sm text-slate-500">Carregando o dia...</p>;
 
   const marcados = presencas.filter((p) => p.situacao === "P" || p.situacao === "M").length;
-  const grupos = SETORES.map((s) => ({ ...s, lista: pessoasDoDia.filter((p) => p.setor === s.id) })).filter(
+  // setores do cadastro + algum que só exista na pessoa (segurança)
+  const todosSetores = [
+    ...setores,
+    ...[...new Set(pessoasDoDia.map((p) => p.setor))]
+      .filter((id) => !setores.some((s) => s.id === id))
+      .map((id) => ({ id, rotulo: rotuloSetor(id, setores) })),
+  ];
+  const grupos = todosSetores.map((s) => ({ ...s, lista: pessoasDoDia.filter((p) => p.setor === s.id) })).filter(
     (g) => g.lista.length
   );
+  const pctMeta = percentualMeta(lerNumero(r.m3), lerNumero(r.meta));
 
   return (
     <div className="space-y-4 pb-20">
@@ -300,11 +314,13 @@ function DiaLancamento({ data, pessoas, pecas, aoSujar }) {
                               className="rounded border border-slate-300 px-1 py-0.5 text-xs text-slate-600"
                               title="Setor em que trabalhou hoje"
                             >
-                              {SETORES.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {rotuloSetor(s.id)}
-                                </option>
-                              ))}
+                              {todosSetores
+                                .filter((s) => s.ativo !== false || s.id === v.setor)
+                                .map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.rotulo}
+                                  </option>
+                                ))}
                             </select>
                           )}
                           <div className="flex gap-1">
@@ -333,19 +349,49 @@ function DiaLancamento({ data, pessoas, pecas, aoSujar }) {
       </Secao>
 
       {/* ---------------- 2. Concretagem ---------------- */}
-      <Secao numero="2" titulo="Concretagem" resumo={`prêmio do dia ${brl(premioConc)}`}>
+      <Secao
+        numero="2"
+        titulo="Concretagem"
+        resumo={`prêmio do dia ${brl(premioConc)}${pctMeta !== null ? ` · ${pctMeta}% da meta` : ""}`}
+      >
         <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
           <div>
-            <label className="block mb-3">
-              <span className="block text-sm font-medium text-slate-700 mb-1">m³ concretado no dia</span>
-              <input
-                value={r.m3}
-                onChange={(e) => mudar((a) => ({ ...a, m3: e.target.value }))}
-                inputMode="decimal"
-                placeholder="Ex.: 7,85"
-                className="w-36 rounded-lg border border-slate-300 px-3 py-2 text-base font-medium"
-              />
-            </label>
+            <div className="flex flex-wrap items-end gap-4 mb-2">
+              <label className="block">
+                <span className="block text-sm font-medium text-slate-700 mb-1">m³ concretado no dia</span>
+                <input
+                  value={r.m3}
+                  onChange={(e) => mudar((a) => ({ ...a, m3: e.target.value }))}
+                  inputMode="decimal"
+                  placeholder="Ex.: 7,85"
+                  className="w-36 rounded-lg border border-slate-300 px-3 py-2 text-base font-medium"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-sm font-medium text-slate-700 mb-1">Meta do dia (m³)</span>
+                <input
+                  value={r.meta}
+                  onChange={(e) => mudar((a) => ({ ...a, meta: e.target.value }))}
+                  inputMode="decimal"
+                  placeholder="sem meta"
+                  className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-base"
+                />
+              </label>
+            </div>
+            {pctMeta !== null && (
+              <div className="mb-4">
+                <div className="h-2.5 w-full max-w-xs rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${pctMeta >= 100 ? "bg-emerald-500" : pctMeta >= 80 ? "bg-amber-400" : "bg-rose-400"}`}
+                    style={{ width: `${Math.min(100, pctMeta)}%` }}
+                  />
+                </div>
+                <p className={`mt-1 text-xs font-medium ${pctMeta >= 100 ? "text-emerald-700" : pctMeta >= 80 ? "text-amber-700" : "text-rose-700"}`}>
+                  {num(lerNumero(r.m3) || 0)} de {num(lerNumero(r.meta))} m³ — {pctMeta}% da meta
+                  {pctMeta >= 100 ? " ✓ meta batida" : ` (faltam ${num(Math.max(0, lerNumero(r.meta) - (lerNumero(r.m3) || 0)))} m³)`}
+                </p>
+              </div>
+            )}
             <p className="text-sm font-medium text-slate-700 mb-1">Peças concretadas</p>
             <table className="w-full text-sm">
               <thead>

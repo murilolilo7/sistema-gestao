@@ -1,13 +1,31 @@
 // Regras simples do módulo Produção (sem acesso ao banco, para poder testar).
 
+// Setores padrão. Os setores vêm do cadastro (tabela producao_setores) e a
+// fábrica pode criar outros; Concretagem e Armação têm regra de prêmio própria,
+// os demais entram só na presença.
 export const SETORES = [
   { id: "CONCRETAGEM", rotulo: "Concretagem" },
   { id: "ARMACAO", rotulo: "Armação" },
   { id: "OUTRO", rotulo: "Outro setor" },
 ];
 
-export function rotuloSetor(id) {
-  return SETORES.find((s) => s.id === id)?.rotulo || id;
+// Linhas do banco ({id, nome, ordem, ativo}) -> {id, rotulo}
+export function listaSetores(linhas) {
+  if (!Array.isArray(linhas) || linhas.length === 0) return SETORES;
+  return [...linhas]
+    .sort((a, b) => (a.ordem ?? 100) - (b.ordem ?? 100) || String(a.nome).localeCompare(String(b.nome)))
+    .map((s) => ({ id: s.id, rotulo: s.nome, ativo: s.ativo !== false, fixo: !!s.fixo }));
+}
+
+export function rotuloSetor(id, setores = SETORES) {
+  return setores.find((s) => s.id === id)?.rotulo || SETORES.find((s) => s.id === id)?.rotulo || id;
+}
+
+// % da meta de m³ do dia (null quando não há meta)
+export function percentualMeta(m3, meta) {
+  const m = Number(meta);
+  if (!(m > 0)) return null;
+  return Math.round(((Number(m3) || 0) / m) * 100);
 }
 
 // Tira espaços sobrando: "  josé   carlos " -> "josé carlos"
