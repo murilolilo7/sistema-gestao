@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
 import { lerNumero, paraTexto } from "@/app/engenharia/custo-pilar/campos";
@@ -35,6 +35,23 @@ export function buscarDia(data) {
 
 export default function Lancamento({ pessoas, pecas, setores = SETORES, parametros, data, irParaData }) {
   const [sujo, setSujo] = useState(false);
+  // Trocar o dia não pode jogar a tela para o topo: guarda onde a pessoa
+  // estava (ex.: no item 4) e a altura do conteúdo enquanto o dia novo carrega.
+  const posicao = useRef(null);
+  const conteudo = useRef(null);
+  const [alturaMinima, setAlturaMinima] = useState(0);
+
+  function aoCarregarDia() {
+    const y = posicao.current;
+    posicao.current = null;
+    // dois quadros: espera o dia novo aparecer na tela antes de voltar à posição
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (y !== null) window.scrollTo(0, y);
+        setAlturaMinima(0);
+      })
+    );
+  }
 
   async function trocar(nova) {
     if (!nova || nova === data) return;
@@ -48,6 +65,8 @@ export default function Lancamento({ pessoas, pecas, setores = SETORES, parametr
       if (!ok) return;
     }
     setSujo(false);
+    posicao.current = window.scrollY;
+    setAlturaMinima(conteudo.current?.offsetHeight || 0);
     irParaData(nova);
   }
 
@@ -83,15 +102,18 @@ export default function Lancamento({ pessoas, pecas, setores = SETORES, parametr
         {sujo && <span className="ml-auto text-xs font-medium text-amber-700">● alterações não salvas</span>}
       </div>
 
-      <DiaLancamento
-        key={data}
-        data={data}
-        pessoas={pessoas}
-        pecas={pecas}
-        setores={setores}
-        parametros={parametros}
-        aoSujar={setSujo}
-      />
+      <div ref={conteudo} style={alturaMinima ? { minHeight: alturaMinima } : undefined}>
+        <DiaLancamento
+          key={data}
+          data={data}
+          pessoas={pessoas}
+          pecas={pecas}
+          setores={setores}
+          parametros={parametros}
+          aoSujar={setSujo}
+          aoCarregar={aoCarregarDia}
+        />
+      </div>
     </div>
   );
 }
@@ -129,7 +151,7 @@ function estadoInicial(dia, parametros) {
 const META_PADRAO = 10;
 const PREMIO_PADRAO = 140;
 
-function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
+function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoCarregar }) {
   const [dia, setDia] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [r, setR] = useState(estadoInicial(null, parametros));
@@ -143,6 +165,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
     setDia(d || null);
     setR(estadoInicial(d, parametros));
     setCarregando(false);
+    aoCarregar?.();
   }
 
   useEffect(() => {
@@ -214,6 +237,8 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
         return s + x.quantidade * (p ? valorArm(id, p) : 0);
       }, 0);
   const mesLinhas = new Map(resumoMes(mesAntes).linhas.map((l) => [l.colaborador_id, l]));
+  // armação acumulada no mês (dias já salvos + o que está na tela)
+  const armMesDe = (id) => (mesLinhas.get(id)?.premioArmacao || 0) + premioArmDe(id);
   const idsPremio = new Set([
     ...equipe.map((e) => e.colaborador_id),
     ...armacao.map((a) => a.colaborador_id),
@@ -330,6 +355,15 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
     (g) => g.lista.length
   );
   const pctMeta = percentualMeta(lerNumero(r.m3), lerNumero(r.meta));
+  const setorDaPessoaHoje = (id) => r.pres[id]?.setor || pessoas.find((p) => p.id === id)?.setor || "OUTRO";
+  const gruposPremio = [
+    ...todosSetores,
+    ...[...new Set(premiosPessoa.map((x) => setorDaPessoaHoje(x.id)))]
+      .filter((id) => !todosSetores.some((s) => s.id === id))
+      .map((id) => ({ id, rotulo: rotuloSetor(id, setores) })),
+  ]
+    .map((s) => ({ ...s, lista: premiosPessoa.filter((x) => setorDaPessoaHoje(x.id) === s.id) }))
+    .filter((g) => g.lista.length);
 
   return (
     <div className="space-y-4 pb-20">
@@ -574,10 +608,6 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
       <Secao
         numero="3"
         titulo="Armação (ferragem)"
-        resumo={`prêmio do dia ${brl(armacao.reduce((s, a) => {
-          const p = pecas.find((pp) => pp.id === a.peca_id);
-          return s + a.quantidade * (p ? valorArm(a.colaborador_id, p) : 0);
-        }, 0))}`}
       >
         {armadores.length === 0 ? (
           <p className="text-sm text-slate-500">
@@ -597,6 +627,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
                       {a.nome}
                     </th>
                   ))}
+                  <th className="py-1 pl-3 font-medium text-right">Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -617,24 +648,35 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
                         </td>
                       );
                     })}
+                    <td className="py-1 pl-3 text-right text-slate-600">
+                      {(() => {
+                        const q = armadores.reduce((s, a) => s + (lerNumero(r.arm[`${a.id}:${p.id}`]) || 0), 0);
+                        return q > 0 ? num(q, 2) : "";
+                      })()}
+                    </td>
                   </tr>
                 ))}
                 <tr className="border-t-2 border-slate-300 font-medium">
                   <td className="py-1.5 pr-3" colSpan={2}>
-                    Prêmio do armador
+                    Prêmio do dia
                   </td>
                   {armadores.map((a) => (
                     <td key={a.id} className="py-1.5 px-1 text-center">
-                      {brl(
-                        armacao
-                          .filter((x) => x.colaborador_id === a.id)
-                          .reduce((s, x) => {
-                            const p = pecas.find((pp) => pp.id === x.peca_id);
-                            return s + x.quantidade * (p ? valorArm(a.id, p) : 0);
-                          }, 0)
-                      )}
+                      {brl(premioArmDe(a.id))}
                     </td>
                   ))}
+                  <td className="py-1.5 pl-3 text-right">{brl(armadores.reduce((s, a) => s + premioArmDe(a.id), 0))}</td>
+                </tr>
+                <tr className="font-medium text-emerald-700">
+                  <td className="py-1.5 pr-3" colSpan={2}>
+                    Acumulado no mês
+                  </td>
+                  {armadores.map((a) => (
+                    <td key={a.id} className="py-1.5 px-1 text-center">
+                      {brl(armMesDe(a.id))}
+                    </td>
+                  ))}
+                  <td className="py-1.5 pl-3 text-right">{brl(armadores.reduce((s, a) => s + armMesDe(a.id), 0))}</td>
                 </tr>
               </tbody>
             </table>
@@ -694,9 +736,32 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
                 </tr>
               </thead>
               <tbody>
-                {premiosPessoa.map((x) => (
+                {gruposPremio.map((g) => (
+                  <Fragment key={g.id}>
+                    <tr className="bg-slate-50">
+                      <td className="py-1.5 pr-2 text-xs font-semibold text-slate-600 uppercase">{g.rotulo}</td>
+                      {visao !== "mes" && (
+                        <>
+                          <td />
+                          <td />
+                          <td className="py-1.5 px-2 text-right text-xs font-semibold text-slate-600">
+                            {brl(g.lista.reduce((s, x) => s + x.hoje, 0))}
+                          </td>
+                        </>
+                      )}
+                      {visao !== "dia" && (
+                        <>
+                          <td />
+                          <td />
+                          <td className="py-1.5 px-2 text-right text-xs font-semibold text-emerald-700">
+                            {brl(g.lista.reduce((s, x) => s + x.mes, 0))}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                {g.lista.map((x) => (
                   <tr key={x.id} className="border-t border-slate-100">
-                    <td className="py-1.5 pr-2 text-slate-700">{x.nome}</td>
+                    <td className="py-1.5 pr-2 pl-3 text-slate-700">{x.nome}</td>
                     {visao !== "mes" && (
                       <>
                         <td className="py-1.5 px-2 text-right">{x.hojeConc ? brl(x.hojeConc) : "—"}</td>
@@ -712,6 +777,8 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
                       </>
                     )}
                   </tr>
+                ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
