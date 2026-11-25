@@ -54,7 +54,8 @@ export default function Lancamento({ pessoas, pecas, setores = SETORES, parametr
   const hoje = hojeISO();
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      {/* Barra da data fixa no topo: fica à vista em qualquer item (1 a 5) */}
+      <div className="sticky top-14 md:top-0 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white/95 backdrop-blur p-3 shadow-sm print:static">
         <button onClick={() => trocar(somarDias(data, -1))} className={BOTAO_SEC} title="Dia anterior">
           ◀
         </button>
