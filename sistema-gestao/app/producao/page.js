@@ -37,18 +37,28 @@ function buscarTudo() {
     supabase.from("mao_de_obra").select("id, funcao, salario_bruto, encargos_pct").order("funcao"),
     supabase.from("producao_setores").select("*").order("ordem"),
     supabase.from("producao_parametros").select("*").eq("id", 1).maybeSingle(),
+    supabase.from("producao_bonus_vagas").select("*").order("ordem").order("id"),
+    supabase.from("producao_bonus_historico").select("*").order("desde").order("id"),
   ]);
 }
 
 function ProducaoPage({ souAdmin }) {
   const [aba, setAba] = useState("lancar");
   const [dataDia, setDataDia] = useState(hojeISO());
-  const [dados, setDados] = useState({ pessoas: [], pecas: [], funcoes: [], setores: SETORES, parametros: null });
+  const [dados, setDados] = useState({
+    pessoas: [],
+    pecas: [],
+    funcoes: [],
+    setores: SETORES,
+    parametros: null,
+    vagas: [],
+    historicoBonus: [],
+  });
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  function aplicar([p, c, f, st, pr]) {
-    const falha = p.error || c.error || f.error || st.error || pr.error;
+  function aplicar([p, c, f, st, pr, vg, hb]) {
+    const falha = p.error || c.error || f.error || st.error || pr.error || vg.error || hb.error;
     if (falha) setErro("Não foi possível carregar: " + falha.message);
     else
       setDados({
@@ -56,6 +66,8 @@ function ProducaoPage({ souAdmin }) {
         pecas: c.data || [],
         funcoes: f.data || [],
         setores: listaSetores(st.data),
+        vagas: vg.data || [],
+        historicoBonus: hb.data || [],
         parametros: pr.data || {
           premio_concretagem_pessoa: 14,
           meta_m3_padrao: 7,
@@ -112,6 +124,7 @@ function ProducaoPage({ souAdmin }) {
           pecas={dados.pecas}
           setores={dados.setores}
           parametros={dados.parametros}
+          vagas={dados.vagas}
           data={dataDia}
           irParaData={setDataDia}
         />
@@ -122,6 +135,7 @@ function ProducaoPage({ souAdmin }) {
           funcoes={dados.funcoes}
           setores={dados.setores}
           parametros={dados.parametros}
+          historicoBonus={dados.historicoBonus}
           souAdmin={souAdmin}
           abrirDia={(d) => {
             setDataDia(d > hojeISO() ? hojeISO() : d);
@@ -133,6 +147,7 @@ function ProducaoPage({ souAdmin }) {
           pessoas={dados.pessoas}
           funcoes={dados.funcoes}
           setores={dados.setores}
+          vagas={dados.vagas}
           recarregar={recarregar}
           souAdmin={souAdmin}
         />
@@ -186,7 +201,7 @@ async function nomeLiberado(nome, pessoas, idIgnorar = null) {
   return true;
 }
 
-function AbaPessoas({ pessoas, funcoes, setores, recarregar, souAdmin }) {
+function AbaPessoas({ pessoas, funcoes, setores, vagas = [], recarregar, souAdmin }) {
   const [novo, setNovo] = useState({ nome: "", funcao_id: "", setor: "CONCRETAGEM" });
   const [salvando, setSalvando] = useState(false);
   const [verInativos, setVerInativos] = useState(false);
@@ -231,11 +246,12 @@ function AbaPessoas({ pessoas, funcoes, setores, recarregar, souAdmin }) {
   const linhas = (lista) =>
     lista.map((p) => (
       <LinhaPessoa
-        key={`${p.id}:${p.nome}:${p.funcao_id}:${p.setor}:${p.ativo}`}
+        key={`${p.id}:${p.nome}:${p.funcao_id}:${p.setor}:${p.ativo}:${vagas.length}`}
         p={p}
         pessoas={pessoas}
         funcoes={funcoes}
         setores={setores}
+        vagas={vagas}
         recarregar={recarregar}
         souAdmin={souAdmin}
       />
@@ -281,6 +297,8 @@ function AbaPessoas({ pessoas, funcoes, setores, recarregar, souAdmin }) {
       </form>
 
       <FuncoesESetores funcoes={funcoes} setores={setores} pessoas={pessoas} recarregar={recarregar} />
+
+      <BonusVagas vagas={vagas} pessoas={pessoas} setores={setores} recarregar={recarregar} />
 
       {setoresVisiveis.map((s) => {
         const doSetor = ativos.filter((p) => p.setor === s.id);
@@ -558,12 +576,184 @@ function LinhaSetor({ s, alternar, salvarRegra }) {
   );
 }
 
-function LinhaPessoa({ p, pessoas, funcoes, setores, recarregar, souAdmin }) {
+// Bônus da meta do mês: vagas com valor e quem ocupa. Quem recebe depende da
+// vaga, não do nome — quando alguém sai, a vaga fica e outro assume.
+function BonusVagas({ vagas, pessoas, setores, recarregar }) {
+  const [nova, setNova] = useState({ nome: "", valor: "", colaborador_id: "" });
+  const [salvando, setSalvando] = useState(false);
+  const ativas = vagas.filter((v) => v.ativo);
+  const inativas = vagas.filter((v) => !v.ativo);
+  const total = ativas.reduce((s, v) => s + (v.colaborador_id ? Number(v.valor) || 0 : 0), 0);
+  const pessoaDe = (id) => pessoas.find((p) => p.id === id);
+  const problemas = ativas.filter((v) => !v.colaborador_id || pessoaDe(v.colaborador_id)?.ativo === false);
+
+  async function criar(e) {
+    e.preventDefault();
+    const nome = nomeLimpo(nova.nome);
+    const valor = lerNumero(nova.valor);
+    if (!nome) return notificar("Dê um nome para a vaga (ex.: Vaga 5, Encarregado).", "erro");
+    if (valor === null || valor < 0) return notificar("Digite o valor do bônus da vaga.", "erro");
+    setSalvando(true);
+    const { data: quem } = await supabase.rpc("nome_usuario_atual");
+    const { error } = await supabase.from("producao_bonus_vagas").insert({
+      nome,
+      valor,
+      colaborador_id: nova.colaborador_id ? Number(nova.colaborador_id) : null,
+      ordem: vagas.length + 1,
+      atualizado_por_nome: quem || null,
+    });
+    setSalvando(false);
+    if (error) return notificar("Não foi possível criar: " + error.message, "erro");
+    notificar(`Vaga ${nome} criada.`);
+    setNova({ nome: "", valor: "", colaborador_id: "" });
+    recarregar();
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+        <p className="text-sm font-medium text-slate-700">Bônus da meta do mês</p>
+        <span className="text-sm text-slate-600">
+          total <b>{brl(total)}</b> se bater a meta
+        </span>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        Pago a quem ocupa cada vaga quando o mês bate a meta de m³. Trocar quem ocupa vale a partir do mês da troca.
+      </p>
+      {problemas.length > 0 && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {problemas.map((v) => `${v.nome}: ${v.colaborador_id ? "quem ocupa está desativado" : "sem ninguém"}`).join(" · ")}.
+          Escolha quem assume.
+        </p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-slate-500 border-b border-slate-100">
+              <th className="py-1.5 pr-2 font-medium">Vaga</th>
+              <th className="py-1.5 px-2 font-medium">Bônus (R$)</th>
+              <th className="py-1.5 px-2 font-medium">Quem ocupa</th>
+              <th className="py-1.5 px-2 font-medium">Prêmio do dia</th>
+              <th className="py-1.5 pl-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {[...ativas, ...inativas].map((v) => (
+              <LinhaVaga
+                key={`${v.id}:${v.nome}:${v.valor}:${v.colaborador_id}:${v.ativo}`}
+                v={v}
+                pessoas={pessoas}
+                setores={setores}
+                recarregar={recarregar}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <form onSubmit={criar} className="mt-3 grid gap-2 sm:grid-cols-[1fr_120px_1fr_auto] items-end">
+        <input value={nova.nome} onChange={(e) => setNova({ ...nova, nome: e.target.value })} placeholder="Nova vaga, ex.: Vaga 5" className={ESTILO_INPUT} />
+        <input value={nova.valor} onChange={(e) => setNova({ ...nova, valor: e.target.value })} placeholder="Bônus R$" inputMode="decimal" className={ESTILO_INPUT} />
+        <SelectOcupante valor={nova.colaborador_id} pessoas={pessoas} aoMudar={(x) => setNova({ ...nova, colaborador_id: x })} />
+        <button
+          disabled={salvando}
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          + Criar vaga
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function SelectOcupante({ valor, pessoas, aoMudar, atual = null }) {
+  const lista = pessoas.filter((p) => p.ativo || p.id === atual).sort((a, b) => a.nome.localeCompare(b.nome));
+  return (
+    <select value={valor} onChange={(e) => aoMudar(e.target.value)} className={ESTILO_INPUT}>
+      <option value="">— sem ninguém —</option>
+      {lista.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.nome}
+          {p.ativo ? "" : " (desativado)"}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function LinhaVaga({ v, pessoas, setores, recarregar }) {
+  const inicial = { nome: v.nome, valor: paraTexto(v.valor), colaborador_id: v.colaborador_id ? String(v.colaborador_id) : "" };
+  const [r, setR] = useState(inicial);
+  const [salvando, setSalvando] = useState(false);
+  const mudou = nomeLimpo(r.nome) !== v.nome || r.valor.trim() !== inicial.valor || r.colaborador_id !== inicial.colaborador_id;
+  const ocupante = pessoas.find((p) => String(p.id) === r.colaborador_id);
+  const regra = ocupante ? setores.find((s) => s.id === ocupante.setor)?.regra : null;
+
+  async function gravar(campos, aviso) {
+    setSalvando(true);
+    const { data: quem } = await supabase.rpc("nome_usuario_atual");
+    const { error } = await supabase
+      .from("producao_bonus_vagas")
+      .update({ ...campos, atualizado_em: new Date().toISOString(), atualizado_por_nome: quem || null })
+      .eq("id", v.id);
+    setSalvando(false);
+    if (error) return notificar("Não foi possível salvar: " + error.message, "erro");
+    notificar(aviso);
+    recarregar();
+  }
+
+  function salvar() {
+    const nome = nomeLimpo(r.nome);
+    const valor = lerNumero(r.valor);
+    if (!nome) return notificar("A vaga precisa de um nome.", "erro");
+    if (valor === null || valor < 0) return notificar("Valor do bônus inválido.", "erro");
+    gravar({ nome, valor, colaborador_id: r.colaborador_id ? Number(r.colaborador_id) : null }, `Vaga ${nome} salva.`);
+  }
+
+  return (
+    <tr className={`border-t border-slate-100 ${!v.ativo ? "opacity-50" : mudou ? "bg-amber-50/60" : ""}`}>
+      <td className="py-1.5 pr-2">
+        <input value={r.nome} onChange={(e) => setR({ ...r, nome: e.target.value })} className={`${ESTILO_INPUT} min-w-28`} />
+      </td>
+      <td className="py-1.5 px-2">
+        <input value={r.valor} onChange={(e) => setR({ ...r, valor: e.target.value })} inputMode="decimal" className={`${ESTILO_INPUT} w-24`} />
+      </td>
+      <td className="py-1.5 px-2 min-w-44">
+        <SelectOcupante valor={r.colaborador_id} pessoas={pessoas} atual={v.colaborador_id} aoMudar={(x) => setR({ ...r, colaborador_id: x })} />
+      </td>
+      <td className="py-1.5 px-2 text-xs text-slate-500 whitespace-nowrap">
+        {!ocupante ? "—" : regra === "SEM" ? "só o bônus" : "recebe também"}
+      </td>
+      <td className="py-1.5 pl-2 text-right whitespace-nowrap">
+        {mudou ? (
+          <span className="inline-flex gap-1">
+            <button onClick={salvar} disabled={salvando} className="rounded bg-emerald-600 px-2.5 py-1 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
+              Salvar
+            </button>
+            <button onClick={() => setR(inicial)} className="rounded border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
+              Desfazer
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => gravar({ ativo: !v.ativo }, v.ativo ? `Vaga ${v.nome} desativada.` : `Vaga ${v.nome} reativada.`)}
+            disabled={salvando}
+            className="text-xs text-slate-500 underline hover:text-slate-900"
+          >
+            {v.ativo ? "Desativar" : "Reativar"}
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function LinhaPessoa({ p, pessoas, funcoes, setores, vagas = [], recarregar, souAdmin }) {
   const [rascunho, setRascunho] = useState({ nome: p.nome, funcao_id: String(p.funcao_id ?? ""), setor: p.setor });
   const [salvando, setSalvando] = useState(false);
   const mudou =
     nomeLimpo(rascunho.nome) !== p.nome || rascunho.funcao_id !== String(p.funcao_id ?? "") || rascunho.setor !== p.setor;
   const funcao = funcoes.find((f) => String(f.id) === rascunho.funcao_id);
+  const minhasVagas = vagas.filter((v) => v.ativo && v.colaborador_id === p.id);
 
   async function gravar(campos, aviso) {
     setSalvando(true);
@@ -585,10 +775,21 @@ function LinhaPessoa({ p, pessoas, funcoes, setores, recarregar, souAdmin }) {
     if (p.ativo) {
       const ok = await confirmar({
         titulo: `Desativar ${p.nome}?`,
-        texto: "A pessoa sai da lista do lançamento do dia. O que ela já produziu continua no histórico. Dá para reativar depois.",
+        texto:
+          "A pessoa sai da lista do lançamento do dia. O que ela já produziu continua no histórico. Dá para reativar depois." +
+          (minhasVagas.length
+            ? `\n\nEla ocupa ${minhasVagas.map((v) => v.nome).join(", ")} do bônus da meta. A vaga fica sem ninguém até você escolher quem assume (Pessoas → Bônus da meta do mês).`
+            : ""),
         confirmarTexto: "Desativar",
       });
       if (!ok) return;
+      if (minhasVagas.length) {
+        const { error } = await supabase
+          .from("producao_bonus_vagas")
+          .update({ colaborador_id: null, atualizado_em: new Date().toISOString() })
+          .in("id", minhasVagas.map((v) => v.id));
+        if (error) return notificar("Não foi possível liberar a vaga: " + error.message, "erro");
+      }
     }
     gravar({ ativo: !p.ativo }, p.ativo ? `${p.nome} desativado.` : `${p.nome} reativado.`);
   }
@@ -604,6 +805,14 @@ function LinhaPessoa({ p, pessoas, funcoes, setores, recarregar, souAdmin }) {
           onChange={(e) => setRascunho({ ...rascunho, nome: e.target.value })}
           className={`${ESTILO_INPUT} min-w-40`}
         />
+        {minhasVagas.length > 0 && (
+          <span
+            className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+            title={minhasVagas.map((v) => v.nome).join(", ")}
+          >
+            Bônus {brl(minhasVagas.reduce((s, v) => s + Number(v.valor || 0), 0))}
+          </span>
+        )}
       </td>
       <td className="px-2 py-1.5">
         <SelectFuncao valor={rascunho.funcao_id} funcoes={funcoes} aoMudar={(v) => setRascunho({ ...rascunho, funcao_id: v })} />

@@ -45,7 +45,7 @@ export function buscarDia(data) {
     .maybeSingle();
 }
 
-export default function Lancamento({ pessoas, pecas, setores = SETORES, parametros, data, irParaData }) {
+export default function Lancamento({ pessoas, pecas, setores = SETORES, parametros, vagas = [], data, irParaData }) {
   const [sujo, setSujo] = useState(false);
   // Trocar o dia não pode jogar a tela para o topo: guarda onde a pessoa
   // estava (ex.: no item 4) e a altura do conteúdo enquanto o dia novo carrega.
@@ -122,6 +122,7 @@ export default function Lancamento({ pessoas, pecas, setores = SETORES, parametr
           pecas={pecas}
           setores={setores}
           parametros={parametros}
+          vagas={vagas}
           aoSujar={setSujo}
           aoCarregar={aoCarregarDia}
         />
@@ -167,7 +168,7 @@ const META_PADRAO = 7;
 const PREMIO_PESSOA_PADRAO = 14;
 const META_MENSAL_PADRAO = 140;
 
-function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoCarregar }) {
+function DiaLancamento({ data, pessoas, pecas, setores, parametros, vagas = [], aoSujar, aoCarregar }) {
   const [dia, setDia] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [r, setR] = useState(estadoInicial(null, parametros));
@@ -271,6 +272,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
   if (fixo && !(premioConcCheio > 0) && equipe.some((e) => e.situacao === "P" || e.situacao === "M"))
     avisos.push("O prêmio da concretagem do dia está zerado.");
   // Meta do mês: dias já salvos + o dia da tela
+  const bonusTotal = vagas.filter((v) => v.ativo && v.colaborador_id).reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const metaMes = metaDoMes(
     [...mesAntes, { m3_concretado: lerNumero(r.m3), meta_m3: lerNumero(r.meta) }],
     parametros?.meta_m3_padrao ?? META_PADRAO,
@@ -574,6 +576,10 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
                 <b className={metaMes.batida ? "text-emerald-700" : "text-amber-700"}>
                   ({metaMes.pct}%{metaMes.batida ? " ✓ batida" : ""})
                 </b>{" "}
+                {bonusTotal > 0 &&
+                  (metaMes.batida
+                    ? ` · bônus de ${brl(bonusTotal)} garantido`
+                    : ` · faltam ${num(Math.max(0, metaMes.meta - metaMes.feito), 1)} m³ para o bônus de ${brl(bonusTotal)}`)}{" "}
                 · {metaMes.dias} {metaMes.dias === 1 ? "dia trabalhado" : "dias trabalhados"}
                 {metaMes.diasAbaixo > 0 &&
                   ` · ${metaMes.diasAbaixo} ${metaMes.diasAbaixo === 1 ? "dia abaixo" : "dias abaixo"} da meta do dia`}

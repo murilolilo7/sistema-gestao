@@ -176,7 +176,7 @@ test("concretagem no valor fixo do dia (como a planilha): não cobra peça nem v
 });
 
 // ---------------------------------------------------------------- meta de 7 m³ e regra por setor
-import { metaBatida, metaDoMes, valorFixoDoDia, listaSetores, regraDoSetor, premioConcretagemDoDia } from "./regras.js";
+import { metaBatida, metaDoMes, valorFixoDoDia, listaSetores, regraDoSetor, premioConcretagemDoDia, bonusDoMes } from "./regras.js";
 
 const SETORES_TESTE = listaSetores([
   { id: "CONCRETAGEM", nome: "Concretagem", ordem: 1, fixo: true, regra_premio: "EQUIPE_META" },
@@ -309,4 +309,53 @@ test("meta do mês fixa (140 m³) quando informada", () => {
   assert.equal(m.meta, 140);
   assert.equal(m.batida, true);
   assert.equal(metaDoMes(dias.slice(0, 10), 7, 140).batida, false);
+});
+
+test("bônus pelas vagas: só se bater a meta do mês, e vale quem ocupava a vaga no fim do mês", () => {
+  const hist = [
+    { id: 1, vaga_id: 1, desde: "2026-11-01", nome: "Vaga 1", valor: 200, colaborador_id: 10, ativo: true },
+    { id: 2, vaga_id: 2, desde: "2026-11-01", nome: "Vaga 2", valor: 100, colaborador_id: 1, ativo: true },
+    // em dezembro a vaga 2 passa para a pessoa 5
+    { id: 3, vaga_id: 2, desde: "2026-12-10", nome: "Vaga 2", valor: 100, colaborador_id: 5, ativo: true },
+  ];
+  assert.equal(bonusDoMes("2026-11", hist, false).size, 0);
+  const nov = bonusDoMes("2026-11", hist, true);
+  assert.equal(nov.get(10).valor, 200);
+  assert.equal(nov.get(1).valor, 100);
+  const dez = bonusDoMes("2026-12", hist, true);
+  assert.equal(dez.get(5).valor, 100);
+  assert.equal(dez.has(1), false);
+  // mês antes de existir a vaga: nada
+  assert.equal(bonusDoMes("2026-10", hist, true).size, 0);
+  // valor digitado no mês manda mais que o da vaga
+  const r = resumoMes([], [{ colaborador_id: 10, valor: 0 }], SETORES_TESTE, nov);
+  assert.equal(r.linhas.find((l) => l.colaborador_id === 10).premioMensal, 0);
+  assert.equal(r.linhas.find((l) => l.colaborador_id === 1).premioMensal, 100);
+  assert.equal(r.totais.premioMensal, 100);
+});
+
+test("custo por m³ conta o salário de quem está em setor sem divisão", () => {
+  const setores = listaSetores([
+    { id: "CONCRETAGEM", nome: "Concretagem", regra_premio: "EQUIPE_META" },
+    { id: "ARMACAO", nome: "Armação", regra_premio: "POR_PECA" },
+    { id: "SUPERVISAO", nome: "Supervisão", regra_premio: "SEM" },
+  ]);
+  const dias = [
+    {
+      m3_concretado: 10,
+      meta_m3: 7,
+      premio_por_pessoa: 14,
+      producao_presencas: [
+        { colaborador_id: 1, setor: "CONCRETAGEM", situacao: "P" },
+        { colaborador_id: 2, setor: "SUPERVISAO", situacao: "P" },
+        { colaborador_id: 3, setor: "ARMACAO", situacao: "P" },
+      ],
+    },
+  ];
+  const r = resumoMes(dias, [], setores);
+  const c = custoMaoObraMes(r, () => 3000, setores);
+  assert.equal(c.concretagem.salarios, 6000);
+  assert.equal(c.concretagem.salariosOutros, 3000);
+  assert.equal(c.armacao.salarios, 3000);
+  assert.equal(c.concretagem.porM3, r2((6000 + 14) / 10));
 });

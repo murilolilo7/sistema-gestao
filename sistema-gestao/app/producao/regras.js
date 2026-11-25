@@ -187,12 +187,40 @@ export function premioConcretagemDoDia(dia, pecas, pessoasNaEquipe) {
 
 const arred = (v) => Math.round(v * 100) / 100;
 
+// Bônus da meta do mês pelas vagas. Cada vaga vale como estava no último dia
+// do mês (histórico), então trocar o ocupante depois não muda o passado.
+// historico: [{vaga_id, desde 'AAAA-MM-DD', nome, valor, colaborador_id, ativo, id}]
+// Devolve Map colaborador_id -> {valor, vagas: [nome]} (vazio se a meta do mês não foi batida).
+export function bonusDoMes(ym, historico, metaBatidaNoMes) {
+  const saida = new Map();
+  if (!metaBatidaNoMes) return saida;
+  const [a, m] = ym.split("-").map(Number);
+  const fim = `${ym}-${String(new Date(a, m, 0).getDate()).padStart(2, "0")}`;
+  const ultimo = new Map();
+  for (const h of historico || []) {
+    if (String(h.desde) > fim) continue;
+    const atual = ultimo.get(h.vaga_id);
+    if (!atual || String(h.desde) > String(atual.desde) || (h.desde === atual.desde && h.id > atual.id))
+      ultimo.set(h.vaga_id, h);
+  }
+  for (const h of ultimo.values()) {
+    const valor = Number(h.valor) || 0;
+    if (!h.ativo || !h.colaborador_id || valor <= 0) continue;
+    const x = saida.get(h.colaborador_id) || { valor: 0, vagas: [] };
+    x.valor += valor;
+    x.vagas.push(h.nome);
+    saida.set(h.colaborador_id, x);
+  }
+  return saida;
+}
+
 // Junta o mês: por pessoa (dias, faltas, prêmios), por setor e totais.
 // dias: [{data, m3_concretado, meta_m3, premio_concretagem_informado,
 //         producao_presencas:[], producao_concretagem_pecas:[], producao_armacao:[]}]
 // Concretagem: o prêmio do dia só é pago se o m³ bater a meta do dia; quem
 // faltou não recebe e a parte dele fica com quem trabalhou.
-export function resumoMes(dias, premiosMensais = [], setores = SETORES) {
+// bonus: Map de bonusDoMes — vale para quem não tem prêmio mensal digitado no mês.
+export function resumoMes(dias, premiosMensais = [], setores = SETORES, bonus = null) {
   const regra = (id) => regraDoSetor(id, setores);
   const pessoas = new Map();
   const pegar = (id) => {
@@ -297,9 +325,21 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES) {
   }
 
   let premioMensal = 0;
+  const digitado = new Set();
   for (const pm of premiosMensais) {
-    pegar(pm.colaborador_id).premioMensal += Number(pm.valor) || 0;
+    const r = pegar(pm.colaborador_id);
+    r.premioMensal += Number(pm.valor) || 0;
+    r.premioMensalOrigem = "DIGITADO";
+    digitado.add(pm.colaborador_id);
     premioMensal += Number(pm.valor) || 0;
+  }
+  for (const [id, b] of bonus || []) {
+    if (digitado.has(id)) continue;
+    const r = pegar(id);
+    r.premioMensal += b.valor;
+    r.premioMensalOrigem = "VAGA";
+    r.vagasBonus = b.vagas;
+    premioMensal += b.valor;
   }
 
   const linhas = [...pessoas.values()].map((r) => ({
@@ -333,8 +373,13 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES) {
 // outro setor só pesa nos dias em que esteve lá.
 //   concretagem R$/m³ = (custo da equipe + prêmios da concretagem) ÷ m³
 //   armação: custo de cada R$ 1 de prêmio = (custo dos armadores + prêmios) ÷ prêmios
-export function custoMaoObraMes(resumo, custoMensalPorPessoa) {
+// Setores sem prêmio por peça (concretagem, sem divisão, valor fixo por dia)
+// entram no custo por m³; setores por peça (armação) ficam na armação.
+export function custoMaoObraMes(resumo, custoMensalPorPessoa, setores = SETORES) {
+  const ehArm = (id) => regraDoSetor(id, setores) === "POR_PECA";
+  const ehEquipe = (id) => regraDoSetor(id, setores) === "EQUIPE_META";
   const setor = { CONCRETAGEM: { custo: 0, pessoas: 0 }, ARMACAO: { custo: 0, pessoas: 0 } };
+  const outros = { custo: 0, pessoas: new Set() };
   let semFuncao = 0;
   for (const r of resumo.linhas) {
     const total = r.dias + r.faltas;
@@ -344,28 +389,36 @@ export function custoMaoObraMes(resumo, custoMensalPorPessoa) {
       semFuncao += 1;
       continue;
     }
-    for (const s of ["CONCRETAGEM", "ARMACAO"]) {
-      // faltas contam no setor principal (o maior)
-      const diasSetor = r.diasPorSetor[s] || 0;
-      const principal = Object.entries(r.diasPorSetor).sort((a, b) => b[1] - a[1])[0][0];
-      const peso = (diasSetor + (principal === s ? r.faltas : 0)) / total;
-      if (peso > 0) {
-        setor[s].custo += custo * peso;
-        setor[s].pessoas += 1;
+    // faltas contam no setor principal (o de mais dias)
+    const principal = Object.entries(r.diasPorSetor).sort((a, b) => b[1] - a[1])[0][0];
+    const conta = { CONCRETAGEM: 0, ARMACAO: 0 };
+    for (const [s, d] of Object.entries(r.diasPorSetor)) {
+      const peso = ((d || 0) + (principal === s ? r.faltas : 0)) / total;
+      if (!(peso > 0)) continue;
+      const destino = ehArm(s) ? "ARMACAO" : "CONCRETAGEM";
+      setor[destino].custo += custo * peso;
+      conta[destino] += 1;
+      if (destino === "CONCRETAGEM" && !ehEquipe(s)) {
+        outros.custo += custo * peso;
+        outros.pessoas.add(r.colaborador_id);
       }
     }
+    for (const k of ["CONCRETAGEM", "ARMACAO"]) if (conta[k]) setor[k].pessoas += 1;
   }
   const t = resumo.totais;
-  const premioMensalConc = resumo.linhas
-    .filter((r) => (r.diasPorSetor.CONCRETAGEM || 0) >= (r.diasPorSetor.ARMACAO || 0))
-    .reduce((s, r) => s + r.premioMensal, 0);
-  const custoConc = setor.CONCRETAGEM.custo + t.premioConcretagem + premioMensalConc;
+  const diasArm = (r) => Object.entries(r.diasPorSetor).reduce((s, [k, d]) => s + (ehArm(k) ? d : 0), 0);
+  const diasOutros = (r) => Object.entries(r.diasPorSetor).reduce((s, [k, d]) => s + (ehArm(k) ? 0 : d), 0);
+  const premioMensalConc = resumo.linhas.filter((r) => diasOutros(r) >= diasArm(r)).reduce((s, r) => s + r.premioMensal, 0);
+  const premiosConc = t.premioConcretagem + (t.premioFixo || 0) + premioMensalConc;
+  const custoConc = setor.CONCRETAGEM.custo + premiosConc;
   const custoArm = setor.ARMACAO.custo + t.premioArmacao + (t.premioMensal - premioMensalConc);
   return {
     concretagem: {
       pessoas: setor.CONCRETAGEM.pessoas,
       salarios: arred(setor.CONCRETAGEM.custo),
-      premios: arred(t.premioConcretagem + premioMensalConc),
+      salariosOutros: arred(outros.custo),
+      pessoasOutros: outros.pessoas.size,
+      premios: arred(premiosConc),
       total: arred(custoConc),
       porM3: t.m3 > 0 ? arred(custoConc / t.m3) : null,
     },

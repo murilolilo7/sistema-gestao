@@ -11,6 +11,7 @@ import {
   resumoMes,
   metaDoMes,
   metaBatida,
+  bonusDoMes,
   custoMaoObraMes,
   custoMensalFuncao,
 } from "./regras";
@@ -61,7 +62,7 @@ const CONTEUDOS = [
   { id: "grade", rotulo: "Mês em grade (dia a dia)" },
 ];
 
-export default function Relatorios({ pessoas, pecas, funcoes, setores, parametros, souAdmin, abrirDia }) {
+export default function Relatorios({ pessoas, pecas, funcoes, setores, parametros, historicoBonus = [], souAdmin, abrirDia }) {
   const [mes, setMes] = useState(hojeISO().slice(0, 7));
   const [selecao, setSelecao] = useState({
     fora: [], // setores desmarcados
@@ -96,6 +97,7 @@ export default function Relatorios({ pessoas, pecas, funcoes, setores, parametro
         pecas={pecas}
         setores={setores}
         parametros={parametros}
+        historicoBonus={historicoBonus}
         selecao={selecao}
         setSelecao={setSelecao}
         souAdmin={souAdmin}
@@ -103,7 +105,16 @@ export default function Relatorios({ pessoas, pecas, funcoes, setores, parametro
       />
       {souAdmin && selecao.conteudo.custo && (
         <div className="print:break-before-page">
-          <CustoMaoObra key={`custo:${mes}`} mesFinal={mes} pessoas={pessoas} pecas={pecas} funcoes={funcoes} setores={setores} />
+          <CustoMaoObra
+            key={`custo:${mes}`}
+            mesFinal={mes}
+            pessoas={pessoas}
+            pecas={pecas}
+            funcoes={funcoes}
+            setores={setores}
+            parametros={parametros}
+            historicoBonus={historicoBonus}
+          />
         </div>
       )}
     </div>
@@ -112,7 +123,7 @@ export default function Relatorios({ pessoas, pecas, funcoes, setores, parametro
 
 // ------------------------------------------------------------------ mês
 
-function RelatorioMes({ mes, pessoas, pecas, setores, parametros, selecao, setSelecao, souAdmin, abrirDia }) {
+function RelatorioMes({ mes, pessoas, pecas, setores, parametros, historicoBonus, selecao, setSelecao, souAdmin, abrirDia }) {
   const [dias, setDias] = useState(null);
   const [premios, setPremios] = useState([]);
   const [metaMensal, setMetaMensal] = useState(null);
@@ -162,7 +173,9 @@ function RelatorioMes({ mes, pessoas, pecas, setores, parametros, selecao, setSe
       </div>
     );
 
-  const resumo = resumoMes(dias, premios, setores);
+  const metaMes = metaDoMes(dias, parametros?.meta_m3_padrao ?? 7, metaMensal ?? parametros?.meta_mensal_m3 ?? 140);
+  const bonus = bonusDoMes(mes, historicoBonus, metaMes.batida);
+  const resumo = resumoMes(dias, premios, setores, bonus);
   const setorDe = (id) => pessoas.find((p) => p.id === id)?.setor || "OUTRO";
 
   // setores que aparecem no mês (presença ou prêmio mensal), na ordem do cadastro
@@ -557,16 +570,24 @@ function MetaMensal({ valor, salvar }) {
   );
 }
 
+// Prêmio mensal: vem sozinho da vaga do bônus (meta do mês batida) ou é
+// digitado. Apagar o número digitado volta para o valor da vaga.
 function PremioMensal({ linha, salvar }) {
-  const inicial = linha.premioMensal ? paraTexto(linha.premioMensal) : "";
+  const digitado = linha.premioMensalOrigem === "DIGITADO";
+  const inicial = digitado || linha.premioMensal ? paraTexto(linha.premioMensal) : "";
   const [texto, setTexto] = useState(inicial);
   const mudou = texto.trim() !== inicial;
-  const valor = texto.trim() ? lerNumero(texto) : 0;
+  const valor = texto.trim() ? lerNumero(texto) : null;
+  const vagas = linha.premioMensalOrigem === "VAGA" ? (linha.vagasBonus || []).join(", ") : "";
   return (
     <>
     {/* no papel sai o valor (o campo de digitar só existe na tela) */}
-    <span className="hidden print:inline">{linha.premioMensal ? brl(linha.premioMensal) : ""}</span>
+    <span className="hidden print:inline">
+      {linha.premioMensal ? brl(linha.premioMensal) : ""}
+      {vagas && <span className="text-[9px] text-slate-500"> ({vagas})</span>}
+    </span>
     <span className="inline-flex items-center gap-1 print:hidden">
+      {vagas && !mudou && <span className="text-[10px] text-amber-700" title="Bônus da meta do mês pela vaga">{vagas}</span>}
       <input
         value={texto}
         onChange={(e) => setTexto(e.target.value)}
@@ -577,7 +598,7 @@ function PremioMensal({ linha, salvar }) {
       {mudou && (
         <button
           onClick={() => salvar(linha.colaborador_id, valor)}
-          disabled={valor === null || valor < 0}
+          disabled={texto.trim() !== "" && (valor === null || valor < 0)}
           className="rounded bg-emerald-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
         >
           Salvar
@@ -682,29 +703,33 @@ function ListaPecas({ mapa, pecaDe, vazio }) {
 
 // ------------------------------------------------------------------ custo (admin)
 
-function montarMeses([d, p], mesIni, setores) {
+function montarMeses([d, p, mm], mesIni, setores, parametros, historicoBonus) {
   if (d.error || p.error) notificar("Não foi possível carregar o custo: " + (d.error || p.error).message, "erro");
   const lista = [];
   for (let i = 0; i < 12; i++) {
     const ym = somarMeses(mesIni, i);
     const dias = (d.data || []).filter((x) => x.data.startsWith(ym));
     const pm = (p.data || []).filter((x) => x.mes.startsWith(ym));
-    if (dias.length) lista.push({ ym, resumo: resumoMes(dias, pm, setores) });
+    const metaMensal = (mm?.data || []).find((x) => x.mes.startsWith(ym))?.meta_m3 ?? parametros?.meta_mensal_m3 ?? 140;
+    const batida = metaDoMes(dias, parametros?.meta_m3_padrao ?? 7, Number(metaMensal)).batida;
+    if (dias.length) lista.push({ ym, resumo: resumoMes(dias, pm, setores, bonusDoMes(ym, historicoBonus, batida)) });
   }
   return lista;
 }
 
-function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores }) {
+function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores, parametros, historicoBonus }) {
   const [meses, setMeses] = useState(null);
   const mesIni = somarMeses(mesFinal, -11);
 
   useEffect(() => {
     let ativo = true;
-    buscarPeriodo(mesIni, mesFinal).then((r) => ativo && setMeses(montarMeses(r, mesIni, setores)));
+    buscarPeriodo(mesIni, mesFinal).then(
+      (r) => ativo && setMeses(montarMeses(r, mesIni, setores, parametros, historicoBonus))
+    );
     return () => {
       ativo = false;
     };
-  }, [mesIni, mesFinal, setores]);
+  }, [mesIni, mesFinal, setores, parametros, historicoBonus]);
 
   if (meses === null) return <p className="text-sm text-slate-500">Calculando o custo dos últimos 12 meses...</p>;
 
@@ -713,7 +738,7 @@ function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores }) {
     const f = funcoes.find((x) => x.id === p?.funcao_id);
     return f ? custoMensalFuncao(f) : null;
   };
-  const linhas = meses.map((m) => ({ ...m, custo: custoMaoObraMes(m.resumo, custoPessoa) }));
+  const linhas = meses.map((m) => ({ ...m, custo: custoMaoObraMes(m.resumo, custoPessoa, setores) }));
   const soma = (f) => linhas.reduce((s, l) => s + f(l), 0);
   const m3 = soma((l) => l.resumo.totais.m3);
   const custoConc = soma((l) => l.custo.concretagem.total);
@@ -728,7 +753,7 @@ function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores }) {
   return (
     <Bloco
       titulo="Custo real da mão de obra (últimos 12 meses) — só administrador"
-      texto="O salário da função de cada pessoa (com encargos) é repartido entre os setores pelos dias em que ela foi marcada em cada um, e somado aos prêmios. Concretagem: custo ÷ m³ do mês. Armação: quanto custa cada R$ 1 de prêmio pago (salários + prêmios ÷ prêmios). Feriados e paradas entram sozinhos: o mês com menos produção fica mais caro."
+      texto="O salário da função de cada pessoa (com encargos) é repartido entre os setores pelos dias em que ela foi marcada em cada um, e somado aos prêmios. Concretagem: custo ÷ m³ do mês, contando também quem está em setor sem divisão de prêmio ou com valor por dia (ex.: Supervisão, Qualidade). Armação: quanto custa cada R$ 1 de prêmio pago (salários + prêmios ÷ prêmios). Feriados e paradas entram sozinhos: o mês com menos produção fica mais caro."
     >
       {linhas.length === 0 ? (
         <p className="text-sm text-slate-400">Sem lançamentos no período.</p>
@@ -748,6 +773,9 @@ function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores }) {
                   <th className="py-2 px-2 font-medium text-right">m³</th>
                   <th className="py-2 px-2 font-medium text-center">Equipe</th>
                   <th className="py-2 px-2 font-medium text-right">Salários + encargos</th>
+                  <th className="py-2 px-2 font-medium text-right" title="Já somado nos salários: quem trabalhou em setor sem divisão de prêmio (ex.: Supervisão, Qualidade)">
+                    dos quais outros setores
+                  </th>
                   <th className="py-2 px-2 font-medium text-right">Prêmios</th>
                   <th className="py-2 px-2 font-medium text-right">Concretagem R$/m³</th>
                   <th className="py-2 px-2 font-medium min-w-28" />
@@ -764,6 +792,9 @@ function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores }) {
                     <td className="py-1.5 px-2 text-right">{num(l.resumo.totais.m3, 1)}</td>
                     <td className="py-1.5 px-2 text-center">{l.custo.concretagem.pessoas}</td>
                     <td className="py-1.5 px-2 text-right">{brl(l.custo.concretagem.salarios)}</td>
+                    <td className="py-1.5 px-2 text-right text-slate-500">
+                      {l.custo.concretagem.salariosOutros ? brl(l.custo.concretagem.salariosOutros) : "—"}
+                    </td>
                     <td className="py-1.5 px-2 text-right">{brl(l.custo.concretagem.premios)}</td>
                     <td className="py-1.5 px-2 text-right font-semibold">{brl(l.custo.concretagem.porM3)}</td>
                     <td className="py-1.5 px-2">
@@ -781,6 +812,7 @@ function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores }) {
                   <td className="py-2 px-2 text-right">{num(m3, 1)}</td>
                   <td />
                   <td className="py-2 px-2 text-right">{brl(soma((l) => l.custo.concretagem.salarios))}</td>
+                  <td className="py-2 px-2 text-right text-slate-500">{brl(soma((l) => l.custo.concretagem.salariosOutros || 0))}</td>
                   <td className="py-2 px-2 text-right">{brl(soma((l) => l.custo.concretagem.premios))}</td>
                   <td className="py-2 px-2 text-right text-emerald-700">{brl(porM3)}</td>
                   <td />
