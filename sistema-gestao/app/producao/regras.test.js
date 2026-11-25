@@ -176,7 +176,7 @@ test("concretagem no valor fixo do dia (como a planilha): não cobra peça nem v
 });
 
 // ---------------------------------------------------------------- meta de 7 m³ e regra por setor
-import { metaBatida, metaDoMes, valorFixoDoDia, listaSetores, regraDoSetor } from "./regras.js";
+import { metaBatida, metaDoMes, valorFixoDoDia, listaSetores, regraDoSetor, premioConcretagemDoDia } from "./regras.js";
 
 const SETORES_TESTE = listaSetores([
   { id: "CONCRETAGEM", nome: "Concretagem", ordem: 1, fixo: true, regra_premio: "EQUIPE_META" },
@@ -283,4 +283,30 @@ test("prêmio de cada setor fica separado (para o relatório por setor)", () => 
   const arm = r.linhas.find((l) => l.colaborador_id === 2);
   assert.equal(arm.porSetor.ARMACAO.pecas, 3);
   assert.equal(arm.armadasPorPeca[5], 3);
+});
+
+test("concretagem: R$ 14 × pessoas lançadas na equipe (com faltosos), dividido entre quem trabalhou", () => {
+  const pres = [
+    ...Array.from({ length: 11 }, (_, i) => ({ colaborador_id: i + 1, setor: "CONCRETAGEM", situacao: "P" })),
+    ...[12, 13, 14].map((id) => ({ colaborador_id: id, setor: "CONCRETAGEM", situacao: "F" })),
+  ];
+  assert.equal(premioConcretagemDoDia({ premio_por_pessoa: 14 }, [], pres.length), 196);
+  const r = resumoMes(
+    [{ m3_concretado: 8, meta_m3: 7, premio_por_pessoa: 14, producao_presencas: pres }],
+    [],
+    SETORES_TESTE
+  );
+  assert.equal(r.totais.premioConcretagem, 196);
+  assert.equal(r.linhas.find((l) => l.colaborador_id === 1).premioConcretagem, 17.82);
+  assert.equal(r.linhas.find((l) => l.colaborador_id === 12).premioConcretagem, 0);
+  // dia antigo com valor total continua igual
+  assert.equal(premioConcretagemDoDia({ premio_concretagem_informado: 140 }, [], 14), 140);
+});
+
+test("meta do mês fixa (140 m³) quando informada", () => {
+  const dias = Array.from({ length: 20 }, () => ({ m3_concretado: 7.5, meta_m3: 7 }));
+  const m = metaDoMes(dias, 7, 140);
+  assert.equal(m.meta, 140);
+  assert.equal(m.batida, true);
+  assert.equal(metaDoMes(dias.slice(0, 10), 7, 140).batida, false);
 });

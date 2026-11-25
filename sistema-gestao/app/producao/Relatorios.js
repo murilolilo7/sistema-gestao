@@ -49,6 +49,7 @@ function buscarPeriodo(mesIni, mesFim) {
       .lte("data", `${mesFim}-${ultimoDia(mesFim)}`)
       .order("data"),
     supabase.from("producao_premio_mensal").select("*").gte("mes", `${mesIni}-01`).lte("mes", `${mesFim}-01`),
+    supabase.from("producao_meta_mes").select("*").gte("mes", `${mesIni}-01`).lte("mes", `${mesFim}-01`),
   ]);
 }
 
@@ -114,11 +115,24 @@ export default function Relatorios({ pessoas, pecas, funcoes, setores, parametro
 function RelatorioMes({ mes, pessoas, pecas, setores, parametros, selecao, setSelecao, souAdmin, abrirDia }) {
   const [dias, setDias] = useState(null);
   const [premios, setPremios] = useState([]);
+  const [metaMensal, setMetaMensal] = useState(null);
 
-  function aplicar([d, p]) {
+  function aplicar([d, p, mm]) {
     if (d.error || p.error) notificar("Não foi possível carregar o mês: " + (d.error || p.error).message, "erro");
     setDias(d.data || []);
     setPremios(p.data || []);
+    const linha = (mm?.data || [])[0];
+    setMetaMensal(linha ? Number(linha.meta_m3) : null);
+  }
+
+  async function salvarMetaMensal(valor) {
+    const { data: nome } = await supabase.rpc("nome_usuario_atual");
+    const { error } = await supabase
+      .from("producao_meta_mes")
+      .upsert({ mes: `${mes}-01`, meta_m3: valor, atualizado_em: new Date().toISOString(), atualizado_por_nome: nome || null });
+    if (error) return notificar("Não foi possível salvar a meta: " + error.message, "erro");
+    notificar("Meta do mês salva.");
+    setMetaMensal(valor);
   }
   useEffect(() => {
     let ativo = true;
@@ -171,6 +185,8 @@ function RelatorioMes({ mes, pessoas, pecas, setores, parametros, selecao, setSe
     pecas,
     setores,
     parametros,
+    metaMensal: metaMensal ?? parametros?.meta_mensal_m3 ?? 140,
+    salvarMetaMensal,
     conteudo: selecao.conteudo,
     salvarPremioMensal,
     abrirDia,
@@ -254,7 +270,22 @@ function MontarRelatorio({ setoresDoMes, selecao, setSelecao, souAdmin }) {
 }
 
 // Um relatório (resumo, pessoas, peças, grade) só com a parte dos setores do grupo
-function RelatorioDosSetores({ mes, dias, resumo, pessoas, pecas, setores, parametros, conteudo, grupo, titulo, salvarPremioMensal, abrirDia }) {
+function RelatorioDosSetores({
+  mes,
+  dias,
+  resumo,
+  pessoas,
+  pecas,
+  setores,
+  parametros,
+  metaMensal,
+  salvarMetaMensal,
+  conteudo,
+  grupo,
+  titulo,
+  salvarPremioMensal,
+  abrirDia,
+}) {
   const ids = grupo.map((s) => s.id);
   const regraDe = (id) => grupo.find((s) => s.id === id)?.regra || regraDoSetor(id, setores);
   const temConcretagem = ids.some((id) => regraDe(id) === "EQUIPE_META");
@@ -291,7 +322,7 @@ function RelatorioDosSetores({ mes, dias, resumo, pessoas, pecas, setores, param
   const totalColuna = (id) => linhas.reduce((s, l) => s + (l.premios[id] || 0), 0);
   const totalMensal = linhas.reduce((s, l) => s + l.mensal, 0);
   const totalGeral = linhas.reduce((s, l) => s + l.totalG, 0);
-  const meta = metaDoMes(dias, parametros?.meta_m3_padrao ?? 7);
+  const meta = metaDoMes(dias, parametros?.meta_m3_padrao ?? 7, metaMensal);
   const t = resumo.totais;
 
   return (
@@ -312,14 +343,17 @@ function RelatorioDosSetores({ mes, dias, resumo, pessoas, pecas, setores, param
               detalhe={t.diasComProducao ? `${num(t.m3 / t.diasComProducao, 2)} m³ por dia` : ""}
             />
           )}
-          {temConcretagem && meta.meta > 0 && (
-            <Cartao
-              rotulo="Meta do mês"
-              valor={`${meta.pct}%`}
-              detalhe={`${num(meta.feito, 1)} de ${num(meta.meta, 1)} m³ em ${meta.dias} ${meta.dias === 1 ? "dia" : "dias"}${
-                meta.diasAbaixo ? ` · ${meta.diasAbaixo} ${meta.diasAbaixo === 1 ? "dia abaixo" : "dias abaixo"} da meta` : ""
-              }`}
-            />
+          {temConcretagem && (
+            <div className={`rounded-xl border p-3 shadow-sm ${meta.batida ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>
+              <p className="text-xs text-slate-500">Meta do mês</p>
+              <p className={`text-xl font-bold ${meta.batida ? "text-emerald-800" : "text-amber-800"}`}>
+                {meta.pct === null ? "—" : `${meta.pct}%`} {meta.batida ? "✓" : ""}
+              </p>
+              <p className="text-[11px] text-slate-600">
+                {num(meta.feito, 1)} de <MetaMensal key={metaMensal} valor={metaMensal} salvar={salvarMetaMensal} /> m³
+                {meta.diasAbaixo ? ` · ${meta.diasAbaixo} ${meta.diasAbaixo === 1 ? "dia abaixo" : "dias abaixo"} da meta do dia` : ""}
+              </p>
+            </div>
           )}
           {temConcretagem && <Cartao rotulo="Peças concretadas" valor={num(t.pecasConcretadas, 0)} />}
           {temArmacao && <Cartao rotulo="Peças armadas" valor={num(t.pecasArmadas, 0)} />}
@@ -490,6 +524,36 @@ function PecasPorArmador({ linhas, nomeDe, pecaDe }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function MetaMensal({ valor, salvar }) {
+  const inicial = paraTexto(valor);
+  const [texto, setTexto] = useState(inicial);
+  const mudou = texto.trim() !== inicial;
+  const v = lerNumero(texto);
+  return (
+    <>
+      <span className="hidden print:inline">{num(valor, 1)}</span>
+      <span className="inline-flex items-center gap-1 print:hidden">
+        <input
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          inputMode="decimal"
+          title="Meta de m³ deste mês"
+          className="w-14 rounded border border-slate-300 bg-white px-1 py-0 text-[11px] text-right"
+        />
+        {mudou && (
+          <button
+            onClick={() => salvar(v)}
+            disabled={v === null || v < 0}
+            className="rounded bg-emerald-600 px-1.5 py-0 text-[10px] text-white disabled:opacity-50"
+          >
+            Salvar
+          </button>
+        )}
+      </span>
+    </>
   );
 }
 

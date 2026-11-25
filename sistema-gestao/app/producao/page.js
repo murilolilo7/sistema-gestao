@@ -56,7 +56,12 @@ function ProducaoPage({ souAdmin }) {
         pecas: c.data || [],
         funcoes: f.data || [],
         setores: listaSetores(st.data),
-        parametros: pr.data || { premio_concretagem_dia: 140, meta_m3_padrao: 7, permitir_soma_pecas: false },
+        parametros: pr.data || {
+          premio_concretagem_pessoa: 14,
+          meta_m3_padrao: 7,
+          meta_mensal_m3: 140,
+          permitir_soma_pecas: false,
+        },
       });
     setCarregando(false);
   }
@@ -648,28 +653,35 @@ function LinhaPessoa({ p, pessoas, funcoes, setores, recarregar, souAdmin }) {
 // Valores padrão da fábrica: prêmio fixo da concretagem por dia e meta de m³.
 function ValoresPadrao({ parametros, recarregar }) {
   const original = {
-    premio: paraTexto(parametros?.premio_concretagem_dia ?? 140),
+    premio: paraTexto(parametros?.premio_concretagem_pessoa ?? 14),
     meta: paraTexto(parametros?.meta_m3_padrao ?? 7),
+    metaMes: paraTexto(parametros?.meta_mensal_m3 ?? 140),
     somaPecas: !!parametros?.permitir_soma_pecas,
   };
   const [v, setV] = useState(original);
   const [salvando, setSalvando] = useState(false);
   const mudou =
-    v.premio.trim() !== original.premio || v.meta.trim() !== original.meta || v.somaPecas !== original.somaPecas;
+    v.premio.trim() !== original.premio ||
+    v.meta.trim() !== original.meta ||
+    v.metaMes.trim() !== original.metaMes ||
+    v.somaPecas !== original.somaPecas;
 
   async function salvar(e) {
     e.preventDefault();
     const premio = lerNumero(v.premio);
     const meta = lerNumero(v.meta);
+    const metaMes = lerNumero(v.metaMes);
     if (premio === null || premio < 0) return notificar("Prêmio da concretagem inválido.", "erro");
-    if (meta === null || meta < 0) return notificar("Meta de m³ inválida.", "erro");
+    if (meta === null || meta < 0) return notificar("Meta de m³ por dia inválida.", "erro");
+    if (metaMes === null || metaMes < 0) return notificar("Meta de m³ do mês inválida.", "erro");
     setSalvando(true);
     const { data: nome } = await supabase.rpc("nome_usuario_atual");
     const { error } = await supabase
       .from("producao_parametros")
       .update({
-        premio_concretagem_dia: premio,
+        premio_concretagem_pessoa: premio,
         meta_m3_padrao: meta,
+        meta_mensal_m3: metaMes,
         permitir_soma_pecas: v.somaPecas,
         atualizado_em: new Date().toISOString(),
         atualizado_por_nome: nome || null,
@@ -689,12 +701,15 @@ function ValoresPadrao({ parametros, recarregar }) {
         salvos.
         {parametros?.atualizado_por_nome && ` Última alteração: ${parametros.atualizado_por_nome}.`}
       </p>
-      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end">
-        <Campo rotulo="Prêmio fixo da concretagem por dia (R$) — dividido entre a equipe">
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr_auto] items-end">
+        <Campo rotulo="Prêmio da concretagem por pessoa da equipe (R$)">
           <input value={v.premio} onChange={(e) => setV({ ...v, premio: e.target.value })} inputMode="decimal" className={ESTILO_INPUT} />
         </Campo>
         <Campo rotulo="Meta de m³ por dia">
           <input value={v.meta} onChange={(e) => setV({ ...v, meta: e.target.value })} inputMode="decimal" className={ESTILO_INPUT} />
+        </Campo>
+        <Campo rotulo="Meta de m³ do mês">
+          <input value={v.metaMes} onChange={(e) => setV({ ...v, metaMes: e.target.value })} inputMode="decimal" className={ESTILO_INPUT} />
         </Campo>
         <button
           disabled={salvando || !mudou}
@@ -775,13 +790,13 @@ function AbaPecas({ pecas, parametros, recarregar }) {
         <br />O valor da armação do <b>pilar sem consolo</b> também entra no Custo real do pilar (Engenharia). Toda
         alteração fica no Histórico de Preços.
         <br />
-        <b>Concretagem:</b> o prêmio do dia é um <b>valor fixo</b> (abaixo) dividido entre a equipe, e só é pago no
-        dia em que o m³ bate a meta. O valor de concretagem por peça só é usado se a soma das peças estiver
+        <b>Concretagem:</b> o prêmio do dia é o <b>valor por pessoa</b> (abaixo) × pessoas lançadas na equipe do dia,
+        contando quem faltou, dividido entre quem trabalhou. Só é pago no dia em que o m³ bate a meta. O valor de concretagem por peça só é usado se a soma das peças estiver
         permitida (abaixo) e for escolhida no dia.
       </Explicacao>
 
       <ValoresPadrao
-        key={`${parametros?.premio_concretagem_dia}:${parametros?.meta_m3_padrao}:${parametros?.permitir_soma_pecas}`}
+        key={`${parametros?.premio_concretagem_pessoa}:${parametros?.meta_m3_padrao}:${parametros?.meta_mensal_m3}:${parametros?.permitir_soma_pecas}`}
         parametros={parametros}
         recarregar={recarregar}
       />

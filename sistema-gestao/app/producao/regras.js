@@ -67,10 +67,10 @@ export function metaBatida(m3, meta) {
   return Math.round((Number(m3) || 0) * 1000) >= Math.round(m * 1000);
 }
 
-// Meta do mês = soma da meta de cada dia trabalhado (dia com m³), ou seja,
-// 7 m³ × dias trabalhados. 10 dias trabalhados = 70 m³; 20 dias = 140 m³.
-// Dia sem meta salva (histórico) conta com a meta padrão.
-export function metaDoMes(dias, metaPadrao = 7) {
+// Meta do mês: o valor do mês (padrão 140 m³) quando informado; sem ele,
+// a soma da meta de cada dia trabalhado (7 m³ × dias).
+// Também conta os dias abaixo da meta do dia (dia sem meta salva usa a padrão).
+export function metaDoMes(dias, metaPadrao = 7, metaMensal = null) {
   let diasTrab = 0;
   let meta = 0;
   let feito = 0;
@@ -84,6 +84,7 @@ export function metaDoMes(dias, metaPadrao = 7) {
     feito += m3;
     if (metaBatida(m3, metaDia)) batidos += 1;
   }
+  if (Number(metaMensal) > 0) meta = Number(metaMensal);
   return {
     dias: diasTrab,
     meta: Math.round(meta * 1000) / 1000,
@@ -175,6 +176,15 @@ export function premioConcretagemDia(informado, pecas) {
   return pecas.reduce((s, x) => s + (Number(x.quantidade) || 0) * (Number(x.valor_unit) || 0), 0);
 }
 
+// Prêmio da concretagem do dia, já com o tamanho da equipe:
+// valor por pessoa × pessoas lançadas na equipe (contando quem faltou);
+// dia antigo = valor total digitado; sem nenhum dos dois = soma das peças.
+export function premioConcretagemDoDia(dia, pecas, pessoasNaEquipe) {
+  const pp = dia?.premio_por_pessoa;
+  if (pp !== null && pp !== undefined && pp !== "") return (Number(pp) || 0) * (Number(pessoasNaEquipe) || 0);
+  return premioConcretagemDia(dia?.premio_concretagem_informado, pecas || []);
+}
+
 const arred = (v) => Math.round(v * 100) / 100;
 
 // Junta o mês: por pessoa (dias, faltas, prêmios), por setor e totais.
@@ -253,7 +263,7 @@ export function resumoMes(dias, premiosMensais = [], setores = SETORES) {
 
     const equipe = pres.filter((x) => regra(x.setor) === "EQUIPE_META");
     const bateu = metaBatida(m3, d.meta_m3);
-    const premioDia = bateu ? premioConcretagemDia(d.premio_concretagem_informado, conc) : 0;
+    const premioDia = bateu ? premioConcretagemDoDia(d, conc, equipe.length) : 0;
     if (!bateu && equipe.some((x) => trabalhou(x.situacao))) tot.diasSemPremioMeta += 1;
     const partes = dividirPremio(premioDia, equipe.map((x) => x.situacao));
     equipe.forEach((x, i) => {

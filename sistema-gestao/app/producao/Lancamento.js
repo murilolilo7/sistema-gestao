@@ -150,24 +150,29 @@ function estadoInicial(dia, parametros) {
   for (const a of dia?.producao_armacao || []) arm[`${a.colaborador_id}:${a.peca_id}`] = paraTexto(a.quantidade);
   // Meta de m³: dia novo já vem com a meta padrão (7); dia antigo (importado) sem meta fica vazio.
   const meta = dia ? paraTexto(dia.meta_m3) : paraTexto(parametros?.meta_m3_padrao ?? META_PADRAO);
-  // Prêmio da concretagem: valor FIXO do dia dividido pela equipe (padrão
-  // R$ 140). Dia salvo sem valor fixo = soma das peças × valor.
+  // Prêmio da concretagem: valor POR PESSOA (padrão R$ 14) × pessoas lançadas
+  // na equipe do dia, dividido entre quem trabalhou. Dia antigo pode ter o
+  // valor TOTAL do dia; dia sem nenhum dos dois = soma das peças × valor.
+  const tem = (v) => v !== null && v !== undefined;
   const informado = dia?.premio_concretagem_informado;
-  const modoConc = !dia || (informado !== null && informado !== undefined) ? "FIXO" : "PECAS";
-  const premioFixo = paraTexto(
-    informado !== null && informado !== undefined ? informado : parametros?.premio_concretagem_dia ?? PREMIO_PADRAO
+  const modoConc = !dia || tem(dia.premio_por_pessoa) ? "PESSOA" : tem(informado) ? "TOTAL" : "PECAS";
+  const premioPessoa = paraTexto(
+    tem(dia?.premio_por_pessoa) ? dia.premio_por_pessoa : parametros?.premio_concretagem_pessoa ?? PREMIO_PESSOA_PADRAO
   );
-  return { m3: paraTexto(dia?.m3_concretado), meta, modoConc, premioFixo, obs: dia?.observacao || "", pres, conc, arm };
+  const premioFixo = paraTexto(tem(informado) ? informado : "");
+  return { m3: paraTexto(dia?.m3_concretado), meta, modoConc, premioPessoa, premioFixo, obs: dia?.observacao || "", pres, conc, arm };
 }
 
 const META_PADRAO = 7;
-const PREMIO_PADRAO = 140;
+const PREMIO_PESSOA_PADRAO = 14;
+const META_MENSAL_PADRAO = 140;
 
 function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoCarregar }) {
   const [dia, setDia] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [r, setR] = useState(estadoInicial(null, parametros));
   const [mesAntes, setMesAntes] = useState([]);
+  const [metaMensal, setMetaMensal] = useState(null);
   const [visao, setVisao] = useState("ambos"); // dia | mes | ambos
   const [salvando, setSalvando] = useState(false);
   const [verOutros, setVerOutros] = useState(false);
@@ -184,6 +189,12 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
     let ativo = true;
     buscarDia(data).then((res) => ativo && aplicar(res));
     buscarMes(data).then(({ data: d }) => ativo && setMesAntes(d || []));
+    supabase
+      .from("producao_meta_mes")
+      .select("meta_m3")
+      .eq("mes", `${data.slice(0, 7)}-01`)
+      .maybeSingle()
+      .then(({ data: m }) => ativo && setMetaMensal(m ? Number(m.meta_m3) : null));
     return () => {
       ativo = false;
     };
@@ -227,19 +238,22 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
       return x.quantidade > 0 && ehArmador(r.pres[x.colaborador_id]);
     });
 
-  const fixo = r.modoConc === "FIXO";
+  const fixo = r.modoConc !== "PECAS";
   // "Soma das peças" só aparece se estiver ligado em Peças e prêmios (ou se o dia já foi salvo assim)
-  const mostrarSomaPecas = !!parametros?.permitir_soma_pecas || !fixo;
+  const mostrarSomaPecas = !!parametros?.permitir_soma_pecas || r.modoConc === "PECAS";
   const somaPecas = concretagem.reduce((s, x) => {
     const p = pecas.find((pp) => pp.id === x.peca_id);
     return s + x.quantidade * (p ? valorConc(p) || 0 : 0);
   }, 0);
-  const premioConcCheio = fixo ? lerNumero(r.premioFixo) || 0 : somaPecas;
+  // equipe da concretagem = todos lançados no dia (P, M, S e F)
+  const equipe = presencas.filter((p) => regra(p.setor) === "EQUIPE_META");
+  const valorPessoa = lerNumero(r.premioPessoa) || 0;
+  const premioConcCheio =
+    r.modoConc === "PESSOA" ? valorPessoa * equipe.length : r.modoConc === "TOTAL" ? lerNumero(r.premioFixo) || 0 : somaPecas;
   // Prêmio do dia só é pago se bater a meta do dia
   const temMeta = lerNumero(r.meta) > 0;
   const bateuMeta = metaBatida(lerNumero(r.m3), lerNumero(r.meta));
   const premioConc = bateuMeta ? premioConcCheio : 0;
-  const equipe = presencas.filter((p) => regra(p.setor) === "EQUIPE_META");
   const partes = dividirPremio(premioConc, equipe.map((p) => p.situacao));
   const parteDe = Object.fromEntries(equipe.map((p, i) => [p.colaborador_id, partes[i]]));
 
@@ -255,11 +269,12 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
   const armadores = pessoasDoDia.filter((p) => ehArmador(r.pres[p.id]));
   const avisos = avisosDoDia({ m3: lerNumero(r.m3), presencas, concretagem, armacao, pecas, premioFixo: fixo, setores });
   if (fixo && !(premioConcCheio > 0) && equipe.some((e) => e.situacao === "P" || e.situacao === "M"))
-    avisos.push("O prêmio fixo da concretagem do dia está zerado.");
+    avisos.push("O prêmio da concretagem do dia está zerado.");
   // Meta do mês: dias já salvos + o dia da tela
   const metaMes = metaDoMes(
     [...mesAntes, { m3_concretado: lerNumero(r.m3), meta_m3: lerNumero(r.meta) }],
-    parametros?.meta_m3_padrao ?? META_PADRAO
+    parametros?.meta_m3_padrao ?? META_PADRAO,
+    metaMensal ?? parametros?.meta_mensal_m3 ?? META_MENSAL_PADRAO
   );
 
   // Prêmio de cada um: hoje (o que está na tela) e acumulado no mês (dias já salvos + hoje)
@@ -330,8 +345,11 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
     const meta = lerNumero(r.meta);
     if (r.meta.trim() && (meta === null || meta < 0)) return notificar("A meta de m³ não é um número válido.", "erro");
     const valorFixo = lerNumero(r.premioFixo);
-    if (fixo && (valorFixo === null || valorFixo < 0))
-      return notificar("O prêmio fixo da concretagem não é um número válido.", "erro");
+    if (r.modoConc === "TOTAL" && (valorFixo === null || valorFixo < 0))
+      return notificar("O valor do dia da concretagem não é um número válido.", "erro");
+    const porPessoa = lerNumero(r.premioPessoa);
+    if (r.modoConc === "PESSOA" && (porPessoa === null || porPessoa < 0))
+      return notificar("O valor por pessoa da concretagem não é um número válido.", "erro");
     const qtdRuim =
       Object.values(r.conc).some((q) => q.trim() && !(lerNumero(q) >= 0)) ||
       Object.values(r.arm).some((q) => q.trim() && !(lerNumero(q) >= 0));
@@ -350,7 +368,8 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
         data,
         m3: m3 === null ? "" : m3,
         meta: meta === null ? "" : meta,
-        premio_fixo: fixo ? valorFixo : "",
+        premio_fixo: r.modoConc === "TOTAL" ? valorFixo : "",
+        premio_por_pessoa: r.modoConc === "PESSOA" ? porPessoa : "",
         observacao: r.obs,
         presencas: presencas.map(({ colaborador_id, setor, situacao }) => ({ colaborador_id, setor, situacao })),
         concretagem,
@@ -551,33 +570,50 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
             )}
             {metaMes.dias > 0 && (
               <p className="mb-4 text-xs text-slate-600">
-                Mês até este dia: {metaMes.dias} {metaMes.dias === 1 ? "dia trabalhado" : "dias trabalhados"} · meta{" "}
-                {num(metaMes.meta, 1)} m³ · feito {num(metaMes.feito, 1)} m³{" "}
-                <b className={metaMes.batida ? "text-emerald-700" : "text-amber-700"}>({metaMes.pct}%)</b>
+                Meta do mês: {num(metaMes.feito, 1)} de {num(metaMes.meta, 1)} m³{" "}
+                <b className={metaMes.batida ? "text-emerald-700" : "text-amber-700"}>
+                  ({metaMes.pct}%{metaMes.batida ? " ✓ batida" : ""})
+                </b>{" "}
+                · {metaMes.dias} {metaMes.dias === 1 ? "dia trabalhado" : "dias trabalhados"}
                 {metaMes.diasAbaixo > 0 &&
-                  ` · ${metaMes.diasAbaixo} ${metaMes.diasAbaixo === 1 ? "dia abaixo" : "dias abaixo"} da meta`}
+                  ` · ${metaMes.diasAbaixo} ${metaMes.diasAbaixo === 1 ? "dia abaixo" : "dias abaixo"} da meta do dia`}
               </p>
             )}
             <div className="mb-4 rounded-lg border border-slate-200 p-3">
               <p className="text-sm font-medium text-slate-700 mb-2">Prêmio da concretagem do dia</p>
-              <label className="flex items-center gap-2 text-sm text-slate-700 mb-1.5">
-                {mostrarSomaPecas && (
+              <label className="flex flex-wrap items-center gap-2 text-sm text-slate-700 mb-1.5">
+                {(mostrarSomaPecas || r.modoConc === "TOTAL") && (
                   <input
                     type="radio"
-                    checked={fixo}
-                    onChange={() => mudar((a) => ({ ...a, modoConc: "FIXO" }))}
+                    checked={r.modoConc === "PESSOA"}
+                    onChange={() => mudar((a) => ({ ...a, modoConc: "PESSOA" }))}
                     className="accent-emerald-600"
                   />
                 )}
-                Valor fixo do dia:
+                Por pessoa da equipe: R$
                 <input
-                  value={r.premioFixo}
-                  onChange={(e) => mudar((a) => ({ ...a, modoConc: "FIXO", premioFixo: e.target.value }))}
+                  value={r.premioPessoa}
+                  onChange={(e) => mudar((a) => ({ ...a, modoConc: "PESSOA", premioPessoa: e.target.value }))}
                   inputMode="decimal"
-                  className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+                  className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
                 />
-                <span className="text-xs text-slate-500">R$</span>
+                <span className="text-slate-500">
+                  × {equipe.length} {equipe.length === 1 ? "pessoa" : "pessoas"} = <b>{brl(valorPessoa * equipe.length)}</b>
+                </span>
               </label>
+              {r.modoConc === "TOTAL" && (
+                <label className="flex items-center gap-2 text-sm text-slate-700 mb-1.5">
+                  <input type="radio" checked readOnly className="accent-emerald-600" />
+                  Valor total do dia:
+                  <input
+                    value={r.premioFixo}
+                    onChange={(e) => mudar((a) => ({ ...a, premioFixo: e.target.value }))}
+                    inputMode="decimal"
+                    className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+                  />
+                  <span className="text-xs text-slate-500">R$</span>
+                </label>
+              )}
               {mostrarSomaPecas && (
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
@@ -633,8 +669,12 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar, aoC
           <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 self-start">
             <p className="text-sm font-medium text-slate-700 mb-1">Divisão do prêmio da concretagem</p>
             <p className="text-xs text-slate-500 mb-2">
-              {fixo ? (
-                <>Prêmio fixo do dia = {brl(premioConcCheio)}.</>
+              {r.modoConc === "PESSOA" ? (
+                <>
+                  {brl(valorPessoa)} × {equipe.length} da equipe (contando quem faltou) = {brl(premioConcCheio)}.
+                </>
+              ) : r.modoConc === "TOTAL" ? (
+                <>Valor do dia = {brl(premioConcCheio)}.</>
               ) : (
                 <>Soma das peças concretadas × valor de cada uma = {brl(premioConcCheio)}.</>
               )}{" "}
