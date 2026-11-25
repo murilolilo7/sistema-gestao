@@ -499,8 +499,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
               </label>
             </div>
             <p className="text-sm font-medium text-slate-700 mb-1">
-              Peças concretadas{" "}
-              {fixo && <span className="font-normal text-xs text-slate-500">— só a quantidade, para o relatório</span>}
+              Peças concretadas
             </p>
             <table className="w-full text-sm">
               <thead>
