@@ -335,7 +335,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
       <p className="text-xs text-slate-500">
         {dia
           ? dia.origem === "PLANILHA" && !dia.atualizado_por_nome
-            ? "Dia importado da planilha de produção."
+            ? "Dia do histórico, lançado antes do sistema."
             : `Último salvamento: ${dia.atualizado_por_nome || "—"} em ${new Date(dia.atualizado_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.`
           : "Este dia ainda não foi lançado."}
       </p>
@@ -479,7 +479,7 @@ function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
                   onChange={() => mudar((a) => ({ ...a, modoConc: "FIXO" }))}
                   className="accent-emerald-600"
                 />
-                Valor fixo do dia (como a planilha):
+                Valor fixo do dia:
                 <input
                   value={r.premioFixo}
                   onChange={(e) => mudar((a) => ({ ...a, modoConc: "FIXO", premioFixo: e.target.value }))}

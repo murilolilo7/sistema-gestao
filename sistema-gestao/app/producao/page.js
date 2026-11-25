@@ -657,7 +657,7 @@ function AbaPecas({ pecas, parametros, recarregar }) {
         <br />O valor da armação do <b>pilar sem consolo</b> também entra no Custo real do pilar (Engenharia). Toda
         alteração fica no Histórico de Preços.
         <br />
-        <b>Concretagem, igual à planilha:</b> o prêmio do dia é um <b>valor fixo</b> (abaixo) dividido entre a equipe.
+        <b>Concretagem:</b> o prêmio do dia é um <b>valor fixo</b> (abaixo) dividido entre a equipe.
         O valor de concretagem por peça só é usado se, no dia, escolherem &quot;Soma das peças&quot;.
       </Explicacao>
 

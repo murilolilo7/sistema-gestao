@@ -212,7 +212,7 @@ function RelatorioMes({ mes, pessoas, pecas, setores, abrirDia }) {
 
       {/* ---------------- grade do mês ---------------- */}
       <Bloco
-        titulo="Mês em grade (igual à planilha)"
+        titulo="Mês em grade"
         texto="Cada letra é o que foi lançado no dia. Letra com bolinha = trabalhou em outro setor naquele dia. Clique no número do dia para abrir o lançamento."
       >
         <GradeMes mes={mes} dias={dias} linhas={linhas} nomeDe={nomeDe} setorDe={setorDe} setores={setores} abrirDia={abrirDia} />
