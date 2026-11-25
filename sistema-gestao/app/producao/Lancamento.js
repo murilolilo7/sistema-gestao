@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar, confirmar } from "@/components/Ui";
 import { lerNumero, paraTexto } from "@/app/engenharia/custo-pilar/campos";
-import { SETORES, SITUACOES, rotuloSetor, dividirPremio, avisosDoDia, percentualMeta } from "./regras";
+import { SETORES, SITUACOES, rotuloSetor, dividirPremio, avisosDoDia, percentualMeta, resumoMes } from "./regras";
 
 const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const num = (v, c = 2) => Number(v || 0).toLocaleString("pt-BR", { maximumFractionDigits: c });
@@ -33,7 +33,7 @@ export function buscarDia(data) {
     .maybeSingle();
 }
 
-export default function Lancamento({ pessoas, pecas, setores = SETORES, data, irParaData }) {
+export default function Lancamento({ pessoas, pecas, setores = SETORES, parametros, data, irParaData }) {
   const [sujo, setSujo] = useState(false);
 
   async function trocar(nova) {
@@ -82,45 +82,76 @@ export default function Lancamento({ pessoas, pecas, setores = SETORES, data, ir
         {sujo && <span className="ml-auto text-xs font-medium text-amber-700">● alterações não salvas</span>}
       </div>
 
-      <DiaLancamento key={data} data={data} pessoas={pessoas} pecas={pecas} setores={setores} aoSujar={setSujo} />
+      <DiaLancamento
+        key={data}
+        data={data}
+        pessoas={pessoas}
+        pecas={pecas}
+        setores={setores}
+        parametros={parametros}
+        aoSujar={setSujo}
+      />
     </div>
   );
 }
 
-function estadoInicial(dia) {
+// Mês do dia (sem o próprio dia) para o acumulado de cada pessoa
+function buscarMes(data) {
+  const ini = `${data.slice(0, 7)}-01`;
+  return supabase
+    .from("producao_dias")
+    .select("*, producao_presencas(*), producao_concretagem_pecas(*), producao_armacao(*)")
+    .gte("data", ini)
+    .lte("data", data)
+    .neq("data", data);
+}
+
+function estadoInicial(dia, parametros) {
   const pres = {};
   const conc = {};
   const arm = {};
   for (const p of dia?.producao_presencas || []) pres[p.colaborador_id] = { situacao: p.situacao, setor: p.setor };
   for (const c of dia?.producao_concretagem_pecas || []) conc[c.peca_id] = paraTexto(c.quantidade);
   for (const a of dia?.producao_armacao || []) arm[`${a.colaborador_id}:${a.peca_id}`] = paraTexto(a.quantidade);
-  // Meta de m³: dia novo já vem com 10; dia antigo (importado) sem meta fica vazio.
-  const meta = dia ? paraTexto(dia.meta_m3) : paraTexto(META_PADRAO);
-  return { m3: paraTexto(dia?.m3_concretado), meta, obs: dia?.observacao || "", pres, conc, arm };
+  // Meta de m³: dia novo já vem com a meta padrão (10); dia antigo (importado) sem meta fica vazio.
+  const meta = dia ? paraTexto(dia.meta_m3) : paraTexto(parametros?.meta_m3_padrao ?? META_PADRAO);
+  // Prêmio da concretagem, igual à planilha: valor FIXO do dia dividido pela equipe
+  // (padrão R$ 140). Dia salvo sem valor fixo = soma das peças × valor.
+  const informado = dia?.premio_concretagem_informado;
+  const modoConc = !dia || (informado !== null && informado !== undefined) ? "FIXO" : "PECAS";
+  const premioFixo = paraTexto(
+    informado !== null && informado !== undefined ? informado : parametros?.premio_concretagem_dia ?? PREMIO_PADRAO
+  );
+  return { m3: paraTexto(dia?.m3_concretado), meta, modoConc, premioFixo, obs: dia?.observacao || "", pres, conc, arm };
 }
 
 const META_PADRAO = 10;
+const PREMIO_PADRAO = 140;
 
-function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
+function DiaLancamento({ data, pessoas, pecas, setores, parametros, aoSujar }) {
   const [dia, setDia] = useState(null);
   const [carregando, setCarregando] = useState(true);
-  const [r, setR] = useState(estadoInicial(null));
+  const [r, setR] = useState(estadoInicial(null, parametros));
+  const [mesAntes, setMesAntes] = useState([]);
+  const [visao, setVisao] = useState("ambos"); // dia | mes | ambos
   const [salvando, setSalvando] = useState(false);
   const [verOutros, setVerOutros] = useState(false);
 
   function aplicar({ data: d, error }) {
     if (error) notificar("Não foi possível carregar o dia: " + error.message, "erro");
     setDia(d || null);
-    setR(estadoInicial(d));
+    setR(estadoInicial(d, parametros));
     setCarregando(false);
   }
 
   useEffect(() => {
     let ativo = true;
     buscarDia(data).then((res) => ativo && aplicar(res));
+    buscarMes(data).then(({ data: d }) => ativo && setMesAntes(d || []));
     return () => {
       ativo = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
   function mudar(fn) {
@@ -156,13 +187,12 @@ function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
       return x.quantidade > 0 && v?.setor === "ARMACAO" && (v.situacao === "P" || v.situacao === "M");
     });
 
-  const usarInformado = concretagem.length === 0 && dia?.premio_concretagem_informado !== null && dia?.premio_concretagem_informado !== undefined;
-  const premioConc = usarInformado
-    ? Number(dia.premio_concretagem_informado)
-    : concretagem.reduce((s, x) => {
-        const p = pecas.find((pp) => pp.id === x.peca_id);
-        return s + x.quantidade * (p ? valorConc(p) || 0 : 0);
-      }, 0);
+  const fixo = r.modoConc === "FIXO";
+  const somaPecas = concretagem.reduce((s, x) => {
+    const p = pecas.find((pp) => pp.id === x.peca_id);
+    return s + x.quantidade * (p ? valorConc(p) || 0 : 0);
+  }, 0);
+  const premioConc = fixo ? lerNumero(r.premioFixo) || 0 : somaPecas;
   const equipe = presencas.filter((p) => p.setor === "CONCRETAGEM");
   const partes = dividirPremio(premioConc, equipe.map((p) => p.situacao));
   const parteDe = Object.fromEntries(equipe.map((p, i) => [p.colaborador_id, partes[i]]));
@@ -170,7 +200,42 @@ function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
   const armadores = pessoasDoDia.filter(
     (p) => r.pres[p.id]?.setor === "ARMACAO" && (r.pres[p.id]?.situacao === "P" || r.pres[p.id]?.situacao === "M")
   );
-  const avisos = avisosDoDia({ m3: lerNumero(r.m3), presencas, concretagem, armacao, pecas });
+  const avisos = avisosDoDia({ m3: lerNumero(r.m3), presencas, concretagem, armacao, pecas, premioFixo: fixo });
+  if (fixo && !(premioConc > 0) && equipe.some((e) => e.situacao === "P" || e.situacao === "M"))
+    avisos.push("O prêmio fixo da concretagem do dia está zerado.");
+
+  // Prêmio de cada um: hoje (o que está na tela) e acumulado no mês (dias já salvos + hoje)
+  const premioArmDe = (id) =>
+    armacao
+      .filter((x) => x.colaborador_id === id)
+      .reduce((s, x) => {
+        const p = pecas.find((pp) => pp.id === x.peca_id);
+        return s + x.quantidade * (p ? valorArm(id, p) : 0);
+      }, 0);
+  const mesLinhas = new Map(resumoMes(mesAntes).linhas.map((l) => [l.colaborador_id, l]));
+  const idsPremio = new Set([
+    ...equipe.map((e) => e.colaborador_id),
+    ...armacao.map((a) => a.colaborador_id),
+    ...mesLinhas.keys(),
+  ]);
+  const premiosPessoa = [...idsPremio]
+    .map((id) => {
+      const hojeConc = parteDe[id] || 0;
+      const hojeArm = premioArmDe(id);
+      const m = mesLinhas.get(id);
+      return {
+        id,
+        nome: pessoas.find((p) => p.id === id)?.nome || `#${id}`,
+        hojeConc,
+        hojeArm,
+        hoje: hojeConc + hojeArm,
+        mesConc: (m?.premioConcretagem || 0) + hojeConc,
+        mesArm: (m?.premioArmacao || 0) + hojeArm,
+      };
+    })
+    .map((x) => ({ ...x, mes: x.mesConc + x.mesArm }))
+    .filter((x) => x.hoje > 0 || x.mes > 0)
+    .sort((a, b) => b.mes - a.mes || a.nome.localeCompare(b.nome));
 
   function marcar(p, situacao) {
     mudar((a) => {
@@ -199,6 +264,9 @@ function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
     if (r.m3.trim() && (m3 === null || m3 < 0)) return notificar("O m³ do dia não é um número válido.", "erro");
     const meta = lerNumero(r.meta);
     if (r.meta.trim() && (meta === null || meta < 0)) return notificar("A meta de m³ não é um número válido.", "erro");
+    const valorFixo = lerNumero(r.premioFixo);
+    if (fixo && (valorFixo === null || valorFixo < 0))
+      return notificar("O prêmio fixo da concretagem não é um número válido.", "erro");
     const qtdRuim =
       Object.values(r.conc).some((q) => q.trim() && !(lerNumero(q) >= 0)) ||
       Object.values(r.arm).some((q) => q.trim() && !(lerNumero(q) >= 0));
@@ -213,13 +281,23 @@ function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
     }
     setSalvando(true);
     const { error } = await supabase.rpc("salvar_dia_producao", {
-      payload: { data, m3: m3 === null ? "" : m3, meta: meta === null ? "" : meta, observacao: r.obs, presencas, concretagem, armacao },
+      payload: {
+        data,
+        m3: m3 === null ? "" : m3,
+        meta: meta === null ? "" : meta,
+        premio_fixo: fixo ? valorFixo : "",
+        observacao: r.obs,
+        presencas,
+        concretagem,
+        armacao,
+      },
     });
     setSalvando(false);
     if (error) return notificar("Não foi possível salvar: " + error.message, "erro");
     notificar("Dia salvo.");
     aoSujar(false);
     buscarDia(data).then(aplicar);
+    buscarMes(data).then(({ data: d }) => setMesAntes(d || []));
   }
 
   async function apagar() {
@@ -392,7 +470,37 @@ function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
                 </p>
               </div>
             )}
-            <p className="text-sm font-medium text-slate-700 mb-1">Peças concretadas</p>
+            <div className="mb-4 rounded-lg border border-slate-200 p-3">
+              <p className="text-sm font-medium text-slate-700 mb-2">Prêmio da concretagem do dia</p>
+              <label className="flex items-center gap-2 text-sm text-slate-700 mb-1.5">
+                <input
+                  type="radio"
+                  checked={fixo}
+                  onChange={() => mudar((a) => ({ ...a, modoConc: "FIXO" }))}
+                  className="accent-emerald-600"
+                />
+                Valor fixo do dia (como a planilha):
+                <input
+                  value={r.premioFixo}
+                  onChange={(e) => mudar((a) => ({ ...a, modoConc: "FIXO", premioFixo: e.target.value }))}
+                  inputMode="decimal"
+                  className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+                />
+                <span className="text-xs text-slate-500">R$</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  checked={!fixo}
+                  onChange={() => mudar((a) => ({ ...a, modoConc: "PECAS" }))}
+                  className="accent-emerald-600"
+                />
+                Soma das peças × valor de cada uma ({brl(somaPecas)})
+              </label>
+            </div>
+            <p className="text-sm font-medium text-slate-700 mb-1">
+              Peças concretadas {fixo && <span className="font-normal text-xs text-slate-500">(só para controle)</span>}
+            </p>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-slate-500">
@@ -431,8 +539,8 @@ function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
           <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 self-start">
             <p className="text-sm font-medium text-slate-700 mb-1">Divisão do prêmio da concretagem</p>
             <p className="text-xs text-slate-500 mb-2">
-              {usarInformado ? (
-                <>Prêmio do dia veio da planilha: {brl(premioConc)}. Lançando as peças, passa a valer a soma delas.</>
+              {fixo ? (
+                <>Prêmio fixo do dia = {brl(premioConc)}.</>
               ) : (
                 <>Soma das peças concretadas × valor de cada uma = {brl(premioConc)}.</>
               )}{" "}
@@ -531,8 +639,85 @@ function DiaLancamento({ data, pessoas, pecas, setores, aoSujar }) {
         )}
       </Secao>
 
-      {/* ---------------- 4. Observação ---------------- */}
-      <Secao numero="4" titulo="Observação do dia (opcional)">
+      {/* ---------------- 4. Prêmio de cada um ---------------- */}
+      <Secao
+        numero="4"
+        titulo="Prêmio de cada um"
+        resumo={`hoje ${brl(premiosPessoa.reduce((s, x) => s + x.hoje, 0))} · no mês ${brl(premiosPessoa.reduce((s, x) => s + x.mes, 0))}`}
+      >
+        <div className="flex flex-wrap items-center gap-1 mb-3">
+          {[
+            ["dia", "Do dia"],
+            ["mes", "Acumulado no mês"],
+            ["ambos", "Os dois"],
+          ].map(([id, rot]) => (
+            <button
+              key={id}
+              onClick={() => setVisao(id)}
+              className={`rounded-full border px-3 py-1 text-xs ${
+                visao === id ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {rot}
+            </button>
+          ))}
+          <span className="text-[11px] text-slate-500 ml-2">
+            Concretagem + armação. O mês soma os dias já salvos até este dia, mais o que está na tela. O prêmio mensal da
+            meta entra no relatório do mês.
+          </span>
+        </div>
+        {premiosPessoa.length === 0 ? (
+          <p className="text-sm text-slate-400">Nenhum prêmio ainda.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                  <th className="py-1.5 pr-2 font-medium">Nome</th>
+                  {visao !== "mes" && (
+                    <>
+                      <th className="py-1.5 px-2 font-medium text-right">Concretagem hoje</th>
+                      <th className="py-1.5 px-2 font-medium text-right">Armação hoje</th>
+                      <th className="py-1.5 px-2 font-medium text-right">Total hoje</th>
+                    </>
+                  )}
+                  {visao !== "dia" && (
+                    <>
+                      <th className="py-1.5 px-2 font-medium text-right">Concretagem no mês</th>
+                      <th className="py-1.5 px-2 font-medium text-right">Armação no mês</th>
+                      <th className="py-1.5 px-2 font-medium text-right">Total no mês</th>
+                    </>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {premiosPessoa.map((x) => (
+                  <tr key={x.id} className="border-t border-slate-100">
+                    <td className="py-1.5 pr-2 text-slate-700">{x.nome}</td>
+                    {visao !== "mes" && (
+                      <>
+                        <td className="py-1.5 px-2 text-right">{x.hojeConc ? brl(x.hojeConc) : "—"}</td>
+                        <td className="py-1.5 px-2 text-right">{x.hojeArm ? brl(x.hojeArm) : "—"}</td>
+                        <td className="py-1.5 px-2 text-right font-semibold">{brl(x.hoje)}</td>
+                      </>
+                    )}
+                    {visao !== "dia" && (
+                      <>
+                        <td className="py-1.5 px-2 text-right">{x.mesConc ? brl(x.mesConc) : "—"}</td>
+                        <td className="py-1.5 px-2 text-right">{x.mesArm ? brl(x.mesArm) : "—"}</td>
+                        <td className="py-1.5 px-2 text-right font-semibold text-emerald-700">{brl(x.mes)}</td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Secao>
+
+      {/* ---------------- 5. Observação ---------------- */}
+      <Secao numero="5" titulo="Observação do dia (opcional)">
         <textarea
           value={r.obs}
           onChange={(e) => mudar((a) => ({ ...a, obs: e.target.value }))}

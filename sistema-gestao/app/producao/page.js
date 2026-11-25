@@ -34,18 +34,19 @@ function buscarTudo() {
     supabase.from("armacao_comissao").select("*").order("ordem"),
     supabase.from("mao_de_obra").select("id, funcao, salario_bruto, encargos_pct").order("funcao"),
     supabase.from("producao_setores").select("*").order("ordem"),
+    supabase.from("producao_parametros").select("*").eq("id", 1).maybeSingle(),
   ]);
 }
 
 function ProducaoPage({ souAdmin }) {
   const [aba, setAba] = useState("lancar");
   const [dataDia, setDataDia] = useState(hojeISO());
-  const [dados, setDados] = useState({ pessoas: [], pecas: [], funcoes: [], setores: SETORES, setoresLinhas: [] });
+  const [dados, setDados] = useState({ pessoas: [], pecas: [], funcoes: [], setores: SETORES, parametros: null });
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  function aplicar([p, c, f, st]) {
-    const falha = p.error || c.error || f.error || st.error;
+  function aplicar([p, c, f, st, pr]) {
+    const falha = p.error || c.error || f.error || st.error || pr.error;
     if (falha) setErro("Não foi possível carregar: " + falha.message);
     else
       setDados({
@@ -53,7 +54,7 @@ function ProducaoPage({ souAdmin }) {
         pecas: c.data || [],
         funcoes: f.data || [],
         setores: listaSetores(st.data),
-        setoresLinhas: st.data || [],
+        parametros: pr.data || { premio_concretagem_dia: 140, meta_m3_padrao: 10 },
       });
     setCarregando(false);
   }
@@ -99,7 +100,14 @@ function ProducaoPage({ souAdmin }) {
       {carregando ? (
         <p className="text-sm text-slate-500">Carregando...</p>
       ) : aba === "lancar" ? (
-        <Lancamento pessoas={dados.pessoas} pecas={dados.pecas} setores={dados.setores} data={dataDia} irParaData={setDataDia} />
+        <Lancamento
+          pessoas={dados.pessoas}
+          pecas={dados.pecas}
+          setores={dados.setores}
+          parametros={dados.parametros}
+          data={dataDia}
+          irParaData={setDataDia}
+        />
       ) : aba === "relatorios" ? (
         <Relatorios
           pessoas={dados.pessoas}
@@ -121,7 +129,7 @@ function ProducaoPage({ souAdmin }) {
           souAdmin={souAdmin}
         />
       ) : (
-        <AbaPecas pecas={dados.pecas} recarregar={recarregar} />
+        <AbaPecas pecas={dados.pecas} parametros={dados.parametros} recarregar={recarregar} />
       )}
     </div>
   );
@@ -536,7 +544,61 @@ function LinhaPessoa({ p, pessoas, funcoes, setores, recarregar, souAdmin }) {
 
 // ------------------------------------------------------------------ Peças
 
-function AbaPecas({ pecas, recarregar }) {
+// Valores padrão da fábrica: prêmio fixo da concretagem por dia e meta de m³.
+function ValoresPadrao({ parametros, recarregar }) {
+  const original = {
+    premio: paraTexto(parametros?.premio_concretagem_dia ?? 140),
+    meta: paraTexto(parametros?.meta_m3_padrao ?? 10),
+  };
+  const [v, setV] = useState(original);
+  const [salvando, setSalvando] = useState(false);
+  const mudou = v.premio.trim() !== original.premio || v.meta.trim() !== original.meta;
+
+  async function salvar(e) {
+    e.preventDefault();
+    const premio = lerNumero(v.premio);
+    const meta = lerNumero(v.meta);
+    if (premio === null || premio < 0) return notificar("Prêmio da concretagem inválido.", "erro");
+    if (meta === null || meta < 0) return notificar("Meta de m³ inválida.", "erro");
+    setSalvando(true);
+    const { data: nome } = await supabase.rpc("nome_usuario_atual");
+    const { error } = await supabase
+      .from("producao_parametros")
+      .update({ premio_concretagem_dia: premio, meta_m3_padrao: meta, atualizado_em: new Date().toISOString(), atualizado_por_nome: nome || null })
+      .eq("id", 1);
+    setSalvando(false);
+    if (error) return notificar("Não foi possível salvar: " + error.message, "erro");
+    notificar("Valores padrão salvos. Valem para os próximos dias lançados.");
+    recarregar();
+  }
+
+  return (
+    <form onSubmit={salvar} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-sm font-medium text-slate-700 mb-1">Valores padrão do dia</p>
+      <p className="text-xs text-slate-500 mb-3">
+        Já vêm preenchidos em todo dia novo e podem ser mudados no próprio dia. Mudar aqui não altera os dias já
+        salvos.
+        {parametros?.atualizado_por_nome && ` Última alteração: ${parametros.atualizado_por_nome}.`}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end">
+        <Campo rotulo="Prêmio fixo da concretagem por dia (R$) — dividido entre a equipe">
+          <input value={v.premio} onChange={(e) => setV({ ...v, premio: e.target.value })} inputMode="decimal" className={ESTILO_INPUT} />
+        </Campo>
+        <Campo rotulo="Meta de m³ por dia">
+          <input value={v.meta} onChange={(e) => setV({ ...v, meta: e.target.value })} inputMode="decimal" className={ESTILO_INPUT} />
+        </Campo>
+        <button
+          disabled={salvando || !mudou}
+          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+        >
+          {salvando ? "Salvando..." : "Salvar"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function AbaPecas({ pecas, parametros, recarregar }) {
   const [nova, setNova] = useState({ nome: "", comissao: "", valor_concretagem: "" });
   const [salvando, setSalvando] = useState(false);
   const [verInativas, setVerInativas] = useState(false);
@@ -594,12 +656,21 @@ function AbaPecas({ pecas, recarregar }) {
         para peça cadastrada por engano, que nunca entrou em lançamento.
         <br />O valor da armação do <b>pilar sem consolo</b> também entra no Custo real do pilar (Engenharia). Toda
         alteração fica no Histórico de Preços.
+        <br />
+        <b>Concretagem, igual à planilha:</b> o prêmio do dia é um <b>valor fixo</b> (abaixo) dividido entre a equipe.
+        O valor de concretagem por peça só é usado se, no dia, escolherem &quot;Soma das peças&quot;.
       </Explicacao>
+
+      <ValoresPadrao
+        key={`${parametros?.premio_concretagem_dia}:${parametros?.meta_m3_padrao}`}
+        parametros={parametros}
+        recarregar={recarregar}
+      />
 
       {semConcretagem.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <b>{semConcretagem.length} peças ainda sem valor de concretagem.</b> Preencha a coluna &quot;Prêmio
-          concretagem&quot; para o sistema calcular o prêmio da equipe.
+          <b>{semConcretagem.length} peças sem valor de concretagem.</b> Só faz falta nos dias lançados como
+          &quot;Soma das peças&quot; — no valor fixo do dia (padrão) não precisa.
         </div>
       )}
 

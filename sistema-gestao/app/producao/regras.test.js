@@ -157,3 +157,20 @@ test("setores do cadastro e % da meta de m³", async () => {
   assert.equal(percentualMeta(12, 10), 120);
   assert.equal(percentualMeta(5, null), null);
 });
+
+test("concretagem no valor fixo do dia (como a planilha): não cobra peça nem valor por peça", async () => {
+  const { avisosDoDia, premioConcretagemDia, dividirPremio } = await import("./regras.js");
+  const presencas = [{ colaborador_id: 1, setor: "CONCRETAGEM", situacao: "P" }];
+  const pecas = [{ id: 9, nome: "PILAR", valor_concretagem: null }];
+  const conc = [{ peca_id: 9, quantidade: 3 }];
+  const fixo = avisosDoDia({ m3: 8, presencas, concretagem: [], armacao: [], pecas, premioFixo: true });
+  assert.ok(!fixo.some((a) => a.includes("nenhuma peça concretada")));
+  const fixo2 = avisosDoDia({ m3: 8, presencas, concretagem: conc, armacao: [], pecas, premioFixo: true });
+  assert.ok(!fixo2.some((a) => a.includes("sem prêmio de concretagem")));
+  const somaPecas = avisosDoDia({ m3: 8, presencas, concretagem: conc, armacao: [], pecas });
+  assert.ok(somaPecas.some((a) => a.includes("sem prêmio de concretagem")));
+  // valor fixo vale mesmo com peças lançadas (elas ficam só para controle)
+  assert.equal(premioConcretagemDia(140, [{ quantidade: 5, valor_unit: 10 }]), 140);
+  // 140 entre 7 do dia inteiro = 20 cada (dia 05/01 da planilha)
+  assert.deepEqual(dividirPremio(140, Array(7).fill("P")).map((v) => Math.round(v * 100) / 100), Array(7).fill(20));
+});

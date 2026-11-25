@@ -246,15 +246,16 @@ export function custoMaoObraMes(resumo, custoMensalPorPessoa) {
 }
 
 // Avisos do dia antes de salvar (não impedem salvar)
-export function avisosDoDia({ m3, presencas, concretagem, armacao, pecas }) {
+export function avisosDoDia({ m3, presencas, concretagem, armacao, pecas, premioFixo = false }) {
   const avisos = [];
   const equipe = presencas.filter((p) => p.setor === "CONCRETAGEM" && trabalhou(p.situacao));
   const temM3 = (Number(m3) || 0) > 0;
   if (temM3 && equipe.length === 0) avisos.push("Tem m³ concretado, mas ninguém marcado na concretagem.");
   if (!temM3 && equipe.length > 0) avisos.push("Tem gente marcada na concretagem, mas o m³ do dia está vazio.");
   if (!temM3 && concretagem.length > 0) avisos.push("Tem peças concretadas, mas o m³ do dia está vazio.");
-  if (temM3 && concretagem.length === 0) avisos.push("Tem m³, mas nenhuma peça concretada lançada (o prêmio da equipe fica zero).");
-  const semValor = concretagem
+  if (!premioFixo && temM3 && concretagem.length === 0)
+    avisos.push("Tem m³, mas nenhuma peça concretada lançada (o prêmio da equipe fica zero).");
+  const semValor = (premioFixo ? [] : concretagem)
     .map((c) => pecas.find((p) => p.id === c.peca_id))
     .filter((p) => p && (p.valor_concretagem === null || p.valor_concretagem === undefined));
   if (semValor.length)
