@@ -1,20 +1,98 @@
 // Regras simples do módulo Produção (sem acesso ao banco, para poder testar).
 
+// Como cada setor ganha prêmio. Todo setor tem uma regra (setor novo escolhe
+// uma ao ser criado).
+export const REGRAS_PREMIO = [
+  { id: "SEM", rotulo: "Sem prêmio", curto: "sem prêmio" },
+  { id: "FIXO_DIA", rotulo: "Valor fixo por dia de presença", curto: "valor fixo por dia" },
+  {
+    id: "EQUIPE_META",
+    rotulo: "Prêmio do dia dividido pela equipe, se bater a meta de m³",
+    curto: "dividido pela equipe, com meta",
+  },
+  { id: "POR_PECA", rotulo: "Por peça produzida (valor de cada peça)", curto: "por peça" },
+];
+const REGRA_PADRAO = { CONCRETAGEM: "EQUIPE_META", ARMACAO: "POR_PECA" };
+
 // Setores padrão. Os setores vêm do cadastro (tabela producao_setores) e a
-// fábrica pode criar outros; Concretagem e Armação têm regra de prêmio própria,
-// os demais entram só na presença.
+// fábrica pode criar outros.
 export const SETORES = [
-  { id: "CONCRETAGEM", rotulo: "Concretagem" },
-  { id: "ARMACAO", rotulo: "Armação" },
-  { id: "OUTRO", rotulo: "Outro setor" },
+  { id: "CONCRETAGEM", rotulo: "Concretagem", regra: "EQUIPE_META", valorDia: null },
+  { id: "ARMACAO", rotulo: "Armação", regra: "POR_PECA", valorDia: null },
+  { id: "OUTRO", rotulo: "Outro setor", regra: "SEM", valorDia: null },
 ];
 
-// Linhas do banco ({id, nome, ordem, ativo}) -> {id, rotulo}
+// Linhas do banco ({id, nome, ordem, ativo, regra_premio, valor_dia}) -> {id, rotulo, regra, valorDia}
 export function listaSetores(linhas) {
   if (!Array.isArray(linhas) || linhas.length === 0) return SETORES;
   return [...linhas]
     .sort((a, b) => (a.ordem ?? 100) - (b.ordem ?? 100) || String(a.nome).localeCompare(String(b.nome)))
-    .map((s) => ({ id: s.id, rotulo: s.nome, ativo: s.ativo !== false, fixo: !!s.fixo }));
+    .map((s) => ({
+      id: s.id,
+      rotulo: s.nome,
+      ativo: s.ativo !== false,
+      fixo: !!s.fixo,
+      regra: s.regra_premio || REGRA_PADRAO[s.id] || "SEM",
+      valorDia: s.valor_dia === null || s.valor_dia === undefined ? null : Number(s.valor_dia),
+    }));
+}
+
+export function regraDoSetor(id, setores = SETORES) {
+  return setores.find((s) => s.id === id)?.regra || REGRA_PADRAO[id] || "SEM";
+}
+
+export function rotuloRegra(regra) {
+  return REGRAS_PREMIO.find((r) => r.id === regra)?.curto || "sem prêmio";
+}
+
+// Quanto do dia a pessoa fez: dia inteiro 1, meio dia ½, sem prêmio/falta 0
+export function fatorDoDia(situacao) {
+  return situacao === "P" ? 1 : situacao === "M" ? 0.5 : 0;
+}
+
+// Valor fixo por dia: o valor guardado no dia (não muda se o setor mudar de
+// valor depois) ou, em dia ainda não salvo, o valor atual do setor.
+export function valorFixoDoDia(presenca, setores = SETORES) {
+  if (regraDoSetor(presenca.setor, setores) !== "FIXO_DIA") return 0;
+  const salvo = presenca.valor_dia;
+  const valor =
+    salvo !== null && salvo !== undefined ? Number(salvo) : setores.find((s) => s.id === presenca.setor)?.valorDia;
+  return (Number(valor) || 0) * fatorDoDia(presenca.situacao);
+}
+
+// A meta do dia foi batida? Dia sem meta (histórico) não tem trava.
+export function metaBatida(m3, meta) {
+  const m = Number(meta);
+  if (!(m > 0)) return true;
+  return Math.round((Number(m3) || 0) * 1000) >= Math.round(m * 1000);
+}
+
+// Meta do mês = soma da meta de cada dia trabalhado (dia com m³), ou seja,
+// 7 m³ × dias trabalhados. 10 dias trabalhados = 70 m³; 20 dias = 140 m³.
+// Dia sem meta salva (histórico) conta com a meta padrão.
+export function metaDoMes(dias, metaPadrao = 7) {
+  let diasTrab = 0;
+  let meta = 0;
+  let feito = 0;
+  let batidos = 0;
+  for (const d of dias) {
+    const m3 = Number(d.m3_concretado) || 0;
+    if (!(m3 > 0)) continue;
+    const metaDia = Number(d.meta_m3) > 0 ? Number(d.meta_m3) : Number(metaPadrao) || 0;
+    diasTrab += 1;
+    meta += metaDia;
+    feito += m3;
+    if (metaBatida(m3, metaDia)) batidos += 1;
+  }
+  return {
+    dias: diasTrab,
+    meta: Math.round(meta * 1000) / 1000,
+    feito: Math.round(feito * 1000) / 1000,
+    pct: meta > 0 ? Math.round((feito / meta) * 100) : null,
+    batida: meta > 0 && Math.round(feito * 1000) >= Math.round(meta * 1000),
+    diasBatidos: batidos,
+    diasAbaixo: diasTrab - batidos,
+  };
 }
 
 export function rotuloSetor(id, setores = SETORES) {
@@ -99,10 +177,13 @@ export function premioConcretagemDia(informado, pecas) {
 
 const arred = (v) => Math.round(v * 100) / 100;
 
-// Junta o mês: por pessoa (dias, faltas, prêmios) e totais.
-// dias: [{data, m3_concretado, premio_concretagem_informado,
+// Junta o mês: por pessoa (dias, faltas, prêmios), por setor e totais.
+// dias: [{data, m3_concretado, meta_m3, premio_concretagem_informado,
 //         producao_presencas:[], producao_concretagem_pecas:[], producao_armacao:[]}]
-export function resumoMes(dias, premiosMensais = []) {
+// Concretagem: o prêmio do dia só é pago se o m³ bater a meta do dia; quem
+// faltou não recebe e a parte dele fica com quem trabalhou.
+export function resumoMes(dias, premiosMensais = [], setores = SETORES) {
+  const regra = (id) => regraDoSetor(id, setores);
   const pessoas = new Map();
   const pegar = (id) => {
     if (!pessoas.has(id))
@@ -113,14 +194,30 @@ export function resumoMes(dias, premiosMensais = []) {
         semPremio: 0,
         faltas: 0,
         diasPorSetor: { CONCRETAGEM: 0, ARMACAO: 0, OUTRO: 0 },
+        porSetor: {},
         premioConcretagem: 0,
         premioArmacao: 0,
+        premioFixo: 0,
         pecasArmadas: 0,
+        armadasPorPeca: {},
         premioMensal: 0,
       });
     return pessoas.get(id);
   };
-  const tot = { diasComProducao: 0, m3: 0, premioConcretagem: 0, premioArmacao: 0, pecasConcretadas: 0, pecasArmadas: 0 };
+  const noSetor = (r, setor) =>
+    (r.porSetor[setor] ||= { dias: 0, meios: 0, semPremio: 0, faltas: 0, premio: 0, pecas: 0 });
+  const tot = {
+    diasComProducao: 0,
+    m3: 0,
+    premioConcretagem: 0,
+    premioArmacao: 0,
+    premioFixo: 0,
+    pecasConcretadas: 0,
+    pecasArmadas: 0,
+    diasSemPremioMeta: 0,
+  };
+  const porSetorTot = {};
+  const somaSetor = (setor, v) => (porSetorTot[setor] = (porSetorTot[setor] || 0) + v);
   const porPecaConcretada = new Map();
   const porPecaArmada = new Map();
 
@@ -134,19 +231,37 @@ export function resumoMes(dias, premiosMensais = []) {
 
     for (const x of pres) {
       const r = pegar(x.colaborador_id);
-      if (x.situacao === "F") r.faltas += 1;
-      else {
+      const s = noSetor(r, x.setor);
+      if (x.situacao === "F") {
+        r.faltas += 1;
+        s.faltas += 1;
+      } else {
         r.dias += 1;
-        if (x.situacao === "M") r.meios += 1;
-        if (x.situacao === "S") r.semPremio += 1;
+        s.dias += 1;
+        if (x.situacao === "M") (r.meios += 1), (s.meios += 1);
+        if (x.situacao === "S") (r.semPremio += 1), (s.semPremio += 1);
         r.diasPorSetor[x.setor] = (r.diasPorSetor[x.setor] || 0) + 1;
+      }
+      const fixo = valorFixoDoDia(x, setores);
+      if (fixo > 0) {
+        r.premioFixo += fixo;
+        s.premio += fixo;
+        tot.premioFixo += fixo;
+        somaSetor(x.setor, fixo);
       }
     }
 
-    const equipe = pres.filter((x) => x.setor === "CONCRETAGEM");
-    const premioDia = premioConcretagemDia(d.premio_concretagem_informado, conc);
+    const equipe = pres.filter((x) => regra(x.setor) === "EQUIPE_META");
+    const bateu = metaBatida(m3, d.meta_m3);
+    const premioDia = bateu ? premioConcretagemDia(d.premio_concretagem_informado, conc) : 0;
+    if (!bateu && equipe.some((x) => trabalhou(x.situacao))) tot.diasSemPremioMeta += 1;
     const partes = dividirPremio(premioDia, equipe.map((x) => x.situacao));
-    equipe.forEach((x, i) => (pegar(x.colaborador_id).premioConcretagem += partes[i]));
+    equipe.forEach((x, i) => {
+      const r = pegar(x.colaborador_id);
+      r.premioConcretagem += partes[i];
+      noSetor(r, x.setor).premio += partes[i];
+      somaSetor(x.setor, partes[i]);
+    });
     if (equipe.some((x) => trabalhou(x.situacao))) tot.premioConcretagem += premioDia;
 
     for (const c of conc) {
@@ -157,8 +272,14 @@ export function resumoMes(dias, premiosMensais = []) {
       const r = pegar(a.colaborador_id);
       const q = Number(a.quantidade) || 0;
       const v = q * (Number(a.valor_unit) || 0);
+      const setor = pres.find((x) => x.colaborador_id === a.colaborador_id)?.setor || "ARMACAO";
+      const s = noSetor(r, setor);
       r.premioArmacao += v;
       r.pecasArmadas += q;
+      r.armadasPorPeca[a.peca_id] = (r.armadasPorPeca[a.peca_id] || 0) + q;
+      s.premio += v;
+      s.pecas += q;
+      somaSetor(setor, v);
       tot.premioArmacao += v;
       tot.pecasArmadas += q;
       porPecaArmada.set(a.peca_id, (porPecaArmada.get(a.peca_id) || 0) + q);
@@ -173,9 +294,11 @@ export function resumoMes(dias, premiosMensais = []) {
 
   const linhas = [...pessoas.values()].map((r) => ({
     ...r,
+    porSetor: Object.fromEntries(Object.entries(r.porSetor).map(([k, s]) => [k, { ...s, premio: arred(s.premio) }])),
     premioConcretagem: arred(r.premioConcretagem),
     premioArmacao: arred(r.premioArmacao),
-    total: arred(r.premioConcretagem + r.premioArmacao + r.premioMensal),
+    premioFixo: arred(r.premioFixo),
+    total: arred(r.premioConcretagem + r.premioArmacao + r.premioFixo + r.premioMensal),
   }));
   return {
     linhas,
@@ -184,9 +307,11 @@ export function resumoMes(dias, premiosMensais = []) {
       m3: Math.round(tot.m3 * 1000) / 1000,
       premioConcretagem: arred(tot.premioConcretagem),
       premioArmacao: arred(tot.premioArmacao),
+      premioFixo: arred(tot.premioFixo),
       premioMensal: arred(premioMensal),
-      total: arred(tot.premioConcretagem + tot.premioArmacao + premioMensal),
+      total: arred(tot.premioConcretagem + tot.premioArmacao + tot.premioFixo + premioMensal),
     },
+    porSetor: Object.fromEntries(Object.entries(porSetorTot).map(([k, v]) => [k, arred(v)])),
     porPecaConcretada,
     porPecaArmada,
   };
@@ -246,9 +371,10 @@ export function custoMaoObraMes(resumo, custoMensalPorPessoa) {
 }
 
 // Avisos do dia antes de salvar (não impedem salvar)
-export function avisosDoDia({ m3, presencas, concretagem, armacao, pecas, premioFixo = false }) {
+export function avisosDoDia({ m3, presencas, concretagem, armacao, pecas, premioFixo = false, setores = SETORES }) {
   const avisos = [];
-  const equipe = presencas.filter((p) => p.setor === "CONCRETAGEM" && trabalhou(p.situacao));
+  const regra = (id) => regraDoSetor(id, setores);
+  const equipe = presencas.filter((p) => regra(p.setor) === "EQUIPE_META" && trabalhou(p.situacao));
   const temM3 = (Number(m3) || 0) > 0;
   if (temM3 && equipe.length === 0) avisos.push("Tem m³ concretado, mas ninguém marcado na concretagem.");
   if (!temM3 && equipe.length > 0) avisos.push("Tem gente marcada na concretagem, mas o m³ do dia está vazio.");
@@ -261,7 +387,9 @@ export function avisosDoDia({ m3, presencas, concretagem, armacao, pecas, premio
   if (semValor.length)
     avisos.push(`Peça sem prêmio de concretagem cadastrado: ${semValor.map((p) => p.nome).join(", ")} (conta como R$ 0).`);
   const armadores = new Set(armacao.map((a) => a.colaborador_id));
-  const parados = presencas.filter((p) => p.setor === "ARMACAO" && trabalhou(p.situacao) && !armadores.has(p.colaborador_id));
+  const parados = presencas.filter(
+    (p) => regra(p.setor) === "POR_PECA" && trabalhou(p.situacao) && !armadores.has(p.colaborador_id)
+  );
   if (parados.length) avisos.push(`${parados.length} na armação sem nenhuma peça lançada.`);
   return avisos;
 }

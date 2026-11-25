@@ -4,7 +4,16 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { notificar } from "@/components/Ui";
 import { lerNumero, paraTexto } from "@/app/engenharia/custo-pilar/campos";
-import { SITUACOES, rotuloSetor, resumoMes, custoMaoObraMes, custoMensalFuncao } from "./regras";
+import {
+  SITUACOES,
+  rotuloSetor,
+  regraDoSetor,
+  resumoMes,
+  metaDoMes,
+  metaBatida,
+  custoMaoObraMes,
+  custoMensalFuncao,
+} from "./regras";
 import { hojeISO } from "./Lancamento";
 
 const brl = (v) =>
@@ -43,8 +52,21 @@ function buscarPeriodo(mesIni, mesFim) {
   ]);
 }
 
-export default function Relatorios({ pessoas, pecas, funcoes, setores, souAdmin, abrirDia }) {
+// O que vai no relatório (fica igual ao trocar de mês)
+const CONTEUDOS = [
+  { id: "resumo", rotulo: "Resumo do mês (m³, meta e totais)" },
+  { id: "pessoas", rotulo: "Presença e prêmio de cada um" },
+  { id: "pecas", rotulo: "Peças produzidas e equipe" },
+  { id: "grade", rotulo: "Mês em grade (dia a dia)" },
+];
+
+export default function Relatorios({ pessoas, pecas, funcoes, setores, parametros, souAdmin, abrirDia }) {
   const [mes, setMes] = useState(hojeISO().slice(0, 7));
+  const [selecao, setSelecao] = useState({
+    fora: [], // setores desmarcados
+    conteudo: { resumo: true, pessoas: true, pecas: true, grade: true, custo: true },
+    separar: false,
+  });
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm print:hidden">
@@ -66,15 +88,30 @@ export default function Relatorios({ pessoas, pecas, funcoes, setores, souAdmin,
         </button>
       </div>
 
-      <RelatorioMes key={mes} mes={mes} pessoas={pessoas} pecas={pecas} setores={setores} abrirDia={abrirDia} />
-      {souAdmin && <CustoMaoObra key={`custo:${mes}`} mesFinal={mes} pessoas={pessoas} pecas={pecas} funcoes={funcoes} />}
+      <RelatorioMes
+        key={mes}
+        mes={mes}
+        pessoas={pessoas}
+        pecas={pecas}
+        setores={setores}
+        parametros={parametros}
+        selecao={selecao}
+        setSelecao={setSelecao}
+        souAdmin={souAdmin}
+        abrirDia={abrirDia}
+      />
+      {souAdmin && selecao.conteudo.custo && (
+        <div className="print:break-before-page">
+          <CustoMaoObra key={`custo:${mes}`} mesFinal={mes} pessoas={pessoas} pecas={pecas} funcoes={funcoes} setores={setores} />
+        </div>
+      )}
     </div>
   );
 }
 
 // ------------------------------------------------------------------ mês
 
-function RelatorioMes({ mes, pessoas, pecas, setores, abrirDia }) {
+function RelatorioMes({ mes, pessoas, pecas, setores, parametros, selecao, setSelecao, souAdmin, abrirDia }) {
   const [dias, setDias] = useState(null);
   const [premios, setPremios] = useState([]);
 
@@ -92,20 +129,6 @@ function RelatorioMes({ mes, pessoas, pecas, setores, abrirDia }) {
   }, [mes]);
 
   if (dias === null) return <p className="text-sm text-slate-500">Carregando o mês...</p>;
-
-  const resumo = resumoMes(dias, premios);
-  // Meta de m³: só os dias que têm meta (os importados da planilha não têm)
-  const diasComMeta = dias.filter((d) => Number(d.meta_m3) > 0);
-  const metaMes = diasComMeta.reduce((s, d) => s + Number(d.meta_m3), 0);
-  const m3NaMeta = diasComMeta.reduce((s, d) => s + (Number(d.m3_concretado) || 0), 0);
-  const pctMetaMes = metaMes > 0 ? Math.round((m3NaMeta / metaMes) * 100) : null;
-  const t = resumo.totais;
-  const nomeDe = (id) => pessoas.find((p) => p.id === id)?.nome || `#${id}`;
-  const setorDe = (id) => pessoas.find((p) => p.id === id)?.setor || "OUTRO";
-  const pecaDe = (id) => pecas.find((p) => p.id === id)?.nome || `#${id}`;
-  const linhas = [...resumo.linhas].sort(
-    (a, b) => setorDe(a.colaborador_id).localeCompare(setorDe(b.colaborador_id)) || nomeDe(a.colaborador_id).localeCompare(nomeDe(b.colaborador_id))
-  );
 
   async function salvarPremioMensal(colaboradorId, valor) {
     const { error } = await supabase.rpc("salvar_premio_mensal", {
@@ -125,108 +148,347 @@ function RelatorioMes({ mes, pessoas, pecas, setores, abrirDia }) {
       </div>
     );
 
+  const resumo = resumoMes(dias, premios, setores);
+  const setorDe = (id) => pessoas.find((p) => p.id === id)?.setor || "OUTRO";
+
+  // setores que aparecem no mês (presença ou prêmio mensal), na ordem do cadastro
+  const idsNoMes = new Set([
+    ...dias.flatMap((d) => (d.producao_presencas || []).map((x) => x.setor)),
+    ...resumo.linhas.filter((l) => l.premioMensal).map((l) => setorDe(l.colaborador_id)),
+  ]);
+  const setoresDoMes = [
+    ...setores.filter((s) => idsNoMes.has(s.id)),
+    ...[...idsNoMes].filter((id) => !setores.some((s) => s.id === id)).map((id) => ({ id, rotulo: rotuloSetor(id, setores), regra: regraDoSetor(id, setores) })),
+  ];
+  const escolhidos = setoresDoMes.filter((s) => !selecao.fora.includes(s.id));
+  const grupos = selecao.separar ? escolhidos.map((s) => [s]) : escolhidos.length ? [escolhidos] : [];
+
+  const props = {
+    mes,
+    dias,
+    resumo,
+    pessoas,
+    pecas,
+    setores,
+    parametros,
+    conteudo: selecao.conteudo,
+    salvarPremioMensal,
+    abrirDia,
+  };
+
   return (
     <div className="space-y-5">
-      <h2 className="hidden print:block text-xl font-bold capitalize">Produção — {NOME_MES(mes)}</h2>
-
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
-        <Cartao rotulo="Dias com produção" valor={t.diasComProducao} />
-        <Cartao
-          rotulo="m³ concretados"
-          valor={num(t.m3, 1)}
-          detalhe={
-            (t.diasComProducao ? `${num(t.m3 / t.diasComProducao, 2)} m³ por dia` : "") +
-            (pctMetaMes !== null
-              ? ` · ${pctMetaMes}% da meta (${num(m3NaMeta, 1)} de ${num(metaMes, 1)} m³ em ${diasComMeta.length} ${diasComMeta.length === 1 ? "dia" : "dias"})`
-              : "")
-          }
-        />
-        <Cartao rotulo="Peças concretadas" valor={num(t.pecasConcretadas, 0)} />
-        <Cartao rotulo="Peças armadas" valor={num(t.pecasArmadas, 0)} />
-        <Cartao rotulo="Prêmios do mês" valor={brl(t.total)} destaque />
-      </div>
-
-      {/* ---------------- prêmios por pessoa ---------------- */}
-      <Bloco
-        titulo="Prêmios por pessoa (para a folha)"
-        texto="Concretagem = prêmio do dia dividido pela equipe. Armação = peças que a pessoa armou × valor da peça. O prêmio mensal (resultado da meta) é digitado aqui."
-      >
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                <th className="py-2 pr-2 font-medium">Nome</th>
-                <th className="py-2 px-2 font-medium">Setor</th>
-                <th className="py-2 px-2 font-medium text-center" title="Dias trabalhados (P, M ou S)">
-                  Dias
-                </th>
-                <th className="py-2 px-2 font-medium text-center">Meio dia</th>
-                <th className="py-2 px-2 font-medium text-center">Faltas</th>
-                <th className="py-2 px-2 font-medium text-right">Concretagem</th>
-                <th className="py-2 px-2 font-medium text-right">Armação</th>
-                <th className="py-2 px-2 font-medium text-right">Prêmio mensal</th>
-                <th className="py-2 pl-2 font-medium text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {linhas.map((l) => (
-                <tr key={l.colaborador_id} className="border-b border-slate-100">
-                  <td className="py-1.5 pr-2 font-medium text-slate-800">{nomeDe(l.colaborador_id)}</td>
-                  <td className="py-1.5 px-2 text-slate-500">{rotuloSetor(setorDe(l.colaborador_id), setores)}</td>
-                  <td className="py-1.5 px-2 text-center">{l.dias}</td>
-                  <td className="py-1.5 px-2 text-center text-slate-500">{l.meios || ""}</td>
-                  <td className={`py-1.5 px-2 text-center ${l.faltas ? "text-rose-600 font-medium" : "text-slate-400"}`}>
-                    {l.faltas || "0"}
-                  </td>
-                  <td className="py-1.5 px-2 text-right">{l.premioConcretagem ? brl(l.premioConcretagem) : ""}</td>
-                  <td className="py-1.5 px-2 text-right">
-                    {l.premioArmacao ? (
-                      <>
-                        {brl(l.premioArmacao)} <span className="text-[10px] text-slate-400">({num(l.pecasArmadas, 0)} pç)</span>
-                      </>
-                    ) : (
-                      ""
-                    )}
-                  </td>
-                  <td className="py-1.5 px-2 text-right">
-                    <PremioMensal key={`${l.colaborador_id}:${l.premioMensal}`} linha={l} salvar={salvarPremioMensal} />
-                  </td>
-                  <td className="py-1.5 pl-2 text-right font-semibold">{brl(l.total)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="font-semibold border-t-2 border-slate-300">
-                <td className="py-2 pr-2" colSpan={5}>
-                  Total do mês
-                </td>
-                <td className="py-2 px-2 text-right">{brl(t.premioConcretagem)}</td>
-                <td className="py-2 px-2 text-right">{brl(t.premioArmacao)}</td>
-                <td className="py-2 px-2 text-right">{brl(t.premioMensal)}</td>
-                <td className="py-2 pl-2 text-right">{brl(t.total)}</td>
-              </tr>
-            </tfoot>
-          </table>
+      <MontarRelatorio setoresDoMes={setoresDoMes} selecao={selecao} setSelecao={setSelecao} souAdmin={souAdmin} />
+      {grupos.length === 0 && (
+        <p className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500 print:hidden">
+          Marque pelo menos um setor.
+        </p>
+      )}
+      {grupos.map((g, i) => (
+        <div key={g.map((s) => s.id).join("+")} className={i > 0 ? "print:break-before-page" : ""}>
+          <RelatorioDosSetores {...props} grupo={g} titulo={selecao.separar || g.length < setoresDoMes.length ? g.map((s) => s.rotulo).join(", ") : ""} />
         </div>
-      </Bloco>
+      ))}
+    </div>
+  );
+}
 
-      {/* ---------------- grade do mês ---------------- */}
-      <Bloco
-        titulo="Mês em grade"
-        texto="Cada letra é o que foi lançado no dia. Letra com bolinha = trabalhou em outro setor naquele dia. Clique no número do dia para abrir o lançamento."
-      >
-        <GradeMes mes={mes} dias={dias} linhas={linhas} nomeDe={nomeDe} setorDe={setorDe} setores={setores} abrirDia={abrirDia} />
-      </Bloco>
+function MontarRelatorio({ setoresDoMes, selecao, setSelecao, souAdmin }) {
+  const [aberto, setAberto] = useState(false);
+  const marcarSetor = (id, sim) =>
+    setSelecao((s) => ({ ...s, fora: sim ? s.fora.filter((x) => x !== id) : [...s.fora, id] }));
+  const marcarConteudo = (id, sim) => setSelecao((s) => ({ ...s, conteudo: { ...s.conteudo, [id]: sim } }));
+  const conteudos = souAdmin ? [...CONTEUDOS, { id: "custo", rotulo: "Custo da mão de obra (12 meses)" }] : CONTEUDOS;
+  const marcados = setoresDoMes.filter((s) => !selecao.fora.includes(s.id)).length;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm print:hidden">
+      <button type="button" onClick={() => setAberto((v) => !v)} className="w-full flex items-center justify-between px-4 py-3 text-left">
+        <span className="text-sm font-medium text-slate-700">Montar relatório</span>
+        <span className="text-xs text-slate-500">
+          {marcados} de {setoresDoMes.length} setores{selecao.separar ? " · cada setor em uma folha" : ""} {aberto ? "▲" : "▼"}
+        </span>
+      </button>
+      {aberto && (
+        <div className="grid gap-4 border-t border-slate-100 p-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium text-slate-700">Setores</p>
+            {setoresDoMes.map((s) => (
+              <label key={s.id} className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={!selecao.fora.includes(s.id)}
+                  onChange={(e) => marcarSetor(s.id, e.target.checked)}
+                  className="accent-emerald-600"
+                />
+                {s.rotulo}
+              </label>
+            ))}
+            <label className="flex items-center gap-2 text-sm text-slate-700 pt-1.5 border-t border-slate-100">
+              <input
+                type="checkbox"
+                checked={selecao.separar}
+                onChange={(e) => setSelecao((s) => ({ ...s, separar: e.target.checked }))}
+                className="accent-emerald-600"
+              />
+              Cada setor em uma folha
+            </label>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium text-slate-700">O que mostrar e imprimir</p>
+            {conteudos.map((c) => (
+              <label key={c.id} className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={!!selecao.conteudo[c.id]}
+                  onChange={(e) => marcarConteudo(c.id, e.target.checked)}
+                  className="accent-emerald-600"
+                />
+                {c.rotulo}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-      {/* ---------------- peças ---------------- */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Bloco titulo="Peças concretadas no mês">
-          <ListaPecas mapa={resumo.porPecaConcretada} pecaDe={pecaDe} vazio="Nenhuma peça concretada lançada." />
+// Um relatório (resumo, pessoas, peças, grade) só com a parte dos setores do grupo
+function RelatorioDosSetores({ mes, dias, resumo, pessoas, pecas, setores, parametros, conteudo, grupo, titulo, salvarPremioMensal, abrirDia }) {
+  const ids = grupo.map((s) => s.id);
+  const regraDe = (id) => grupo.find((s) => s.id === id)?.regra || regraDoSetor(id, setores);
+  const temConcretagem = ids.some((id) => regraDe(id) === "EQUIPE_META");
+  const temArmacao = ids.some((id) => regraDe(id) === "POR_PECA");
+  const colunasPremio = grupo.filter((s) => regraDe(s.id) !== "SEM");
+  const nomeDe = (id) => pessoas.find((p) => p.id === id)?.nome || `#${id}`;
+  const setorDe = (id) => pessoas.find((p) => p.id === id)?.setor || "OUTRO";
+  const pecaDe = (id) => pecas.find((p) => p.id === id)?.nome || `#${id}`;
+  const soma = (l, campo) => ids.reduce((s, id) => s + (l.porSetor[id]?.[campo] || 0), 0);
+
+  // pessoas que trabalharam (ou faltaram) nesses setores; prêmio mensal fica no setor da pessoa
+  const linhas = resumo.linhas
+    .map((l) => {
+      const mensal = ids.includes(setorDe(l.colaborador_id)) ? l.premioMensal : 0;
+      const premios = Object.fromEntries(colunasPremio.map((s) => [s.id, l.porSetor[s.id]?.premio || 0]));
+      const totalPremios = Object.values(premios).reduce((a, b) => a + b, 0);
+      return {
+        ...l,
+        diasG: soma(l, "dias"),
+        meiosG: soma(l, "meios"),
+        faltasG: soma(l, "faltas"),
+        premios,
+        mensal,
+        totalG: Math.round((totalPremios + mensal) * 100) / 100,
+        aparece: ids.some((id) => l.porSetor[id]) || mensal > 0,
+      };
+    })
+    .filter((l) => l.aparece)
+    .sort(
+      (a, b) =>
+        setorDe(a.colaborador_id).localeCompare(setorDe(b.colaborador_id)) ||
+        nomeDe(a.colaborador_id).localeCompare(nomeDe(b.colaborador_id))
+    );
+  const totalColuna = (id) => linhas.reduce((s, l) => s + (l.premios[id] || 0), 0);
+  const totalMensal = linhas.reduce((s, l) => s + l.mensal, 0);
+  const totalGeral = linhas.reduce((s, l) => s + l.totalG, 0);
+  const meta = metaDoMes(dias, parametros?.meta_m3_padrao ?? 7);
+  const t = resumo.totais;
+
+  return (
+    <div className="space-y-5">
+      <h2 className="hidden print:block text-xl font-bold capitalize">
+        Produção — {NOME_MES(mes)}
+        {titulo && <span className="normal-case"> — {titulo}</span>}
+      </h2>
+      {titulo && <h2 className="text-lg font-semibold text-slate-800 print:hidden">{titulo}</h2>}
+
+      {conteudo.resumo && (
+        <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
+          <Cartao rotulo="Dias com produção" valor={t.diasComProducao} />
+          {temConcretagem && (
+            <Cartao
+              rotulo="m³ concretados"
+              valor={num(t.m3, 1)}
+              detalhe={t.diasComProducao ? `${num(t.m3 / t.diasComProducao, 2)} m³ por dia` : ""}
+            />
+          )}
+          {temConcretagem && meta.meta > 0 && (
+            <Cartao
+              rotulo="Meta do mês"
+              valor={`${meta.pct}%`}
+              detalhe={`${num(meta.feito, 1)} de ${num(meta.meta, 1)} m³ em ${meta.dias} ${meta.dias === 1 ? "dia" : "dias"}${
+                meta.diasAbaixo ? ` · ${meta.diasAbaixo} ${meta.diasAbaixo === 1 ? "dia abaixo" : "dias abaixo"} da meta` : ""
+              }`}
+            />
+          )}
+          {temConcretagem && <Cartao rotulo="Peças concretadas" valor={num(t.pecasConcretadas, 0)} />}
+          {temArmacao && <Cartao rotulo="Peças armadas" valor={num(t.pecasArmadas, 0)} />}
+          <Cartao rotulo="Prêmios do mês" valor={brl(totalGeral)} destaque />
+        </div>
+      )}
+
+      {conteudo.pessoas && (
+        <Bloco titulo="Presença e prêmio de cada um">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                  <th className="py-2 pr-2 font-medium">Nome</th>
+                  <th className="py-2 px-2 font-medium">Setor</th>
+                  <th className="py-2 px-2 font-medium text-center" title="Dias trabalhados (P, M ou S)">
+                    Dias
+                  </th>
+                  <th className="py-2 px-2 font-medium text-center">Meio dia</th>
+                  <th className="py-2 px-2 font-medium text-center">Faltas</th>
+                  {colunasPremio.map((s) => (
+                    <th key={s.id} className="py-2 px-2 font-medium text-right">
+                      {s.rotulo}
+                    </th>
+                  ))}
+                  <th className="py-2 px-2 font-medium text-right">Prêmio mensal</th>
+                  <th className="py-2 pl-2 font-medium text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linhas.map((l) => (
+                  <tr key={l.colaborador_id} className="border-b border-slate-100">
+                    <td className="py-1.5 pr-2 font-medium text-slate-800">{nomeDe(l.colaborador_id)}</td>
+                    <td className="py-1.5 px-2 text-slate-500">{rotuloSetor(setorDe(l.colaborador_id), setores)}</td>
+                    <td className="py-1.5 px-2 text-center">{l.diasG}</td>
+                    <td className="py-1.5 px-2 text-center text-slate-500">{l.meiosG || ""}</td>
+                    <td className={`py-1.5 px-2 text-center ${l.faltasG ? "text-rose-600 font-medium" : "text-slate-400"}`}>
+                      {l.faltasG || "0"}
+                    </td>
+                    {colunasPremio.map((s) => (
+                      <td key={s.id} className="py-1.5 px-2 text-right">
+                        {l.premios[s.id] ? brl(l.premios[s.id]) : ""}
+                        {regraDe(s.id) === "POR_PECA" && l.porSetor[s.id]?.pecas ? (
+                          <span className="text-[10px] text-slate-400"> ({num(l.porSetor[s.id].pecas, 0)} pç)</span>
+                        ) : null}
+                      </td>
+                    ))}
+                    <td className="py-1.5 px-2 text-right">
+                      {ids.includes(setorDe(l.colaborador_id)) ? (
+                        <PremioMensal key={`${l.colaborador_id}:${l.premioMensal}`} linha={l} salvar={salvarPremioMensal} />
+                      ) : null}
+                    </td>
+                    <td className="py-1.5 pl-2 text-right font-semibold">{brl(l.totalG)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="font-semibold border-t-2 border-slate-300">
+                  <td className="py-2 pr-2" colSpan={5}>
+                    Total do mês
+                  </td>
+                  {colunasPremio.map((s) => (
+                    <td key={s.id} className="py-2 px-2 text-right">
+                      {brl(totalColuna(s.id))}
+                    </td>
+                  ))}
+                  <td className="py-2 px-2 text-right">{brl(totalMensal)}</td>
+                  <td className="py-2 pl-2 text-right">{brl(totalGeral)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </Bloco>
-        <Bloco titulo="Peças armadas no mês">
-          <ListaPecas mapa={resumo.porPecaArmada} pecaDe={pecaDe} vazio="Nenhuma peça armada lançada." />
+      )}
+
+      {conteudo.pecas && (temConcretagem || temArmacao) && (
+        <div className="grid gap-5 lg:grid-cols-2">
+          {temConcretagem && (
+            <Bloco titulo="Peças concretadas no mês">
+              <ListaPecas mapa={resumo.porPecaConcretada} pecaDe={pecaDe} vazio="Nenhuma peça concretada lançada." />
+              <EquipeDoSetor
+                linhas={linhas.filter((l) => ids.some((id) => regraDe(id) === "EQUIPE_META" && l.porSetor[id]?.dias))}
+                nomeDe={nomeDe}
+                diasDe={(l) => ids.filter((id) => regraDe(id) === "EQUIPE_META").reduce((s, id) => s + (l.porSetor[id]?.dias || 0), 0)}
+              />
+            </Bloco>
+          )}
+          {temArmacao && (
+            <Bloco titulo="Peças armadas no mês, por armador">
+              <PecasPorArmador
+                linhas={linhas.filter((l) => ids.some((id) => regraDe(id) === "POR_PECA" && l.porSetor[id]?.pecas))}
+                nomeDe={nomeDe}
+                pecaDe={pecaDe}
+              />
+            </Bloco>
+          )}
+        </div>
+      )}
+
+      {conteudo.grade && (
+        <Bloco
+          titulo="Mês em grade"
+          texto="Cada letra é o que foi lançado no dia. Letra com bolinha = trabalhou em outro setor naquele dia. Clique no número do dia para abrir o lançamento."
+        >
+          <GradeMes
+            mes={mes}
+            dias={dias}
+            linhas={linhas.filter((l) => ids.some((id) => l.porSetor[id]))}
+            nomeDe={nomeDe}
+            setorDe={setorDe}
+            setores={setores}
+            somenteSetores={ids}
+            mostrarM3={temConcretagem}
+            metaPadrao={parametros?.meta_m3_padrao ?? 7}
+            abrirDia={abrirDia}
+          />
         </Bloco>
-      </div>
+      )}
+    </div>
+  );
+}
+
+function EquipeDoSetor({ linhas, nomeDe, diasDe }) {
+  if (!linhas.length) return null;
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-2">
+      <p className="text-xs font-medium text-slate-600 mb-1">Equipe</p>
+      <p className="text-sm text-slate-700">
+        {linhas
+          .map((l) => `${nomeDe(l.colaborador_id)} (${diasDe(l)} ${diasDe(l) === 1 ? "dia" : "dias"})`)
+          .join(" · ")}
+      </p>
+    </div>
+  );
+}
+
+function PecasPorArmador({ linhas, nomeDe, pecaDe }) {
+  const idsPecas = [...new Set(linhas.flatMap((l) => Object.keys(l.armadasPorPeca)))];
+  if (!linhas.length || !idsPecas.length) return <p className="text-sm text-slate-400">Nenhuma peça armada lançada.</p>;
+  const total = (pid) => linhas.reduce((s, l) => s + (l.armadasPorPeca[pid] || 0), 0);
+  idsPecas.sort((a, b) => total(b) - total(a));
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+            <th className="py-1.5 pr-2 font-medium">Peça</th>
+            {linhas.map((l) => (
+              <th key={l.colaborador_id} className="py-1.5 px-1 font-medium text-center">
+                {nomeDe(l.colaborador_id).split(" ").slice(0, 2).join(" ")}
+              </th>
+            ))}
+            <th className="py-1.5 pl-2 font-medium text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {idsPecas.map((pid) => (
+            <tr key={pid} className="border-b border-slate-100">
+              <td className="py-1 pr-2 text-slate-700">{pecaDe(Number(pid))}</td>
+              {linhas.map((l) => (
+                <td key={l.colaborador_id} className="py-1 px-1 text-center">
+                  {l.armadasPorPeca[pid] ? num(l.armadasPorPeca[pid], 0) : ""}
+                </td>
+              ))}
+              <td className="py-1 pl-2 text-right font-medium">{num(total(pid), 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -262,7 +524,7 @@ function PremioMensal({ linha, salvar }) {
   );
 }
 
-function GradeMes({ mes, dias, linhas, nomeDe, setorDe, setores, abrirDia }) {
+function GradeMes({ mes, dias, linhas, nomeDe, setorDe, setores, somenteSetores = null, mostrarM3 = true, metaPadrao = 7, abrirDia }) {
   const n = ultimoDia(mes);
   const porData = Object.fromEntries(dias.map((d) => [Number(d.data.slice(8, 10)), d]));
   const cor = Object.fromEntries(SITUACOES.map((s) => [s.id, s.cor]));
@@ -287,19 +549,32 @@ function GradeMes({ mes, dias, linhas, nomeDe, setorDe, setores, abrirDia }) {
           </tr>
         </thead>
         <tbody>
-          <tr className="border-b border-slate-200">
-            <td className="sticky left-0 bg-white pr-2 py-1 font-medium text-emerald-700 whitespace-nowrap">m³ do dia</td>
-            {nums.map((d) => (
-              <td key={d} className="text-center text-[10px] text-emerald-700 py-1">
-                {porData[d]?.m3_concretado ? num(porData[d].m3_concretado, 1) : ""}
-              </td>
-            ))}
-          </tr>
+          {mostrarM3 && (
+            <tr className="border-b border-slate-200">
+              <td className="sticky left-0 bg-white pr-2 py-1 font-medium text-emerald-700 whitespace-nowrap">m³ do dia</td>
+              {nums.map((d) => {
+                const dd = porData[d];
+                const metaDia = Number(dd?.meta_m3) > 0 ? Number(dd.meta_m3) : metaPadrao;
+                const abaixo = dd?.m3_concretado && !metaBatida(dd.m3_concretado, metaDia);
+                return (
+                  <td
+                    key={d}
+                    className={`text-center text-[10px] py-1 ${abaixo ? "text-rose-600 font-semibold" : "text-emerald-700"}`}
+                    title={abaixo ? `Abaixo da meta de ${num(metaDia, 1)} m³` : undefined}
+                  >
+                    {dd?.m3_concretado ? num(dd.m3_concretado, 1) : ""}
+                  </td>
+                );
+              })}
+            </tr>
+          )}
           {linhas.map((l) => (
             <tr key={l.colaborador_id} className="border-b border-slate-100">
               <td className="sticky left-0 bg-white pr-2 py-0.5 text-slate-700 whitespace-nowrap">{nomeDe(l.colaborador_id)}</td>
               {nums.map((d) => {
-                const p = porData[d]?.producao_presencas?.find((x) => x.colaborador_id === l.colaborador_id);
+                const p = porData[d]?.producao_presencas?.find(
+                  (x) => x.colaborador_id === l.colaborador_id && (!somenteSetores || somenteSetores.includes(x.setor))
+                );
                 return (
                   <td key={d} className="text-center py-0.5">
                     {p && (
@@ -343,29 +618,29 @@ function ListaPecas({ mapa, pecaDe, vazio }) {
 
 // ------------------------------------------------------------------ custo (admin)
 
-function montarMeses([d, p], mesIni) {
+function montarMeses([d, p], mesIni, setores) {
   if (d.error || p.error) notificar("Não foi possível carregar o custo: " + (d.error || p.error).message, "erro");
   const lista = [];
   for (let i = 0; i < 12; i++) {
     const ym = somarMeses(mesIni, i);
     const dias = (d.data || []).filter((x) => x.data.startsWith(ym));
     const pm = (p.data || []).filter((x) => x.mes.startsWith(ym));
-    if (dias.length) lista.push({ ym, resumo: resumoMes(dias, pm) });
+    if (dias.length) lista.push({ ym, resumo: resumoMes(dias, pm, setores) });
   }
   return lista;
 }
 
-function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes }) {
+function CustoMaoObra({ mesFinal, pessoas, pecas, funcoes, setores }) {
   const [meses, setMeses] = useState(null);
   const mesIni = somarMeses(mesFinal, -11);
 
   useEffect(() => {
     let ativo = true;
-    buscarPeriodo(mesIni, mesFinal).then((r) => ativo && setMeses(montarMeses(r, mesIni)));
+    buscarPeriodo(mesIni, mesFinal).then((r) => ativo && setMeses(montarMeses(r, mesIni, setores)));
     return () => {
       ativo = false;
     };
-  }, [mesIni, mesFinal]);
+  }, [mesIni, mesFinal, setores]);
 
   if (meses === null) return <p className="text-sm text-slate-500">Calculando o custo dos últimos 12 meses...</p>;
 

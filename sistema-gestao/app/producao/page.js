@@ -8,6 +8,8 @@ import Relatorios from "./Relatorios";
 import { lerNumero, paraTexto } from "@/app/engenharia/custo-pilar/campos";
 import {
   SETORES,
+  REGRAS_PREMIO,
+  rotuloRegra,
   listaSetores,
   nomeLimpo,
   nomeRepetido,
@@ -54,7 +56,7 @@ function ProducaoPage({ souAdmin }) {
         pecas: c.data || [],
         funcoes: f.data || [],
         setores: listaSetores(st.data),
-        parametros: pr.data || { premio_concretagem_dia: 140, meta_m3_padrao: 10 },
+        parametros: pr.data || { premio_concretagem_dia: 140, meta_m3_padrao: 7, permitir_soma_pecas: false },
       });
     setCarregando(false);
   }
@@ -114,6 +116,7 @@ function ProducaoPage({ souAdmin }) {
           pecas={dados.pecas}
           funcoes={dados.funcoes}
           setores={dados.setores}
+          parametros={dados.parametros}
           souAdmin={souAdmin}
           abrirDia={(d) => {
             setDataDia(d > hojeISO() ? hojeISO() : d);
@@ -326,6 +329,7 @@ function FuncoesESetores({ funcoes, setores, pessoas, recarregar }) {
   const [aberto, setAberto] = useState(false);
   const [funcao, setFuncao] = useState("");
   const [setor, setSetor] = useState("");
+  const [regraNova, setRegraNova] = useState({ regra: "", valor: "" });
   const [salvando, setSalvando] = useState(false);
 
   async function criarFuncao(e) {
@@ -348,14 +352,30 @@ function FuncoesESetores({ funcoes, setores, pessoas, recarregar }) {
     const id = gerarTipo(nome);
     if (setores.some((s) => s.id === id || s.rotulo.toUpperCase() === nome.toUpperCase()))
       return notificar(`O setor "${nome}" já existe.`, "erro");
+    const regra = conferirRegra(regraNova);
+    if (!regra) return;
     setSalvando(true);
     const ordem = 50 + setores.length;
-    const { error } = await supabase.from("producao_setores").insert({ id, nome, ordem });
+    const { error } = await supabase.from("producao_setores").insert({ id, nome, ordem, ...regra });
     setSalvando(false);
     if (error) return notificar("Não foi possível criar: " + error.message, "erro");
     notificar(`Setor ${nome} criado.`);
     setSetor("");
+    setRegraNova({ regra: "", valor: "" });
     recarregar();
+  }
+
+  async function salvarRegra(s, rascunho) {
+    const regra = conferirRegra(rascunho);
+    if (!regra) return false;
+    const { error } = await supabase.from("producao_setores").update(regra).eq("id", s.id);
+    if (error) {
+      notificar("Não foi possível salvar: " + error.message, "erro");
+      return false;
+    }
+    notificar(`Regra do setor ${s.rotulo} salva. Vale para os próximos dias lançados.`);
+    recarregar();
+    return true;
   }
 
   async function alternarSetor(s) {
@@ -410,45 +430,126 @@ function FuncoesESetores({ funcoes, setores, pessoas, recarregar }) {
             </form>
           </div>
           <div>
-            <p className="text-sm font-medium text-slate-700 mb-1">Setores</p>
-            <div className="flex flex-wrap gap-1.5 mb-2">
+            <p className="text-sm font-medium text-slate-700 mb-1">Setores e como cada um ganha prêmio</p>
+            <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
               {setores.map((s) => (
-                <span
-                  key={s.id}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs ${
-                    s.ativo === false ? "border-slate-200 text-slate-400 line-through" : "border-slate-300 text-slate-700"
-                  }`}
-                >
-                  {s.rotulo}
-                  {!s.fixo && (
-                    <button type="button" onClick={() => alternarSetor(s)} className="text-slate-400 hover:text-slate-800" title={s.ativo === false ? "Reativar" : "Desativar"}>
-                      {s.ativo === false ? "↺" : "×"}
-                    </button>
-                  )}
-                </span>
+                <LinhaSetor
+                  key={`${s.id}:${s.regra}:${s.valorDia}:${s.ativo}`}
+                  s={s}
+                  alternar={() => alternarSetor(s)}
+                  salvarRegra={(rasc) => salvarRegra(s, rasc)}
+                />
               ))}
-            </div>
-            <form onSubmit={criarSetor} className="flex gap-2">
+            </ul>
+            <form onSubmit={criarSetor} className="space-y-2 rounded-lg border border-slate-200 p-3">
               <input
                 value={setor}
                 onChange={(e) => setSetor(e.target.value)}
                 placeholder="Novo setor, ex.: Montagem"
                 className={ESTILO_INPUT}
               />
+              <EscolhaRegra valor={regraNova} aoMudar={setRegraNova} />
               <button
                 disabled={salvando}
-                className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
               >
-                + Criar
+                + Criar setor
               </button>
             </form>
-            <p className="text-[11px] text-slate-500 mt-1.5">
-              Setor novo entra na presença do dia. O prêmio por peça continua só em Concretagem e Armação.
-            </p>
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+// Regra escolhida na tela -> colunas do banco (ou null com aviso)
+function conferirRegra({ regra, valor }) {
+  if (!regra) {
+    notificar("Escolha como esse setor ganha prêmio.", "erro");
+    return null;
+  }
+  if (regra !== "FIXO_DIA") return { regra_premio: regra, valor_dia: null };
+  const v = lerNumero(valor);
+  if (v === null || v < 0) {
+    notificar("Digite o valor por dia de presença (R$).", "erro");
+    return null;
+  }
+  return { regra_premio: regra, valor_dia: v };
+}
+
+function EscolhaRegra({ valor, aoMudar, nome = "regra-nova" }) {
+  return (
+    <fieldset className="space-y-1">
+      <legend className="text-xs font-medium text-slate-600 mb-1">Como esse setor ganha prêmio</legend>
+      {REGRAS_PREMIO.map((r) => (
+        <label key={r.id} className="flex items-start gap-2 text-sm text-slate-700">
+          <input
+            type="radio"
+            name={nome}
+            checked={valor.regra === r.id}
+            onChange={() => aoMudar({ ...valor, regra: r.id })}
+            className="mt-1 accent-emerald-600"
+          />
+          <span className="flex-1">
+            {r.rotulo}
+            {r.id === "FIXO_DIA" && valor.regra === "FIXO_DIA" && (
+              <span className="ml-2 inline-flex items-center gap-1">
+                <input
+                  value={valor.valor}
+                  onChange={(e) => aoMudar({ ...valor, valor: e.target.value })}
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  className="w-20 rounded border border-slate-300 px-2 py-0.5 text-sm"
+                />
+                <span className="text-xs text-slate-500">R$ por pessoa</span>
+              </span>
+            )}
+          </span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function LinhaSetor({ s, alternar, salvarRegra }) {
+  const [editando, setEditando] = useState(false);
+  const [rasc, setRasc] = useState({ regra: s.regra, valor: s.valorDia === null ? "" : paraTexto(s.valorDia) });
+  const inativo = s.ativo === false;
+  return (
+    <li className="px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className={`font-medium ${inativo ? "text-slate-400 line-through" : "text-slate-800"}`}>{s.rotulo}</span>
+        <span className="text-xs text-slate-500">
+          {rotuloRegra(s.regra)}
+          {s.regra === "FIXO_DIA" && ` · ${brl(s.valorDia)} por dia`}
+        </span>
+        {!s.fixo && (
+          <span className="ml-auto inline-flex gap-3">
+            {!inativo && (
+              <button type="button" onClick={() => setEditando((v) => !v)} className="text-xs text-emerald-700 underline">
+                {editando ? "Fechar" : "Mudar regra"}
+              </button>
+            )}
+            <button type="button" onClick={alternar} className="text-xs text-slate-500 underline">
+              {inativo ? "Reativar" : "Desativar"}
+            </button>
+          </span>
+        )}
+      </div>
+      {editando && (
+        <div className="mt-2 space-y-2 rounded-lg bg-slate-50 p-2">
+          <EscolhaRegra valor={rasc} aoMudar={setRasc} nome={`regra-${s.id}`} />
+          <button
+            type="button"
+            onClick={async () => (await salvarRegra(rasc)) && setEditando(false)}
+            className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700"
+          >
+            Salvar regra
+          </button>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -548,11 +649,13 @@ function LinhaPessoa({ p, pessoas, funcoes, setores, recarregar, souAdmin }) {
 function ValoresPadrao({ parametros, recarregar }) {
   const original = {
     premio: paraTexto(parametros?.premio_concretagem_dia ?? 140),
-    meta: paraTexto(parametros?.meta_m3_padrao ?? 10),
+    meta: paraTexto(parametros?.meta_m3_padrao ?? 7),
+    somaPecas: !!parametros?.permitir_soma_pecas,
   };
   const [v, setV] = useState(original);
   const [salvando, setSalvando] = useState(false);
-  const mudou = v.premio.trim() !== original.premio || v.meta.trim() !== original.meta;
+  const mudou =
+    v.premio.trim() !== original.premio || v.meta.trim() !== original.meta || v.somaPecas !== original.somaPecas;
 
   async function salvar(e) {
     e.preventDefault();
@@ -564,7 +667,13 @@ function ValoresPadrao({ parametros, recarregar }) {
     const { data: nome } = await supabase.rpc("nome_usuario_atual");
     const { error } = await supabase
       .from("producao_parametros")
-      .update({ premio_concretagem_dia: premio, meta_m3_padrao: meta, atualizado_em: new Date().toISOString(), atualizado_por_nome: nome || null })
+      .update({
+        premio_concretagem_dia: premio,
+        meta_m3_padrao: meta,
+        permitir_soma_pecas: v.somaPecas,
+        atualizado_em: new Date().toISOString(),
+        atualizado_por_nome: nome || null,
+      })
       .eq("id", 1);
     setSalvando(false);
     if (error) return notificar("Não foi possível salvar: " + error.message, "erro");
@@ -594,6 +703,15 @@ function ValoresPadrao({ parametros, recarregar }) {
           {salvando ? "Salvando..." : "Salvar"}
         </button>
       </div>
+      <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={v.somaPecas}
+          onChange={(e) => setV({ ...v, somaPecas: e.target.checked })}
+          className="accent-emerald-600"
+        />
+        Permitir prêmio da concretagem pela soma das peças
+      </label>
     </form>
   );
 }
@@ -657,17 +775,18 @@ function AbaPecas({ pecas, parametros, recarregar }) {
         <br />O valor da armação do <b>pilar sem consolo</b> também entra no Custo real do pilar (Engenharia). Toda
         alteração fica no Histórico de Preços.
         <br />
-        <b>Concretagem:</b> o prêmio do dia é um <b>valor fixo</b> (abaixo) dividido entre a equipe.
-        O valor de concretagem por peça só é usado se, no dia, escolherem &quot;Soma das peças&quot;.
+        <b>Concretagem:</b> o prêmio do dia é um <b>valor fixo</b> (abaixo) dividido entre a equipe, e só é pago no
+        dia em que o m³ bate a meta. O valor de concretagem por peça só é usado se a soma das peças estiver
+        permitida (abaixo) e for escolhida no dia.
       </Explicacao>
 
       <ValoresPadrao
-        key={`${parametros?.premio_concretagem_dia}:${parametros?.meta_m3_padrao}`}
+        key={`${parametros?.premio_concretagem_dia}:${parametros?.meta_m3_padrao}:${parametros?.permitir_soma_pecas}`}
         parametros={parametros}
         recarregar={recarregar}
       />
 
-      {semConcretagem.length > 0 && (
+      {semConcretagem.length > 0 && parametros?.permitir_soma_pecas && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <b>{semConcretagem.length} peças sem valor de concretagem.</b> Só faz falta nos dias lançados como
           &quot;Soma das peças&quot; — no valor fixo do dia (padrão) não precisa.

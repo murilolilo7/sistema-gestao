@@ -174,3 +174,113 @@ test("concretagem no valor fixo do dia (como a planilha): não cobra peça nem v
   // 140 entre 7 do dia inteiro = 20 cada (dia 05/01 da planilha)
   assert.deepEqual(dividirPremio(140, Array(7).fill("P")).map((v) => Math.round(v * 100) / 100), Array(7).fill(20));
 });
+
+// ---------------------------------------------------------------- meta de 7 m³ e regra por setor
+import { metaBatida, metaDoMes, valorFixoDoDia, listaSetores, regraDoSetor } from "./regras.js";
+
+const SETORES_TESTE = listaSetores([
+  { id: "CONCRETAGEM", nome: "Concretagem", ordem: 1, fixo: true, regra_premio: "EQUIPE_META" },
+  { id: "ARMACAO", nome: "Armação", ordem: 2, fixo: true, regra_premio: "POR_PECA" },
+  { id: "QUALIDADE", nome: "Qualidade", ordem: 50, regra_premio: "FIXO_DIA", valor_dia: 14 },
+  { id: "MONTAGEM", nome: "Montagem", ordem: 51, regra_premio: "SEM" },
+]);
+
+test("meta do dia: 7 m³ bate, 6,99 não; dia sem meta não trava", () => {
+  assert.equal(metaBatida(7, 7), true);
+  assert.equal(metaBatida(7.4, 7), true);
+  assert.equal(metaBatida(6.99, 7), false);
+  assert.equal(metaBatida(4, null), true);
+});
+
+test("meta do mês = 7 × dias trabalhados (10 dias = 70 m³, mesmo sem chegar a 140)", () => {
+  const dias = Array.from({ length: 10 }, () => ({ m3_concretado: 7, meta_m3: 7 }));
+  const m = metaDoMes(dias, 7);
+  assert.equal(m.dias, 10);
+  assert.equal(m.meta, 70);
+  assert.equal(m.batida, true);
+  assert.equal(m.diasAbaixo, 0);
+});
+
+test("dia abaixo da meta não paga ninguém, mesmo o mês batendo 140", () => {
+  const dia = (data, m3, pres) => ({
+    data,
+    m3_concretado: m3,
+    meta_m3: 7,
+    premio_concretagem_informado: 140,
+    producao_presencas: pres,
+    producao_concretagem_pecas: [],
+    producao_armacao: [],
+  });
+  const equipe = [1, 2, 3, 4].map((id) => ({ colaborador_id: id, setor: "CONCRETAGEM", situacao: "P" }));
+  const dias = [dia("2026-01-05", 9, equipe), dia("2026-01-06", 6.5, equipe), dia("2026-01-07", 8, equipe)];
+  const r = resumoMes(dias, [], SETORES_TESTE);
+  // só 2 dias pagam: 2 × 140 = 280; cada um 70
+  assert.equal(r.totais.premioConcretagem, 280);
+  assert.equal(r.linhas.find((l) => l.colaborador_id === 1).premioConcretagem, 70);
+  assert.equal(r.totais.diasSemPremioMeta, 1);
+  assert.equal(metaDoMes(dias, 7).diasAbaixo, 1);
+});
+
+test("quem faltou perde o dia; a parte fica com quem trabalhou (meio dia = metade)", () => {
+  const pres = [
+    { colaborador_id: 1, setor: "CONCRETAGEM", situacao: "P" },
+    { colaborador_id: 2, setor: "CONCRETAGEM", situacao: "P" },
+    { colaborador_id: 3, setor: "CONCRETAGEM", situacao: "M" },
+    { colaborador_id: 4, setor: "CONCRETAGEM", situacao: "F" },
+  ];
+  const r = resumoMes(
+    [{ m3_concretado: 7.2, meta_m3: 7, premio_concretagem_informado: 140, producao_presencas: pres }],
+    [],
+    SETORES_TESTE
+  );
+  const de = (id) => r.linhas.find((l) => l.colaborador_id === id).premioConcretagem;
+  assert.equal(de(4), 0);
+  // 3 trabalharam: meio dia = 140 ÷ 3 ÷ 2 = 23,33; o resto (116,67) fica com os 2 do dia inteiro
+  assert.ok(Math.abs(de(1) + de(2) + de(3) - 140) < 0.02);
+  assert.equal(de(3), 23.33);
+  assert.equal(de(1), 58.33);
+});
+
+test("setor com valor fixo por dia: Qualidade R$ 14, meio dia R$ 7; Montagem não ganha", () => {
+  assert.equal(regraDoSetor("QUALIDADE", SETORES_TESTE), "FIXO_DIA");
+  assert.equal(valorFixoDoDia({ setor: "QUALIDADE", situacao: "P" }, SETORES_TESTE), 14);
+  assert.equal(valorFixoDoDia({ setor: "QUALIDADE", situacao: "M" }, SETORES_TESTE), 7);
+  assert.equal(valorFixoDoDia({ setor: "QUALIDADE", situacao: "F" }, SETORES_TESTE), 0);
+  // valor guardado no dia vale mais que o valor de hoje do setor
+  assert.equal(valorFixoDoDia({ setor: "QUALIDADE", situacao: "P", valor_dia: 12 }, SETORES_TESTE), 12);
+  assert.equal(valorFixoDoDia({ setor: "MONTAGEM", situacao: "P" }, SETORES_TESTE), 0);
+
+  const dias = [
+    { m3_concretado: 0, producao_presencas: [{ colaborador_id: 9, setor: "QUALIDADE", situacao: "P", valor_dia: 14 }] },
+    { m3_concretado: 0, producao_presencas: [{ colaborador_id: 9, setor: "MONTAGEM", situacao: "P" }] },
+    { m3_concretado: 0, producao_presencas: [{ colaborador_id: 9, setor: "QUALIDADE", situacao: "M", valor_dia: 14 }] },
+  ];
+  const r = resumoMes(dias, [], SETORES_TESTE);
+  const l = r.linhas[0];
+  assert.equal(l.premioFixo, 21);
+  assert.equal(l.total, 21);
+  assert.equal(l.porSetor.QUALIDADE.dias, 2);
+  assert.equal(l.porSetor.MONTAGEM.dias, 1);
+  assert.equal(r.porSetor.QUALIDADE, 21);
+});
+
+test("prêmio de cada setor fica separado (para o relatório por setor)", () => {
+  const dias = [
+    {
+      m3_concretado: 8,
+      meta_m3: 7,
+      premio_concretagem_informado: 140,
+      producao_presencas: [
+        { colaborador_id: 1, setor: "CONCRETAGEM", situacao: "P" },
+        { colaborador_id: 2, setor: "ARMACAO", situacao: "P" },
+      ],
+      producao_armacao: [{ colaborador_id: 2, peca_id: 5, quantidade: 3, valor_unit: 10 }],
+    },
+  ];
+  const r = resumoMes(dias, [], SETORES_TESTE);
+  assert.equal(r.porSetor.CONCRETAGEM, 140);
+  assert.equal(r.porSetor.ARMACAO, 30);
+  const arm = r.linhas.find((l) => l.colaborador_id === 2);
+  assert.equal(arm.porSetor.ARMACAO.pecas, 3);
+  assert.equal(arm.armadasPorPeca[5], 3);
+});
